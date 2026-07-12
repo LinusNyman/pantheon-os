@@ -1,7 +1,9 @@
 # cargo-dist — per-app artifacts & installers (§15.3). Each bin ships standalone;
-# nobody downloads the suite to get one tool. Starting config; tune per release.
+# nobody downloads the suite to get one tool.
+# STARTING STUB — finalize with `dist init` before the first release (§16 step 7);
+# that regenerates this file and the release workflow, and pins the dist version.
 [workspace]
-members = ["cargo:crates/*"]
+members = ["cargo:."]   # the Cargo workspace at the repo root (members = crates/*)
 
 [dist]
 cargo-dist-version = "0.28.0"

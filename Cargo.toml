@@ -14,9 +14,10 @@ repository   = "https://github.com/LinusNyman/pantheon-os"
 # Shared dependency set — see PANTHEONOS-SPEC.md §13. Crates opt in with `<dep>.workspace = true`.
 [workspace.dependencies]
 # internal (hub-and-spoke, I5): everything points at pantheon; nothing points sideways.
-pantheon = { path = "crates/pantheon" }
-porticus = { path = "crates/porticus" }
-tessera  = { path = "crates/tessera" }
+# version + path: path is used in-workspace, version is required for crates.io publish.
+pantheon = { path = "crates/pantheon", version = "0.1.0" }
+porticus = { path = "crates/porticus", version = "0.1.0" }
+tessera  = { path = "crates/tessera",  version = "0.1.0" }
 
 # external
 ratatui     = "0.30"

@@ -1,0 +1,37 @@
+# cargo-deny config (§15.2). CI runs `cargo deny check bans licenses sources`;
+# advisories are handled separately by `cargo audit`.
+
+[graph]
+all-features = true
+
+[licenses]
+version = 2
+# Skip our own unpublished crates (e.g. xtask, publish = false) — they carry no
+# license field and aren't distributed.
+private = { ignore = true }
+# Permissive licenses present in the dependency tree. Add here (with a note) if a
+# new dependency introduces another that is acceptable.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "0BSD",
+    "CC0-1.0",
+    "Unlicense",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"   # transitive dupes (e.g. thiserror 1.x + 2.x) are noise, not errors
+wildcards = "deny"           # no `version = "*"` deps — internal crates carry version + path
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
