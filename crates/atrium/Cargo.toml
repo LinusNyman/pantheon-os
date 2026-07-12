@@ -1,0 +1,20 @@
+[package]
+name = "atrium"
+version = "0.1.0"
+description = "Atrium — the home dashboard (the hearth). The mosaic opened first; relays human writes only."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "atr"
+path = "src/main.rs"
+
+[dependencies]
+pantheon.workspace = true
+porticus.workspace = true
+tessera.workspace = true
+clap.workspace = true
+anyhow.workspace = true

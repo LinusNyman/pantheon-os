@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+description = "Dev tasks (regen schemas, seed data). Not published."
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true

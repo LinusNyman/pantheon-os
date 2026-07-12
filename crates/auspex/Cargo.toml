@@ -1,0 +1,30 @@
+[package]
+name = "auspex"
+version = "0.1.0"
+description = "Auspex — the rules engine. The one component allowed to turn a read into a write (I2); rules propose, only Auspex applies."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "aus"
+path = "src/main.rs"
+
+[features]
+default = ["tui"]
+tui = ["dep:porticus"]
+
+[dependencies]
+pantheon.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+porticus = { workspace = true, optional = true }
+
+[dev-dependencies]
+insta.workspace = true

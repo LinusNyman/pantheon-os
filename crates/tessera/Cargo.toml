@@ -1,0 +1,15 @@
+[package]
+name = "tessera"
+version = "0.1.0"
+description = "Tessera — small droppable tiles that compute derived values from readings and draw via Porticus."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Peer of Porticus under the UI layer; depends on Pantheon only for data (I5).
+pantheon.workspace = true
+ratatui.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,33 @@
+[package]
+name = "pantheon"
+version = "0.1.0"
+description = "The PantheonOS spine — addressing, resolution, the record envelope, the Core substrate, and write-time validation."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The `pan` CLI (§5.5, §10). Named by its three-char short.
+# NOTE: pantheon is the hub (I5) — porticus depends on it, so it must NOT depend on
+# porticus. `pan`'s TUI (§10) is wired in a later split to avoid a Cargo cycle.
+[[bin]]
+name = "pan"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+toml_edit.workspace = true
+gray_matter.workspace = true
+ignore.workspace = true
+fd-lock.workspace = true
+jiff.workspace = true
+thiserror.workspace = true
+etcetera.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

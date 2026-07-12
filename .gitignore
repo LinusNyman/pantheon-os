@@ -1,0 +1,29 @@
+# Rust build output (workspace builds to /target; also catch any nested crate build)
+/target
+target/
+**/*.rs.bk
+
+# mdBook render output
+/docs/book
+
+# Private design docs — kept local, out of the repo (spec sources only)
+/docs/src/*-SPEC.md
+
+# AI assistant / local agent files
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+.claude/
+.aider*
+.cursor/
+
+# Cargo.lock is COMMITTED — this is a binary-producing workspace (§15). Do not ignore it.
+
+# macOS
+.DS_Store
+
+# Editors
+*.swp
+*~
+.idea/
+.vscode/

@@ -1,0 +1,5 @@
+# Pinned MSRV (§15.1). Edition 2024 needs >= 1.85; ratatui 0.30 (§13) raises the
+# floor to 1.88, so that is the workspace MSRV.
+[toolchain]
+channel    = "1.88"
+components = ["rustfmt", "clippy"]

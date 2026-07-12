@@ -1,0 +1,7 @@
+# release-plz — per-crate versions, tags, changelogs (§15.3).
+# One Release PR per crate; merge when ready, then push its tag (e.g. album-v0.2.1).
+[workspace]
+# Tags are per-crate: "{{ package }}-v{{ version }}".
+git_tag_name = "{{ package }}-v{{ version }}"
+git_release_name = "{{ package }} {{ version }}"
+changelog_update = true

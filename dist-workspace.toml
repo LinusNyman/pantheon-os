@@ -1,0 +1,17 @@
+# cargo-dist — per-app artifacts & installers (§15.3). Each bin ships standalone;
+# nobody downloads the suite to get one tool. Starting config; tune per release.
+[workspace]
+members = ["cargo:crates/*"]
+
+[dist]
+cargo-dist-version = "0.28.0"
+ci = "github"
+installers = ["shell", "powershell", "homebrew"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+install-updater = false

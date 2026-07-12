@@ -1,0 +1,29 @@
+[package]
+name = "rationes"
+version = "0.1.0"
+description = "Rationes — res holdings (what). A kind-partitioned register with optional companion balance series."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "rat"
+path = "src/main.rs"
+
+[features]
+default = ["tui"]
+tui = ["dep:porticus", "dep:tessera"]
+
+[dependencies]
+pantheon.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+porticus = { workspace = true, optional = true }
+tessera = { workspace = true, optional = true }
+
+[dev-dependencies]
+insta.workspace = true

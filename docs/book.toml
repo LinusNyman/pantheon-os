@@ -1,0 +1,10 @@
+# mdBook → GitHub Pages (§15.6). Renders docs/src/*.md; output (docs/book) is gitignored.
+[book]
+title    = "PantheonOS"
+authors  = ["Linus Nyman"]
+src      = "src"
+language = "en"
+
+[output.html]
+default-theme = "navy"
+git-repository-url = "https://github.com/LinusNyman/pantheon-os"

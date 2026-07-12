@@ -1,0 +1,29 @@
+[package]
+name = "annales"
+version = "0.1.0"
+description = "Annales — the fact tense of Actio. Append-only named series: what happened. The purest expression of I1."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "ann"
+path = "src/main.rs"
+
+[features]
+default = ["tui"]
+tui = ["dep:porticus", "dep:tessera"]
+
+[dependencies]
+pantheon.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+porticus = { workspace = true, optional = true }
+tessera = { workspace = true, optional = true }
+
+[dev-dependencies]
+insta.workspace = true

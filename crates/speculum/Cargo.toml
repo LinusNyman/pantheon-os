@@ -1,0 +1,22 @@
+[package]
+name = "speculum"
+version = "0.1.0"
+description = "Speculum — the review lens (the mirror). A read-only horizon dashboard across all cores; relays human writes only."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# Lens: a thin bin over Porticus/Tessera that discovers cores on PATH. Links no
+# core (I5); reaches them through the JSON contract (I4).
+[[bin]]
+name = "spe"
+path = "src/main.rs"
+
+[dependencies]
+pantheon.workspace = true
+porticus.workspace = true
+tessera.workspace = true
+clap.workspace = true
+anyhow.workspace = true

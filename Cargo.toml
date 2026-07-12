@@ -1,0 +1,44 @@
+# PantheonOS — single public Cargo workspace (monorepo, forced by I5).
+# Per-crate versions & per-app releases (§15.5); members inherit shared metadata.
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+edition      = "2024"
+rust-version = "1.88"   # floor set by ratatui 0.30 (§13); edition 2024 alone needs only 1.85
+license      = "MIT OR Apache-2.0"
+authors      = ["Linus Nyman"]
+repository   = "https://github.com/LinusNyman/pantheon-os"
+
+# Shared dependency set — see PANTHEONOS-SPEC.md §13. Crates opt in with `<dep>.workspace = true`.
+[workspace.dependencies]
+# internal (hub-and-spoke, I5): everything points at pantheon; nothing points sideways.
+pantheon = { path = "crates/pantheon" }
+porticus = { path = "crates/porticus" }
+tessera  = { path = "crates/tessera" }
+
+# external
+ratatui     = "0.30"
+crossterm   = "0.29"
+clap        = { version = "4", features = ["derive"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+schemars    = "1"
+toml_edit   = "0.25"
+gray_matter = "0.3"
+ignore      = "0.4"
+fd-lock     = "4"
+jiff        = "0.2"
+thiserror   = "2"
+anyhow      = "1"
+sha2        = "0.11"
+tracing     = "0.1"
+etcetera    = "0.11"
+figlet-rs   = "1.0"
+insta       = "1"
+
+[profile.release]
+lto       = true
+strip     = true
+codegen-units = 1

@@ -1,0 +1,30 @@
+[package]
+name = "tabella"
+version = "0.1.0"
+description = "Tabella — documents (meaning). Loose Markdown with +++ TOML frontmatter, handled in place."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "tab"
+path = "src/main.rs"
+
+[features]
+default = ["tui"]
+tui = ["dep:porticus", "dep:tessera"]
+
+[dependencies]
+pantheon.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+gray_matter.workspace = true
+porticus = { workspace = true, optional = true }
+tessera = { workspace = true, optional = true }
+
+[dev-dependencies]
+insta.workspace = true

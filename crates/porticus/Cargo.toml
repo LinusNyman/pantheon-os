@@ -1,0 +1,18 @@
+[package]
+name = "porticus"
+version = "0.1.0"
+description = "The shared TUI chrome for PantheonOS instruments — one shell, one keymap, one look, over ratatui + crossterm."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Porticus depends on Pantheon only (I5) — hub-and-spoke, never sideways.
+pantheon.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+figlet-rs.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
