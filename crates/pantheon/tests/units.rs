@@ -7,8 +7,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
-    Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef, Shape,
-    build_tree, normalize, plan_new, resolve_all, resolve_code, validate, with_record_lock,
+    Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
+    Severity, Shape, build_tree, normalize, plan_new, resolve_all, resolve_code, validate,
+    with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -877,4 +878,97 @@ fn a_date_keyed_series_still_folds_to_its_latest() {
     assert_eq!(folded.len(), 1, "a sampled series folds to one present");
     assert_eq!(folded[0].line.key.as_str(), "260720");
     assert_eq!(folded[0].name.as_deref(), Some("weight"));
+}
+
+fn pensum_registry() -> CoreRegistry {
+    CoreRegistry::from_cores(vec![DiscoveredCore {
+        name: "pensum".to_string(),
+        short: "pen".to_string(),
+        kinds: vec![("task".to_string(), Shape::Series { named: false })],
+        format_version: 1,
+    }])
+}
+
+#[test]
+fn a_name_keyed_line_resolves_but_a_date_keyed_one_does_not() {
+    let root = societas_root();
+    // The last line is date-keyed: the key's own shape is the second gate, so a
+    // sample registers nothing even inside a series whose lines are targets.
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"reach_out_to_alex\",\"refs\":[],\"data\":{}}\n\
+         {\"key\":\"file_taxes\",\"refs\":[],\"data\":{}}\n\
+         {\"key\":\"260718\",\"refs\":[],\"data\":{}}\n",
+    );
+
+    let reg = pensum_registry();
+    let want = [
+        Ref::parse("pensum:reach_out_to_alex").unwrap(),
+        Ref::parse("pensum:file_taxes").unwrap(),
+        Ref::parse("pensum:260718").unwrap(),
+        Ref::parse("pensum:never_written").unwrap(),
+    ];
+    let out = resolve_all(&root, &reg, &want).unwrap();
+
+    let RefOutcome::Resolved(one) = &out[0] else {
+        panic!("a task is reached by its key (§5.4): {:?}", out[0])
+    };
+    assert_eq!(one.home.as_str(), "csa");
+    assert_eq!(one.kind, "task");
+    // The resolution points at the series file the line lives in (I3).
+    assert!(one.rel_path.ends_with("csa__task.jsonl"));
+
+    assert!(matches!(out[1], RefOutcome::Resolved(_)));
+    assert!(
+        matches!(out[2], RefOutcome::Unresolved(_)),
+        "a date-keyed line is a sample, never a target (I1)"
+    );
+    assert!(matches!(out[3], RefOutcome::Unresolved(_)));
+}
+
+#[test]
+fn a_ref_to_a_task_no_longer_dangles() {
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"reach_out_to_alex\",\"refs\":[],\"data\":{}}\n",
+    );
+    // Another record pointing at the task — the edge §8.5 says a task is reached by.
+    write_record(
+        &root,
+        "cso",
+        "cso__task.jsonl",
+        "{\"key\":\"chase_it_up\",\"refs\":[\"pensum:reach_out_to_alex\"],\"data\":{}}\n",
+    );
+    let findings = validate(&root, &pensum_registry()).unwrap();
+    let dangling: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == FindingCode::DanglingRef)
+        .collect();
+    assert!(dangling.is_empty(), "{dangling:?}");
+}
+
+#[test]
+fn one_task_key_at_two_nodes_is_the_soft_duplicate_finding() {
+    let root = societas_root();
+    for code in ["csa", "cso"] {
+        write_record(
+            &root,
+            code,
+            &format!("{code}__task.jsonl"),
+            "{\"key\":\"file_taxes\",\"refs\":[],\"data\":{}}\n",
+        );
+    }
+    let findings = validate(&root, &pensum_registry()).unwrap();
+    let duplicates: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == FindingCode::DuplicateSlug)
+        .collect();
+    // Both files are named, because the fix is made at the source (§5.4).
+    assert_eq!(duplicates.len(), 2, "{findings:?}");
+    assert!(duplicates.iter().all(|f| f.severity == Severity::Warning));
 }

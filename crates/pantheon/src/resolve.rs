@@ -213,13 +213,19 @@ fn register_record(
     path: &Path,
     index: &mut Index,
 ) {
-    // (kind, identifier) for the shapes that are ref targets. An entity-as-node's
-    // slug is the node's definition (its label); a determined-name series is never a
-    // ref target on its own (§5.4), so it registers nothing.
+    // (kind, identifier) for the shapes whose *filename* is a ref target. An
+    // entity-as-node's slug is the node's definition (its label). A determined-name
+    // series is not among them: its name slot carries a determinant, not an identity,
+    // so the series is never a ref target on its own (§5.4) — but the name-keyed
+    // *lines* inside it are, which is the branch below.
     let (kind, ident) = match class {
         FileClass::Partitioned { kind, slug, .. } => (kind.clone(), slug.clone()),
         FileClass::EntityNode { kind, .. } => (kind.clone(), node.label.clone()),
         FileClass::NamedSeries { kind, name, .. } => (kind.clone(), name.clone()),
+        FileClass::DeterminedSeries { kind, .. } => {
+            register_series_lines(root, node, reg, kind, path, index);
+            return;
+        }
         _ => return,
     };
     let Some(core) = reg.core_of_kind(&kind) else {
@@ -236,6 +242,46 @@ fn register_record(
         ident,
         path,
     );
+}
+
+/// A **name-keyed line** is a record reached by its key — a Pensum task,
+/// `pensum:reach_out_to_alex` (§5.4). It is the one resolution that opens a record
+/// file rather than resting on its filename (§5.0), so it is gated twice: on the
+/// registry reporting a nameless series for this token, and then on the key's own
+/// shape. A date-keyed line is a sample and registers nothing (I1) — which is why
+/// Rationes' `balance` costs nothing here despite sharing the gate.
+fn register_series_lines(
+    root: &Path,
+    node: &Node,
+    reg: &CoreRegistry,
+    kind: &str,
+    path: &Path,
+    index: &mut Index,
+) {
+    let Some(core) = reg.core_of_kind(kind) else {
+        return;
+    };
+    let shape = reg.shape_of_kind(kind);
+    if shape != Some(Shape::Series { named: false }) {
+        return;
+    }
+    // A file that does not parse is a `pan validate` finding, not a resolution
+    // failure — this walk reports nothing, so it simply registers nothing.
+    let Ok(keys) = crate::validate::series_name_keys(path) else {
+        return;
+    };
+    for key in keys {
+        push(
+            index,
+            root,
+            node,
+            core.name.clone(),
+            kind.to_string(),
+            Shape::Series { named: false },
+            key,
+            path,
+        );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
