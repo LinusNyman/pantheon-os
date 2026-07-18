@@ -380,21 +380,16 @@ impl<C: Core> Store<C> {
                 home.as_str()
             )));
         }
-        Self::touch_series(&path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::lock::with_record_lock(&path, |_| Ok(Vec::new()))?;
         Ok(SeriesRef {
             home: home.clone(),
             kind: kind.to_string(),
             name: Some(name.to_string()),
             path,
         })
-    }
-
-    /// Bring a series file into being, empty, through the record lock (§6.4).
-    fn touch_series(path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        crate::lock::with_record_lock(path, |_| Ok(Vec::new()))
     }
 
     /// Whether this core files `kind` under a hand-chosen name (§7.1). The first read
@@ -427,7 +422,14 @@ impl<C: Core> Store<C> {
                     sref.home.as_str()
                 )));
             }
-            Self::touch_series(&sref.path)?;
+            // The mint rides *inside* the write's own lock rather than preceding it:
+            // `open_for_lock` creates, and the inode re-check retries a writer whose
+            // file was renamed underneath (§6.4). Minting first would be a second,
+            // unsynchronized write — two hands filing a node's first task at once
+            // would each truncate the file the other had just filled.
+            if let Some(parent) = sref.path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
         }
         let encoded = serde_json::to_string(line)?;
         let key = line.key.clone();

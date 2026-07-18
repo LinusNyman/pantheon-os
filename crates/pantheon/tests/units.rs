@@ -1,6 +1,7 @@
 //! Property unit tests for the spine's contract surface (§5, §7). The JSON output
 //! shapes are frozen separately by the snapshots in `contract.rs`.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -971,4 +972,93 @@ fn one_task_key_at_two_nodes_is_the_soft_duplicate_finding() {
     // Both files are named, because the fix is made at the source (§5.4).
     assert_eq!(duplicates.len(), 2, "{findings:?}");
     assert!(duplicates.iter().all(|f| f.severity == Severity::Warning));
+}
+
+// ── the record lock under contention (§6.4, step 4) ─────────────────────────
+
+#[test]
+fn concurrent_writers_all_land_on_one_nameless_series() {
+    // The file a detached hook and a hand contend for (§6.4, §16 step 4). Eight
+    // writers, none of which finds the file there to begin with, so every one of
+    // them is racing to mint it as well as to append.
+    let root = societas_root();
+    let home = Code::parse("csa").unwrap();
+    let store = pantheon::Store::<Nameless>::new(&root);
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&home, "task", None).unwrap(),
+    };
+    assert!(!sref.path.exists(), "the race starts with no file at all");
+
+    std::thread::scope(|scope| {
+        for w in 0..8 {
+            let store = &store;
+            let sref = &sref;
+            scope.spawn(move || {
+                for i in 0..20 {
+                    store
+                        .write_line(sref, &line(&format!("task_{w}_{i}")))
+                        .unwrap();
+                }
+            });
+        }
+    });
+
+    let lines = std::fs::read_to_string(&sref.path).unwrap();
+    let keys: HashSet<&str> = lines.lines().filter(|l| !l.trim().is_empty()).collect();
+    // 160 distinct lines, none lost. A writer that read bytes another had already
+    // replaced would drop that other's work silently — which is the whole reason
+    // the lock re-checks the inode after acquiring (lock.rs).
+    assert_eq!(keys.len(), 160, "every writer's lines must survive");
+}
+
+#[test]
+fn a_writer_whose_file_was_renamed_underneath_retries() {
+    // The inode re-check, deterministically. B locks the file A is about to swap;
+    // when A's temp-and-rename lands, B is holding a lock on an inode the path no
+    // longer names, and must re-open rather than write into the void (§6.4).
+    let root = fresh_root();
+    let path = root.join("contended.jsonl");
+    std::fs::write(&path, "").unwrap();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+    std::thread::scope(|scope| {
+        let p = path.as_path();
+        scope.spawn(move || {
+            with_record_lock(p, |prev| {
+                // Inside A's lock: let B start, and hold until it is queued.
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                let mut out = prev.unwrap_or_default().to_vec();
+                out.extend_from_slice(b"written_by_a\n");
+                Ok(out)
+            })
+            .unwrap();
+        });
+
+        entered_rx.recv().unwrap();
+        scope.spawn(move || {
+            with_record_lock(p, |prev| {
+                let mut out = prev.unwrap_or_default().to_vec();
+                out.extend_from_slice(b"written_by_b\n");
+                Ok(out)
+            })
+            .unwrap();
+        });
+
+        // B is now blocked on A's lock. Letting A finish swaps the inode under it.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        release_tx.send(()).unwrap();
+    });
+
+    let out = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        out.contains("written_by_a"),
+        "A's write must survive B: {out:?}"
+    );
+    assert!(out.contains("written_by_b"), "B's write must land: {out:?}");
 }

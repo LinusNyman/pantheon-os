@@ -689,7 +689,7 @@ fn join<'a>(items: impl Iterator<Item = &'a str>) -> String {
 /// the home, core, kind, and series come from the file's location and name (I3) and
 /// are added here so a reader of the JSON alone knows what it is looking at.
 ///
-/// `series` is **absent** — not null — where the core's series is determined (§9.6):
+/// `series` is **absent** — not null — where the core's series is determined (§9.3):
 /// there is no name to report, and a hollow key would read as one withheld. This is
 /// the same conditional insert [`RecordChange::body`] makes.
 pub fn line_json<T: Serialize>(
