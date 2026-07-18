@@ -1,0 +1,16 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: out
+---
+"Hello World" => Some("hello_world")
+"café" => Some("café")
+"cafe\u{301}" => Some("café")
+"Ångström" => Some("ångström")
+"a--b" => Some("a_b")
+"  x  " => Some("x")
+"u.s.a!" => Some("usa")
+"MixedCASE__Foo" => Some("mixedcase_foo")
+"YouTube-Video" => Some("youtube_video")
+"" => None
+"-" => None
+"___" => None

@@ -1,0 +1,15 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: pretty(&dry)
+---
+{
+  "changes": [
+    {
+      "code": "a",
+      "op": "mkdir",
+      "path": "a_actio"
+    }
+  ],
+  "plan": "new",
+  "token": "[redacted]"
+}

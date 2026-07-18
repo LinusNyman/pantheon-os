@@ -1,0 +1,23 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: "pretty(&pantheon::resolve::outcomes_json(&outcomes))"
+---
+{
+  "ambiguous": [],
+  "resolved": [
+    {
+      "core": "album",
+      "home": "csa",
+      "kind": "person",
+      "path": "c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__alex.json",
+      "ref": "album:alex",
+      "shape": {
+        "shape": "partitioned"
+      },
+      "slug": "alex"
+    }
+  ],
+  "unresolved": [
+    "mappa:home"
+  ]
+}

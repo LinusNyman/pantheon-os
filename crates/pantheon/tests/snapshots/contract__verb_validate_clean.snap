@@ -1,0 +1,7 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: "pretty(&pantheon::validate::findings_json(&findings))"
+---
+{
+  "findings": []
+}

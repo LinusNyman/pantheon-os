@@ -1,0 +1,31 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: pretty(&tree.to_json())
+---
+{
+  "nodes": [
+    {
+      "char": "a",
+      "children": [
+        {
+          "char": "c",
+          "children": [
+            {
+              "char": null,
+              "children": [],
+              "code": "ac_john_appleseed",
+              "form": "definition_prefix",
+              "label": "john_appleseed"
+            }
+          ],
+          "code": "ac",
+          "form": "triple",
+          "label": "cura"
+        }
+      ],
+      "code": "a",
+      "form": "triple",
+      "label": "actio"
+    }
+  ]
+}
