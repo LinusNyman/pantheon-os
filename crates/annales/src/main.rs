@@ -101,6 +101,9 @@ enum Cmd {
     },
     /// Correct a reading in place, by its key (§7.2). A correction rewrites the
     /// keyed line; it never stacks a second (I1).
+    ///
+    /// Given no new value this is the editor form (§7.3): at a TTY the reading's
+    /// values open in `$VISUAL`/`$EDITOR`/`vi`; piped, it prints `{"path":…}`.
     Edit {
         key: String,
         values: Vec<String>,
@@ -250,6 +253,7 @@ fn cmd_add(
     series: Option<&str>,
     note: Option<&str>,
 ) -> Result<Response> {
+    refuse_under_rule(cli, "add")?;
     let ctx = Ctx::open(cli)?;
     let target = ctx.write_target(cli, series, tokens, create)?;
 
@@ -325,22 +329,22 @@ fn cmd_edit(
     series: Option<&str>,
     note: Option<&str>,
 ) -> Result<Response> {
+    refuse_under_rule(cli, "edit")?;
     let ctx = Ctx::open(cli)?;
     let target = ctx.write_target(cli, series, &[], false)?;
     let sref = target.existing.clone().ok_or_else(|| missing(&target))?;
     let key = Key::parse(key)?;
-
-    if values.is_empty() && note.is_none() && refs.is_empty() {
-        return Err(Error::usage(
-            "`edit` needs the new value inline; the editor form (§7.3) lands with the TUI (step 6)",
-        ));
-    }
 
     let lines = ctx.store.read_series(&sref)?;
     let prev = lines
         .iter()
         .find(|l| l.key == key)
         .ok_or_else(|| no_line(&sref, &key))?;
+
+    // An `edit` given no new value is the editor form (§7.3).
+    if values.is_empty() && note.is_none() && refs.is_empty() {
+        return editor_form(&ctx, &sref, prev, &key);
+    }
 
     // What a hand did not give, the reading keeps (I1: the stored record is truth).
     let record = LogReading {
@@ -379,6 +383,7 @@ fn cmd_edit(
 }
 
 fn cmd_rm(cli: &Cli, key: &str, series: Option<&str>) -> Result<Response> {
+    refuse_under_rule(cli, "rm")?;
     let ctx = Ctx::open(cli)?;
     let target = ctx.write_target(cli, series, &[], false)?;
     let sref = target.existing.clone().ok_or_else(|| missing(&target))?;
@@ -528,6 +533,66 @@ impl Ctx {
             },
         )
     }
+}
+
+/// The editor form of `edit` (§7.3): an `edit` given no new value opens the value
+/// itself, and the session *is* the review — it mints no plan token and needs no
+/// `-y`, because the hand is already looking at the thing it is changing.
+fn editor_form(
+    ctx: &Ctx,
+    sref: &SeriesRef,
+    prev: &Line<LogReading>,
+    key: &Key,
+) -> Result<Response> {
+    // Piped, it spawns nothing and prints the file's path, by the same law that
+    // sends a table to a TTY and JSON down a pipe: the LLM hand gets a path to open
+    // with its own tools rather than a blocked process it cannot drive (I8).
+    if !contract::stdout_is_terminal() {
+        return Ok(Response::Json(
+            json!({ "path": sref.path.display().to_string() }),
+        ));
+    }
+
+    // What opens follows the shape (§6.1): a series line opens a buffer holding only
+    // its value — one reading value per line — never the raw JSONL, which is
+    // machine-owned and is never handed to a hand raw (I6, §6.6). A reading value is
+    // not a typed token, so it is kept verbatim rather than normalized (§5.1).
+    let initial = format!("{}\n", prev.data.values.join("\n"));
+    match contract::edit_text(&initial)? {
+        // Text that comes back unchanged writes nothing (§7.3).
+        contract::Edited::Unchanged => Ok(Response::Json(line_json(sref, prev)?)),
+        contract::Edited::Changed(text) => {
+            let values = text
+                .lines()
+                .map(str::trim_end)
+                .filter(|line| !line.trim().is_empty())
+                .map(str::to_string)
+                .collect();
+            let record = LogReading {
+                values,
+                note: prev.data.note.clone(),
+            };
+            // Text that comes back invalid exits 3 (§7.3).
+            Annales::validate(&record)?;
+            let line = Line {
+                key: key.clone(),
+                refs: prev.refs.clone(),
+                data: record,
+            };
+            ctx.store.write_line(sref, &line)?;
+            Ok(Response::Json(line_json(sref, &line)?))
+        }
+    }
+}
+
+/// A write verb is refused outright under `PANTHEON_RULE=1` (exit `6`, §9.3): the
+/// one reactive writer is Auspex, and a rule may not borrow a hand's authority (I2).
+fn refuse_under_rule(cli: &Cli, verb: &str) -> Result<()> {
+    // `--dry-run` computes without writing, so a rule may still plan (§7.3).
+    if contract::under_rule() && !cli.dry_run {
+        return Err(contract::refused_under_rule(verb));
+    }
+    Ok(())
 }
 
 /// Run one mutation past the confirm rule (§7.3). `Some` is a pending response the

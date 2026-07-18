@@ -45,7 +45,7 @@ pub mod validate;
 
 pub use classify::{DocExt, FileClass, classify};
 pub use code::{CharToken, Code, CodeForm, NodeName};
-pub use contract::{Checkpoint, RecordChange, Response, SeriesTarget};
+pub use contract::{Checkpoint, Edited, RecordChange, Response, SeriesTarget};
 pub use core::{Core, CoreRegistry, DiscoveredCore};
 pub use envelope::{Entity, Frontmatter, Key, KeyShape, Line, RawEntity, RawLine, Ref};
 pub use error::{Error, ExitCode, Result};

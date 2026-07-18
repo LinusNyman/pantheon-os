@@ -42,13 +42,20 @@ fn fresh_root() -> PathBuf {
 /// Run the real `ann`, returning its exit code and the JSON it emitted — stdout when
 /// it produced a value, stderr for the `{"error":…}` envelope (§7.3).
 fn ann(root: &Path, args: &[&str]) -> (i32, Value) {
-    let out = Command::new(env!("CARGO_BIN_EXE_ann"))
-        .arg("-C")
+    ann_env(root, args, &[])
+}
+
+/// [`ann`] with environment set for the child — never for this process (§7.3).
+fn ann_env(root: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, Value) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ann"));
+    cmd.arg("-C")
         .arg(root)
         .args(args)
-        .env_remove("PANTHEON_ROOT")
-        .output()
-        .unwrap();
+        .env_remove("PANTHEON_ROOT");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let out = cmd.output().unwrap();
     let code = out.status.code().unwrap_or(-1);
     let bytes = if out.stdout.is_empty() {
         out.stderr
@@ -186,6 +193,67 @@ fn verbs_list_get_series() {
     out.push_str(&format!("where weight:\n{}\n", pretty(&located)));
 
     insta::assert_snapshot!("verbs_read", out);
+}
+
+// ── the editor follows the hand too (§7.3, I8) ──────────────────────────────
+
+#[test]
+fn the_editor_form_piped_prints_a_path_and_spawns_nothing() {
+    let root = fresh_root();
+    ann(&root, &["ecv", "weight", "-c"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+
+    // An `edit` given no new value, with stdout a pipe: it spawns nothing and hands
+    // back the file's path, so the LLM hand opens it with its own tools rather than
+    // a process it cannot drive. `$EDITOR` is set to prove nothing is run.
+    let (code, out) = ann_env(
+        &root,
+        &["edit", "260718", "--series", "weight"],
+        &[("EDITOR", "false"), ("VISUAL", "false")],
+    );
+    assert_eq!(code, 0, "the editor form is not a failure (§7.3)");
+    let path = out["path"].as_str().expect("a path (§7.3)");
+    assert!(path.ends_with("ecv__log__weight.jsonl"), "got {path}");
+
+    // Nothing was written: the reading still reads 78.4.
+    let (_, present) = ann(&root, &["get", "weight"]);
+    assert_eq!(present["data"]["values"][0], "78.4");
+}
+
+// ── a rule may not borrow a hand's authority (I2, §9.3) ─────────────────────
+
+#[test]
+fn write_verbs_are_refused_under_a_rule() {
+    let root = fresh_root();
+    ann(&root, &["ecv", "weight", "-c"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+
+    let rule = [("PANTHEON_RULE", "1")];
+    for args in [
+        &["ecv", "weight", "79.0", "-a", "260719"][..],
+        &["edit", "260718", "79.0", "--series", "weight", "-y"][..],
+        &["rm", "260718", "--series", "weight", "-y"][..],
+    ] {
+        let (code, out) = ann_env(&root, args, &rule);
+        assert_eq!(
+            code, 6,
+            "a write verb under a rule is refused: ann {args:?}"
+        );
+        assert_eq!(out["error"]["code"], 6);
+    }
+
+    // Reads run free under a rule — a rule that wants a value uses `get` (§9.3).
+    let (code, present) = ann_env(&root, &["get", "weight"], &rule);
+    assert_eq!(code, 0);
+    assert_eq!(present["data"]["values"][0], "78.4");
+
+    // And `--dry-run` still computes, since it writes nothing (§7.3).
+    let (code, _) = ann_env(
+        &root,
+        &["ecv", "weight", "79.0", "-a", "260719", "-n"],
+        &rule,
+    );
+    assert_eq!(code, 0);
 }
 
 // ── the path is the home (I3) ───────────────────────────────────────────────

@@ -195,6 +195,108 @@ fn confirm(change_json: &Value) -> bool {
     io::stdin().read_line(&mut line).is_ok() && matches!(line.trim(), "y" | "Y" | "yes")
 }
 
+// ── the editor follows the hand too (§7.3, I8) ───────────────────────────────
+
+/// Whether a rule is driving this process (§9.3). Under it every write verb is
+/// refused before it computes anything: the one reactive writer is Auspex, and a
+/// rule may not borrow a hand's authority (I2).
+pub fn under_rule() -> bool {
+    std::env::var_os("PANTHEON_RULE").is_some_and(|v| v == "1")
+}
+
+/// The exit-`6` refusal a write verb gives under `PANTHEON_RULE=1` (§7.3, §9.3).
+pub fn refused_under_rule(verb: &str) -> Error {
+    Error::write_refused(format!(
+        "`{verb}` is a write verb and PANTHEON_RULE=1 refuses it; a rule that wants a value uses \
+         `get` or `where` (§9.3)"
+    ))
+}
+
+/// Whether stdout is a terminal — the one test that decides both the format and
+/// whether an `edit` opens an editor or prints a path (§7.3).
+pub fn stdout_is_terminal() -> bool {
+    io::stdout().is_terminal()
+}
+
+/// What came back from an editor session (§7.3).
+#[derive(Clone, Debug)]
+pub enum Edited {
+    /// The text came back unchanged — write nothing, exit `0`.
+    Unchanged,
+    /// New text, to be folded back into the record.
+    Changed(String),
+}
+
+/// Open `initial` in the hand's own editor and hand back what it saved (§7.3).
+///
+/// The editor is the environment's, never Pantheon's: `$VISUAL`, else `$EDITOR`,
+/// else `vi`. There is no `PANTHEON_EDITOR`, no per-core variable, and no
+/// `--editor` flag — that is a knob where the OS already has one (§18), and the
+/// shell already overrides it per command.
+///
+/// Nothing is locked across the session (§6.4): a session runs for minutes, and any
+/// hand may edit the record directly meanwhile regardless (I8). The lock is taken to
+/// read and again to write back. An editor exiting non-zero writes nothing (exit `1`).
+pub fn edit_text(initial: &str) -> Result<Edited> {
+    edit_text_in(&editor_command(), initial)
+}
+
+/// [`edit_text`] against a stated editor command rather than the environment's —
+/// the seam a test drives, since the environment is the hand's to set (§7.3).
+pub fn edit_text_in(command: &str, initial: &str) -> Result<Edited> {
+    let words = shell_words::split(command)
+        .map_err(|e| Error::usage(format!("$VISUAL/$EDITOR is not a valid command: {e}")))?;
+    let (program, args) = words
+        .split_first()
+        .ok_or_else(|| Error::usage("$VISUAL/$EDITOR is empty (§7.3)"))?;
+
+    let scratch = scratch_path();
+    std::fs::write(&scratch, initial)?;
+    let status = std::process::Command::new(program)
+        .args(args)
+        .arg(&scratch)
+        .status()
+        .map_err(|e| Error::runtime(format!("could not run {program:?}: {e}")));
+    let status = match status {
+        Ok(status) => status,
+        Err(e) => {
+            let _ = std::fs::remove_file(&scratch);
+            return Err(e);
+        }
+    };
+    if !status.success() {
+        let _ = std::fs::remove_file(&scratch);
+        return Err(Error::runtime(format!(
+            "{program} exited without saving; nothing was written (§7.3)"
+        )));
+    }
+    let text = std::fs::read_to_string(&scratch)?;
+    let _ = std::fs::remove_file(&scratch);
+    if text == initial {
+        Ok(Edited::Unchanged)
+    } else {
+        Ok(Edited::Changed(text))
+    }
+}
+
+fn editor_command() -> String {
+    for key in ["VISUAL", "EDITOR"] {
+        if let Ok(value) = std::env::var(key) {
+            if !value.trim().is_empty() {
+                return value;
+            }
+        }
+    }
+    "vi".to_string()
+}
+
+static SCRATCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn scratch_path() -> PathBuf {
+    let n = SCRATCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!("pantheon-edit-{}-{n}.txt", std::process::id()))
+}
+
 // ── the key is what you give, never invented (§7.3) ──────────────────────────
 
 /// Turn `--at` into a series key (§7.3): `YYMMDD`, `YYMMDDThhmm`, or `hhmm` for a
