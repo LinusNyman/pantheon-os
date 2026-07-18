@@ -100,8 +100,36 @@ pub fn findings_json(findings: &[Finding]) -> serde_json::Value {
 /// success; any `Error`-severity finding is a validation failure (exit `3`, decided
 /// by the caller).
 pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
-    let ids = crate::resolve::identifier_set(root, reg)?;
+    let identifiers = crate::resolve::identifiers(root, reg)?;
+    let ids = identifiers.known;
     let mut findings = Vec::new();
+
+    // A slug held at two nodes: the *soft* half of §5.4's uniqueness rule. `add`
+    // refuses a clash within a node (one `read_dir`) and only warns across nodes,
+    // because finding those costs this walk — so reporting them is this lint's job,
+    // and it stays a warning. Every file holding the name is named, since the fix is
+    // made at the source: give one of them a fuller name (§5.4, §18).
+    for duplicate in &identifiers.duplicates {
+        for here in &duplicate.at {
+            let others = duplicate
+                .at
+                .iter()
+                .filter(|other| other.rel_path != here.rel_path)
+                .map(|other| other.home.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            findings.push(Finding {
+                code: FindingCode::DuplicateSlug,
+                severity: Severity::Warning,
+                rel_path: here.rel_path.clone(),
+                msg: format!(
+                    "{} also names a record at {others} — a ref meeting both lists them \
+                     rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
+                    duplicate.reference.to_token()
+                ),
+            });
+        }
+    }
 
     // Spheres are the root's children, parsed with no parent (§5.1).
     let mut spheres: Vec<(NodeName, PathBuf)> = Vec::new();

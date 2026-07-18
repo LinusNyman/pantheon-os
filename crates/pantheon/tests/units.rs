@@ -276,6 +276,57 @@ fn a_stale_plan_token_is_a_validation_error() {
 }
 
 #[test]
+fn validate_reports_a_cross_node_duplicate_softly() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    for (code, dir) in [("csa", "csa"), ("cso", "cso")] {
+        write_record(
+            &root,
+            code,
+            &format!("{dir}__person__alex.json"),
+            r#"{"refs":[],"data":{}}"#,
+        );
+    }
+
+    let findings = validate(&root, &album_registry()).unwrap();
+    let dupes: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == FindingCode::DuplicateSlug)
+        .collect();
+    // Every file holding the name is named — the fix is made at the source (§5.4).
+    assert_eq!(dupes.len(), 2, "{findings:?}");
+    assert!(
+        dupes
+            .iter()
+            .all(|f| f.severity == pantheon::Severity::Warning)
+    );
+    assert!(dupes[0].msg.contains("album:alex"), "{:?}", dupes[0].msg);
+    // Soft: a warning is not a validation failure (§5.4, §18).
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.severity == pantheon::Severity::Error),
+        "a duplicate slug must never harden into an error: {findings:?}"
+    );
+
+    // One name at one node is not a duplicate, however many kinds the core has.
+    let clean = fresh_root();
+    mint(&clean, "root", triple("c", "contextus"));
+    mint(&clean, "c", triple("s", "societas"));
+    mint(&clean, "cs", triple("a", "amicitia"));
+    write_record(
+        &clean,
+        "csa",
+        "csa__person__alex.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    assert!(validate(&clean, &album_registry()).unwrap().is_empty());
+}
+
+#[test]
 fn a_change_body_names_a_series_only_when_there_is_one() {
     let base = pantheon::RecordChange {
         verb: "add",
