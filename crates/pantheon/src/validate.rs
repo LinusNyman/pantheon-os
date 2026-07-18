@@ -54,6 +54,10 @@ pub enum FindingCode {
     MalformedRecord,
     /// A `core:slug` reference that resolves to nothing (§5.4).
     DanglingRef,
+    /// One core's slug held at two nodes (§5.4). Soft by design: finding it is a
+    /// tree walk, which is the cost the softness exists to avoid, so `add` warns
+    /// and you fix it at the source (§18).
+    DuplicateSlug,
     /// A typed token not in normal form (§5.1).
     NonNormalizedName,
 }
@@ -68,6 +72,7 @@ impl FindingCode {
             FindingCode::KindOwnedByNoCore => "kind_owned_by_no_core",
             FindingCode::MalformedRecord => "malformed_record",
             FindingCode::DanglingRef => "dangling_ref",
+            FindingCode::DuplicateSlug => "duplicate_slug",
             FindingCode::NonNormalizedName => "non_normalized_name",
         }
     }
