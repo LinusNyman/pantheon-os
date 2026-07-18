@@ -8,12 +8,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-# The `pan` CLI (§5.5, §10). Named by its three-char short.
-# NOTE: pantheon is the hub (I5) — porticus depends on it, so it must NOT depend on
-# porticus. `pan`'s TUI (§10) is wired in a later split to avoid a Cargo cycle.
-[[bin]]
-name = "pan"
-path = "src/main.rs"
+# pantheon is lib-only (§14): everything links the spine, and nothing may drag the
+# UI layer in with it (I5). The `pan` bin lives in its own crate (crates/pan) so
+# porticus → pantheon stays acyclic once pan grows a TUI behind a feature (§14).
+[lib]
+path = "src/lib.rs"
 
 [dependencies]
 serde.workspace = true
@@ -29,8 +28,9 @@ unicode-normalization.workspace = true
 shell-words.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-clap.workspace = true
-anyhow.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
