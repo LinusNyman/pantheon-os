@@ -20,26 +20,30 @@ porticus = { path = "crates/porticus", version = "0.1.0" }
 tessera  = { path = "crates/tessera",  version = "0.1.0" }
 
 # external
-ratatui     = "0.30"
-crossterm   = "0.29"
-clap        = { version = "4", features = ["derive"] }
-serde       = { version = "1", features = ["derive"] }
-serde_json  = "1"
-schemars    = "1"
-toml_edit   = "0.25"
-gray_matter = "0.3"
-ignore      = "0.4"
-fd-lock     = "4"
-jiff        = "0.2"
-thiserror   = "2"
-anyhow      = "1"
-sha2        = "0.11"
-tracing     = "0.1"
-etcetera    = "0.11"
-figlet-rs   = "1.0"
-insta       = "1"
+# ratatui: apps take the full crate (it owns the backend); widget libs take
+# ratatui-core (§11.2, §13). crossterm is NOT a direct dep — it arrives via the
+# `ratatui::crossterm` re-export so backend and call sites cannot drift (§13).
+ratatui       = "0.30"
+ratatui-core  = "0.1"
+clap          = { version = "4", features = ["derive"] }
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+schemars      = "1"
+toml_edit     = "0.25"   # every TOML surface: annotations AND `+++` frontmatter (§6.6)
+walkdir       = "2"      # not `ignore`: no ignore-file may govern the tree (§13, §18)
+fd-lock       = "4"
+jiff          = "0.2"
+unicode-normalization = "0.1"   # NFC for typed tokens (§5.1)
+shell-words   = "1"      # splits $VISUAL/$EDITOR into argv (§7.3)
+sha2          = "0.11"   # plan tokens (§7.3)
+thiserror     = "2"
+anyhow        = "1"
+tracing       = "0.1"
+insta         = "1"
 
 [profile.release]
 lto       = true
 strip     = true
 codegen-units = 1
+panic     = "unwind"   # REQUIRED: Porticus's terminal-teardown Drop guard rides on unwinding (PORTICUS-SPEC.md P§10).
+                       # `panic = "abort"` runs no destructor and would leave the terminal in raw mode on any panic.
