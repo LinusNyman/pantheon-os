@@ -281,7 +281,9 @@ fn check_record(
 }
 
 /// Read a record's envelope refs. An entity is one object; a series is many lines.
-fn record_refs(path: &Path, is_series: bool) -> std::result::Result<Vec<Ref>, String> {
+/// The `data` half is never parsed past `RawValue` — the spine carries a core's
+/// record opaquely (I5).
+pub(crate) fn record_refs(path: &Path, is_series: bool) -> std::result::Result<Vec<Ref>, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     if is_series {
         let mut out = Vec::new();

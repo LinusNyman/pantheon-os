@@ -24,6 +24,7 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::doc_markdown)]
 
+pub mod cascade;
 pub mod classify;
 pub mod code;
 pub mod contract;
@@ -43,6 +44,7 @@ pub mod store;
 pub mod tree;
 pub mod validate;
 
+pub use cascade::{Cascade, RefRewrite, plan_cascade};
 pub use classify::{DocExt, FileClass, classify};
 pub use code::{CharToken, Code, CodeForm, NodeName};
 pub use contract::{
