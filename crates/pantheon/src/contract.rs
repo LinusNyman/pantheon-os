@@ -117,6 +117,19 @@ impl RecordChange {
     fn body(&self) -> Value {
         // Built as a map rather than a literal so a shape that has no series (or no
         // cascade) omits the key entirely rather than carrying a hollow one.
+        //
+        // **This function's exact bytes are the plan token** (`token()` hashes them),
+        // and the snapshots redact that token — so a change here is invisible to
+        // every snapshot in the workspace while silently invalidating any token a
+        // hand is holding from an earlier `--dry-run`. The one thing that catches it
+        // is `units.rs::a_change_body_names_a_series_only_when_there_is_one`, which
+        // pins the exact byte string a Series change hashes. If that test fails,
+        // the token contract moved: decide that deliberately, and do not simply
+        // update the pinned string to match.
+        //
+        // Adding an `Option` field is safe only because `serde_json` here has no
+        // `preserve_order`, so this is a `BTreeMap` and a conditionally-inserted key
+        // cannot reorder the rest.
         let mut body = serde_json::Map::new();
         body.insert("verb".into(), json!(self.verb));
         body.insert("core".into(), json!(self.core));
