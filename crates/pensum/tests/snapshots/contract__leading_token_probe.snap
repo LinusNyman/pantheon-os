@@ -1,0 +1,15 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 311
+expression: out
+---
+$ pen ao file_taxes
+  exit 0  home="ao" key="file_taxes" data={}
+$ pen book_flights aisle seat
+  exit 0  home="ac" key="book_flights" data={"note":"aisle seat"}
+$ pen acm call_bank about the fee
+  exit 0  home="acm" key="call_bank" data={"note":"about the fee"}
+$ pen ring_alex
+  exit 0  home="ac" key="ring_alex" data={}
+$ pen -H ao ao a task really named ao
+  exit 0  home="ao" key="ao" data={"note":"a task really named ao"}

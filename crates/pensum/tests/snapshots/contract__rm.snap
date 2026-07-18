@@ -1,0 +1,8 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 253
+expression: pretty(&value)
+---
+{
+  "deleted": "buy_milk"
+}

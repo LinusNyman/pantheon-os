@@ -1,0 +1,111 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 283
+expression: out
+---
+$ pen list -H a
+  exit 0
+[
+  {
+    "core": "pensum",
+    "data": {},
+    "home": "acm",
+    "key": "reach_out_to_alex",
+    "kind": "task",
+    "refs": [
+      "album:alex"
+    ]
+  },
+  {
+    "core": "pensum",
+    "data": {},
+    "home": "ao",
+    "key": "file_taxes",
+    "kind": "task",
+    "refs": []
+  }
+]
+
+$ pen list -H a --all
+  exit 0
+[
+  {
+    "core": "pensum",
+    "data": {},
+    "home": "acm",
+    "key": "reach_out_to_alex",
+    "kind": "task",
+    "refs": [
+      "album:alex"
+    ]
+  },
+  {
+    "core": "pensum",
+    "data": {
+      "done": "260719",
+      "note": "the 2% one"
+    },
+    "home": "acm",
+    "key": "buy_milk",
+    "kind": "task",
+    "refs": []
+  },
+  {
+    "core": "pensum",
+    "data": {},
+    "home": "ao",
+    "key": "file_taxes",
+    "kind": "task",
+    "refs": []
+  }
+]
+
+$ pen series acm
+  exit 0
+[
+  {
+    "core": "pensum",
+    "data": {},
+    "home": "acm",
+    "key": "reach_out_to_alex",
+    "kind": "task",
+    "refs": [
+      "album:alex"
+    ]
+  },
+  {
+    "core": "pensum",
+    "data": {
+      "done": "260719",
+      "note": "the 2% one"
+    },
+    "home": "acm",
+    "key": "buy_milk",
+    "kind": "task",
+    "refs": []
+  }
+]
+
+$ pen get buy_milk
+  exit 0
+{
+  "core": "pensum",
+  "data": {
+    "done": "260719",
+    "note": "the 2% one"
+  },
+  "home": "acm",
+  "key": "buy_milk",
+  "kind": "task",
+  "refs": []
+}
+
+$ pen where file_taxes
+  exit 0
+{
+  "core": "pensum",
+  "home": "ao",
+  "key": "file_taxes",
+  "kind": "task",
+  "path": "a_actio/a_o_opus/ao__/ao__task.jsonl"
+}

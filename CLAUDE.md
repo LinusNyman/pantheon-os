@@ -58,13 +58,35 @@ Every tool has a three-char short and is both a CLI emitting JSON and a Porticus
 
 Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `xtask`.
 
-- `crates/pantheon` — spine lib + `pan` bin. `crates/porticus`, `crates/tessera` — the peer libs.
+- `crates/pantheon` — the spine lib. `crates/pan` — the thin bin over it, its own crate.
+- `crates/porticus`, `crates/tessera` — the peer libs.
 - `crates/<core>` — one crate per core; `lib.rs` holds the logic, `main.rs` the thin bin.
 - `xtask/` — workspace automation (run via `cargo xtask`).
 - `docs/` — the mdBook spec. `deny.toml`, `dist-workspace.toml`, `release-plz.toml` — supply chain & release.
 
-**Status: everything is scaffold.** All crate sources are stubs printing a not-implemented line.
-Build order step 1 (Pantheon spine + `pan`) is the next real work.
+## Status — build order steps 1–4 are done (§16)
+
+**Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4).
+That is two of the three storage shapes — Partitioned, and Series in *both* its hand-named
+and nameless forms — plus the `core:slug` resolver, the record-level rename cascade, and the
+record lock under real contention. **Document is the shape still unbuilt** (§6.1), which is
+what step 5 is for, and why `Store` has no document path at all.
+
+**Still scaffold** — a stub printing a not-implemented line: `tabella` (step 5), `porticus`
+and `tessera` and `atrium` (6), `mappa`/`rationes`/`fasti` (7), `auspex` (8), `speculum` and
+`studium` (9). Next real work is **step 5, Tabella** — the Document shape, the one file→core
+mapping resting on extension alone.
+
+Two things a later step must not be surprised by:
+
+- **`pan`'s node-level cascade (§10.1) is still stubbed.** Its six structural mutators
+  (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented.
+  The *record*-level cascade (§5.4) is done and is what the cores use.
+- **`Store::write_line` mints any `Shape::Series { named: false }` series on first write**
+  (§7.3: a determined series is minted by its determinant). For Pensum the determinant is the
+  node, so that is right. **Rationes' `balance` is determined by a holding *entity*** — so `rat`
+  must check that entity exists in its own bin before writing. The store links no core and
+  cannot know (I5).
 
 ## Commands (match CI exactly — see `.github/workflows/ci.yml`)
 
@@ -93,8 +115,17 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
 - **`walkdir`, not `ignore`** — no ignore-file may govern the tree (§13, §18).
 - **`panic = "unwind"` in release is required** — Porticus's terminal-teardown Drop guard rides on
   unwinding; `abort` would leave the terminal in raw mode on a panic. Do not change it.
-- **The contract is frozen by `insta` snapshots** (`key` and plan tokens redacted). Any change to a core's
-  JSON output is a visible snapshot diff in review — regenerate deliberately, never blindly `cargo insta accept`.
+- **The contract is frozen by `insta` snapshots**, taken from the real binary rather than the library
+  behind it (I4). **Only the plan token is redacted** — a `key` never is, being the record's identity
+  and its name at once (§5.4). Any change to a core's JSON is a visible snapshot diff in review —
+  regenerate deliberately, never blindly `cargo insta accept`.
+- **A snapshot cannot see the plan token move.** `RecordChange::body()`'s exact bytes *are* the token,
+  and every snapshot redacts it — so editing that function is invisible workspace-wide while silently
+  invalidating any token a hand holds from an earlier `--dry-run`. One test catches it:
+  `pantheon/tests/units.rs::a_change_body_names_a_series_only_when_there_is_one`, which pins the byte
+  string. If it fails, the token contract moved — decide that deliberately; do not update the pin.
+- **Keep snapshots off the wall clock.** Pass every date explicitly (`ann -a 260718`, `pen --done 260719`);
+  a core that reads `now` in a snapshotted path makes the suite fail tomorrow.
 - **Name normalization is one rule** (§5.1): lowercase, NFC, alphanumeric+`_`, fold space/`-` to `_`,
   collapse and strip `_`. NFC is not optional (macOS/Linux byte disagreement). Apply on write, compare NFC on read.
 - **Exit codes are contract** (§7.3): `0` ok · `1` runtime · `2` usage · `3` validation · `4` not found ·

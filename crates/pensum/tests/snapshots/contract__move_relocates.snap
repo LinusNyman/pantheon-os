@@ -1,0 +1,17 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 241
+expression: pretty(&value)
+---
+{
+  "moved": {
+    "from": "acm",
+    "to": "ao"
+  },
+  "record": {
+    "core": "pensum",
+    "home": "ao",
+    "key": "reach_out_to_alex",
+    "kind": "task"
+  }
+}

@@ -1,0 +1,15 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 142
+expression: pretty(&value)
+---
+{
+  "core": "pensum",
+  "data": {},
+  "home": "acm",
+  "key": "reach_out_to_alex",
+  "kind": "task",
+  "refs": [
+    "album:alex"
+  ]
+}

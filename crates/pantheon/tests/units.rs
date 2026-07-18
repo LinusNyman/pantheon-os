@@ -1,14 +1,16 @@
 //! Property unit tests for the spine's contract surface (§5, §7). The JSON output
 //! shapes are frozen separately by the snapshots in `contract.rs`.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
-    Code, CoreRegistry, DiscoveredCore, FindingCode, Ref, RefOutcome, Shape, build_tree, normalize,
-    plan_new, resolve_all, resolve_code, validate, with_record_lock,
+    Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
+    Severity, Shape, build_tree, normalize, plan_new, resolve_all, resolve_code, validate,
+    with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -731,4 +733,655 @@ fn the_entity_walk_counts_only_this_cores_kinds() {
     let found = store.find_entities(None, None, None).unwrap();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].slug, "mara");
+}
+
+// ── the nameless series (§7.1, step 4) ──────────────────────────────────────
+
+/// A stand-in for Pensum: one token, filed as a **nameless** series.
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default, Debug)]
+struct Doing {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    done: Option<String>,
+}
+
+struct Nameless;
+impl pantheon::Core for Nameless {
+    type Record = Doing;
+    const NAME: &'static str = "pensum";
+    fn kinds() -> &'static [(&'static str, Shape)] {
+        &[("task", Shape::Series { named: false })]
+    }
+    fn validate(_record: &Doing) -> pantheon::Result<()> {
+        Ok(())
+    }
+}
+
+/// A stand-in for Annales: one token, hand-named.
+struct Named;
+impl pantheon::Core for Named {
+    type Record = Doing;
+    const NAME: &'static str = "annales";
+    fn kinds() -> &'static [(&'static str, Shape)] {
+        &[("log", Shape::Series { named: true })]
+    }
+    fn validate(_record: &Doing) -> pantheon::Result<()> {
+        Ok(())
+    }
+}
+
+fn line(key: &str) -> Line<Doing> {
+    Line {
+        key: Key::parse(key).unwrap(),
+        refs: vec![],
+        data: Doing::default(),
+    }
+}
+
+#[test]
+fn the_walk_sees_a_nameless_series() {
+    let root = societas_root();
+    write_record(&root, "csa", "csa__task.jsonl", "");
+    // A hand-named series of another core at the same node is not ours (§5.0).
+    write_record(&root, "csa", "csa__log__weight.jsonl", "");
+
+    let found = pantheon::Store::<Nameless>::new(&root)
+        .find_series(None, None, None)
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].kind, "task");
+    // Nameless is the whole point: there is no name slot to have filled.
+    assert_eq!(found[0].name, None);
+    assert_eq!(found[0].label(), "task");
+}
+
+#[test]
+fn a_name_filter_never_matches_a_nameless_series() {
+    let root = societas_root();
+    write_record(&root, "csa", "csa__task.jsonl", "");
+    let store = pantheon::Store::<Nameless>::new(&root);
+    assert!(
+        store
+            .find_series(None, None, Some("task"))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store.find_series(None, Some("task"), None).unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn the_first_task_mints_the_series_and_a_named_one_still_refuses() {
+    let root = societas_root();
+    let home = Code::parse("csa").unwrap();
+
+    // Nameless: minted by its determinant — the node's first task — not by `-c`
+    // (§7.3, §18). The file does not exist until this write.
+    let store = pantheon::Store::<Nameless>::new(&root);
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&home, "task", None).unwrap(),
+    };
+    assert!(!sref.path.exists());
+    store.write_line(&sref, &line("reach_out_to_alex")).unwrap();
+    assert!(sref.path.exists());
+    assert!(sref.path.ends_with("csa__task.jsonl"));
+
+    // Hand-named: still a not-found, because a typo must not conjure a log (§7.3).
+    let named = pantheon::Store::<Named>::new(&root);
+    let missing = SeriesRef {
+        home: home.clone(),
+        kind: "log".to_string(),
+        name: Some("wieght".to_string()),
+        path: named.series_path(&home, "log", Some("wieght")).unwrap(),
+    };
+    let err = named.write_line(&missing, &line("260718")).unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::NotFound);
+    assert!(!missing.path.exists(), "a refused write mints nothing");
+}
+
+#[test]
+fn a_name_keyed_line_is_its_own_present() {
+    let root = societas_root();
+    let home = Code::parse("csa").unwrap();
+    let store = pantheon::Store::<Nameless>::new(&root);
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&home, "task", None).unwrap(),
+    };
+    for key in ["reach_out_to_alex", "file_taxes", "book_flights"] {
+        store.write_line(&sref, &line(key)).unwrap();
+    }
+
+    // Every task survives the fold: a task is a record, not a sample (I1, §5.4).
+    let folded = store.fold(None, None).unwrap();
+    let mut keys: Vec<&str> = folded.iter().map(|p| p.line.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["book_flights", "file_taxes", "reach_out_to_alex"]);
+    assert!(folded.iter().all(|p| p.name.is_none()));
+}
+
+#[test]
+fn a_date_keyed_series_still_folds_to_its_latest() {
+    let root = societas_root();
+    let home = Code::parse("csa").unwrap();
+    let store = pantheon::Store::<Named>::new(&root);
+    let sref = store.create_series(&home, "log", "weight").unwrap();
+    for key in ["260718", "260720", "260719"] {
+        store.write_line(&sref, &line(key)).unwrap();
+    }
+    let folded = store.fold(None, None).unwrap();
+    assert_eq!(folded.len(), 1, "a sampled series folds to one present");
+    assert_eq!(folded[0].line.key.as_str(), "260720");
+    assert_eq!(folded[0].name.as_deref(), Some("weight"));
+}
+
+fn pensum_registry() -> CoreRegistry {
+    CoreRegistry::from_cores(vec![DiscoveredCore {
+        name: "pensum".to_string(),
+        short: "pen".to_string(),
+        kinds: vec![("task".to_string(), Shape::Series { named: false })],
+        format_version: 1,
+    }])
+}
+
+#[test]
+fn a_name_keyed_line_resolves_but_a_date_keyed_one_does_not() {
+    let root = societas_root();
+    // The last line is date-keyed: the key's own shape is the second gate, so a
+    // sample registers nothing even inside a series whose lines are targets.
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"reach_out_to_alex\",\"refs\":[],\"data\":{}}\n\
+         {\"key\":\"file_taxes\",\"refs\":[],\"data\":{}}\n\
+         {\"key\":\"260718\",\"refs\":[],\"data\":{}}\n",
+    );
+
+    let reg = pensum_registry();
+    let want = [
+        Ref::parse("pensum:reach_out_to_alex").unwrap(),
+        Ref::parse("pensum:file_taxes").unwrap(),
+        Ref::parse("pensum:260718").unwrap(),
+        Ref::parse("pensum:never_written").unwrap(),
+    ];
+    let out = resolve_all(&root, &reg, &want).unwrap();
+
+    let RefOutcome::Resolved(one) = &out[0] else {
+        panic!("a task is reached by its key (§5.4): {:?}", out[0])
+    };
+    assert_eq!(one.home.as_str(), "csa");
+    assert_eq!(one.kind, "task");
+    // The resolution points at the series file the line lives in (I3).
+    assert!(one.rel_path.ends_with("csa__task.jsonl"));
+
+    assert!(matches!(out[1], RefOutcome::Resolved(_)));
+    assert!(
+        matches!(out[2], RefOutcome::Unresolved(_)),
+        "a date-keyed line is a sample, never a target (I1)"
+    );
+    assert!(matches!(out[3], RefOutcome::Unresolved(_)));
+}
+
+#[test]
+fn a_ref_to_a_task_no_longer_dangles() {
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"reach_out_to_alex\",\"refs\":[],\"data\":{}}\n",
+    );
+    // Another record pointing at the task — the edge §8.5 says a task is reached by.
+    write_record(
+        &root,
+        "cso",
+        "cso__task.jsonl",
+        "{\"key\":\"chase_it_up\",\"refs\":[\"pensum:reach_out_to_alex\"],\"data\":{}}\n",
+    );
+    let findings = validate(&root, &pensum_registry()).unwrap();
+    let dangling: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == FindingCode::DanglingRef)
+        .collect();
+    assert!(dangling.is_empty(), "{dangling:?}");
+}
+
+#[test]
+fn one_task_key_at_two_nodes_is_the_soft_duplicate_finding() {
+    let root = societas_root();
+    for code in ["csa", "cso"] {
+        write_record(
+            &root,
+            code,
+            &format!("{code}__task.jsonl"),
+            "{\"key\":\"file_taxes\",\"refs\":[],\"data\":{}}\n",
+        );
+    }
+    let findings = validate(&root, &pensum_registry()).unwrap();
+    let duplicates: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == FindingCode::DuplicateSlug)
+        .collect();
+    // Both files are named, because the fix is made at the source (§5.4).
+    assert_eq!(duplicates.len(), 2, "{findings:?}");
+    assert!(duplicates.iter().all(|f| f.severity == Severity::Warning));
+}
+
+// ── the record lock under contention (§6.4, step 4) ─────────────────────────
+
+#[test]
+fn concurrent_writers_all_land_on_one_nameless_series() {
+    // The file a detached hook and a hand contend for (§6.4, §16 step 4). Eight
+    // writers, none of which finds the file there to begin with, so every one of
+    // them is racing to mint it as well as to append.
+    let root = societas_root();
+    let home = Code::parse("csa").unwrap();
+    let store = pantheon::Store::<Nameless>::new(&root);
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&home, "task", None).unwrap(),
+    };
+    assert!(!sref.path.exists(), "the race starts with no file at all");
+
+    std::thread::scope(|scope| {
+        for w in 0..8 {
+            let store = &store;
+            let sref = &sref;
+            scope.spawn(move || {
+                for i in 0..20 {
+                    store
+                        .write_line(sref, &line(&format!("task_{w}_{i}")))
+                        .unwrap();
+                }
+            });
+        }
+    });
+
+    let lines = std::fs::read_to_string(&sref.path).unwrap();
+    let keys: HashSet<&str> = lines.lines().filter(|l| !l.trim().is_empty()).collect();
+    // 160 distinct lines, none lost. A writer that read bytes another had already
+    // replaced would drop that other's work silently — which is the whole reason
+    // the lock re-checks the inode after acquiring (lock.rs).
+    assert_eq!(keys.len(), 160, "every writer's lines must survive");
+}
+
+#[test]
+fn a_writer_whose_file_was_renamed_underneath_retries() {
+    // The inode re-check, deterministically. B locks the file A is about to swap;
+    // when A's temp-and-rename lands, B is holding a lock on an inode the path no
+    // longer names, and must re-open rather than write into the void (§6.4).
+    let root = fresh_root();
+    let path = root.join("contended.jsonl");
+    std::fs::write(&path, "").unwrap();
+
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+
+    std::thread::scope(|scope| {
+        let p = path.as_path();
+        scope.spawn(move || {
+            with_record_lock(p, |prev| {
+                // Inside A's lock: let B start, and hold until it is queued.
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                let mut out = prev.unwrap_or_default().to_vec();
+                out.extend_from_slice(b"written_by_a\n");
+                Ok(out)
+            })
+            .unwrap();
+        });
+
+        entered_rx.recv().unwrap();
+        scope.spawn(move || {
+            with_record_lock(p, |prev| {
+                let mut out = prev.unwrap_or_default().to_vec();
+                out.extend_from_slice(b"written_by_b\n");
+                Ok(out)
+            })
+            .unwrap();
+        });
+
+        // B is now blocked on A's lock. Letting A finish swaps the inode under it.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        release_tx.send(()).unwrap();
+    });
+
+    let out = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        out.contains("written_by_a"),
+        "A's write must survive B: {out:?}"
+    );
+    assert!(out.contains("written_by_b"), "B's write must land: {out:?}");
+}
+
+#[test]
+fn the_cascade_refuses_renaming_a_task_onto_an_occupied_key() {
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"reach_out_to_alex\",\"refs\":[],\"data\":{}}\n\
+         {\"key\":\"call_alex\",\"refs\":[],\"data\":{}}\n",
+    );
+    let own = ["task"];
+    let from = Ref::parse("pensum:reach_out_to_alex").unwrap();
+
+    // Onto a key its own file already holds.
+    let err = pantheon::plan_cascade(&root, &own, &from, &Ref::parse("pensum:call_alex").unwrap())
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+
+    // And onto one another node holds — the check is tree-wide (§7.2).
+    write_record(
+        &root,
+        "cso",
+        "cso__task.jsonl",
+        "{\"key\":\"ring_alex\",\"refs\":[],\"data\":{}}\n",
+    );
+    assert!(
+        pantheon::plan_cascade(&root, &own, &from, &Ref::parse("pensum:ring_alex").unwrap())
+            .is_err()
+    );
+
+    // A free name still plans cleanly.
+    let clean = pantheon::plan_cascade(
+        &root,
+        &own,
+        &from,
+        &Ref::parse("pensum:email_alex").unwrap(),
+    )
+    .unwrap();
+    assert!(clean.rewrites.is_empty());
+}
+
+#[test]
+fn a_task_key_is_not_an_identity_to_a_core_that_does_not_own_the_token() {
+    // `own_kinds` is the calling core's, so Album renaming an entity never trips
+    // over a Pensum task that happens to share the name (I5, §5.4).
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"mara\",\"refs\":[],\"data\":{}}\n",
+    );
+    let plan = pantheon::plan_cascade(
+        &root,
+        &["person"],
+        &Ref::parse("album:maara").unwrap(),
+        &Ref::parse("album:mara").unwrap(),
+    );
+    assert!(plan.is_ok(), "another core's key is not ours to guard");
+}
+
+#[test]
+fn a_date_keyed_line_never_blocks_a_rename() {
+    // A sample is not an identity (I1), so it cannot occupy a name.
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"260718\",\"refs\":[],\"data\":{}}\n",
+    );
+    assert!(
+        pantheon::plan_cascade(
+            &root,
+            &["task"],
+            &Ref::parse("pensum:a").unwrap(),
+            &Ref::parse("pensum:260718").unwrap(),
+        )
+        .is_ok()
+    );
+}
+
+// ── reaching, re-keying, and re-homing a line (§5.4, §7.2) ──────────────────
+
+/// A tree with one task at `csa` and two at `cso`, all through the store.
+fn tasked_root() -> (PathBuf, pantheon::Store<Nameless>) {
+    let root = societas_root();
+    let store = pantheon::Store::<Nameless>::new(&root);
+    for (code, keys) in [
+        ("csa", &["reach_out_to_alex"][..]),
+        ("cso", &["file_taxes", "book_flights"][..]),
+    ] {
+        let home = Code::parse(code).unwrap();
+        let sref = SeriesRef {
+            home: home.clone(),
+            kind: "task".to_string(),
+            name: None,
+            path: store.series_path(&home, "task", None).unwrap(),
+        };
+        for key in keys {
+            store.write_line(&sref, &line(key)).unwrap();
+        }
+    }
+    (root, store)
+}
+
+#[test]
+fn a_key_is_reached_tree_wide_and_ambiguity_is_listed_not_guessed() {
+    let (root, store) = tasked_root();
+    let (sref, found) = store
+        .locate_line(&Key::parse("file_taxes").unwrap(), None, None)
+        .unwrap();
+    assert_eq!(sref.home.as_str(), "cso");
+    assert_eq!(found.key.as_str(), "file_taxes");
+
+    let missing = store
+        .locate_line(&Key::parse("never_written").unwrap(), None, None)
+        .unwrap_err();
+    assert_eq!(missing.exit_code(), pantheon::ExitCode::NotFound);
+
+    // The same key at two nodes: listed with its homes, never guessed (§7.3).
+    let home = Code::parse("csa").unwrap();
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&home, "task", None).unwrap(),
+    };
+    store.write_line(&sref, &line("file_taxes")).unwrap();
+    let ambiguous = store
+        .locate_line(&Key::parse("file_taxes").unwrap(), None, None)
+        .unwrap_err();
+    assert_eq!(ambiguous.exit_code(), pantheon::ExitCode::Usage);
+
+    // And that second one is the soft cross-node duplicate `add` warns on (§5.4).
+    let elsewhere = store
+        .duplicate_keys_elsewhere(&home, &Key::parse("file_taxes").unwrap(), None)
+        .unwrap();
+    assert_eq!(elsewhere.len(), 1);
+    assert_eq!(elsewhere[0].home.as_str(), "cso");
+    drop(root);
+}
+
+#[test]
+fn renaming_a_line_moves_its_key_and_leaves_its_neighbours_verbatim() {
+    let (root, store) = tasked_root();
+    let home = Code::parse("cso").unwrap();
+    let path = store.series_path(&home, "task", None).unwrap();
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: path.clone(),
+    };
+    let before: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+
+    store
+        .rename_line(
+            &sref,
+            &Key::parse("file_taxes").unwrap(),
+            &Key::parse("do_the_taxes").unwrap(),
+        )
+        .unwrap();
+
+    let after: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert!(after[0].contains("do_the_taxes"));
+    assert_eq!(after[1], before[1], "an untouched line is carried verbatim");
+
+    // Onto a key the same file already holds: exit 3, and nothing is written.
+    let err = store
+        .rename_line(
+            &sref,
+            &Key::parse("do_the_taxes").unwrap(),
+            &Key::parse("book_flights").unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap().lines().count(),
+        2,
+        "a refused rename writes nothing"
+    );
+    drop(root);
+}
+
+#[test]
+fn moving_a_line_lands_it_at_the_destination_and_drops_the_source() {
+    let (root, store) = tasked_root();
+    let from_home = Code::parse("cso").unwrap();
+    let to_home = Code::parse("csa").unwrap();
+    let source = SeriesRef {
+        home: from_home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&from_home, "task", None).unwrap(),
+    };
+    let key = Key::parse("file_taxes").unwrap();
+
+    let dest = store.move_line(&source, &to_home, &key).unwrap();
+    assert_eq!(dest.home.as_str(), "csa");
+    assert!(dest.path.ends_with("csa__task.jsonl"));
+
+    // Exactly one home holds it now — the move is not a copy.
+    let found = store.find_line(&key, None, None).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].0.home.as_str(), "csa");
+    // The line the source keeps is untouched.
+    let left = store.read_series(&source).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].key.as_str(), "book_flights");
+    drop(root);
+}
+
+#[test]
+fn moving_onto_an_occupied_key_is_refused_rather_than_clobbering() {
+    let (root, store) = tasked_root();
+    let from_home = Code::parse("cso").unwrap();
+    let to_home = Code::parse("csa").unwrap();
+    let source = SeriesRef {
+        home: from_home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&from_home, "task", None).unwrap(),
+    };
+    // Give the destination a task of the same name first.
+    let dest = SeriesRef {
+        home: to_home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&to_home, "task", None).unwrap(),
+    };
+    store.write_line(&dest, &line("file_taxes")).unwrap();
+
+    let err = store
+        .move_line(&source, &to_home, &Key::parse("file_taxes").unwrap())
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+    // Both sides intact: a refused move loses nothing.
+    assert_eq!(store.read_series(&source).unwrap().len(), 2);
+    assert_eq!(store.read_series(&dest).unwrap().len(), 2);
+    drop(root);
+}
+
+#[test]
+fn the_keyed_target_probes_its_leading_token_for_a_node_code() {
+    let (root, store) = tasked_root();
+    let elsewhere = root.join("cs_something_else");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+
+    let resolve = |positionals: &[&str], home: Option<&str>| {
+        let owned: Vec<String> = positionals.iter().map(|s| (*s).to_string()).collect();
+        pantheon::contract::resolve_register_target(
+            &store,
+            &pantheon::RegisterQuery {
+                kind: "task",
+                home,
+                positionals: &owned,
+                // A locus that is not one of the codes under test, so an accidental
+                // fallback cannot be mistaken for a correct probe.
+                pwd: Some(
+                    root.join("c_contextus/c_s_societas/cs_o_officium")
+                        .as_path(),
+                ),
+            },
+        )
+    };
+
+    // `csa` is a code and something follows it: home, then key.
+    let t = resolve(&["csa", "reach_out_to_alex"], None).unwrap();
+    assert_eq!(t.home.as_str(), "csa");
+    assert_eq!(t.key.as_str(), "reach_out_to_alex");
+    assert!(t.values.is_empty());
+    assert!(t.existing.is_some(), "csa already holds a task series");
+
+    // Not a code: key, then the trailing value stream. Home falls to the locus.
+    let t = resolve(&["reach_out_to_alex", "call re: the contract"], None).unwrap();
+    assert_eq!(t.home.as_str(), "cso");
+    assert_eq!(t.key.as_str(), "reach_out_to_alex");
+    assert_eq!(t.values, ["call re: the contract"]);
+
+    // Three tokens are unambiguous.
+    let t = resolve(&["csa", "reach_out_to_alex", "text"], None).unwrap();
+    assert_eq!(
+        (t.home.as_str(), t.key.as_str()),
+        ("csa", "reach_out_to_alex")
+    );
+    assert_eq!(t.values, ["text"]);
+
+    // A lone token is the key — a home with the name missing addresses nothing.
+    let t = resolve(&["csa"], None).unwrap();
+    assert_eq!((t.home.as_str(), t.key.as_str()), ("cso", "csa"));
+
+    // `-H` short-circuits the probe, so a task really named `csa` is reachable.
+    let t = resolve(&["csa", "text"], Some("csa")).unwrap();
+    assert_eq!((t.home.as_str(), t.key.as_str()), ("csa", "csa"));
+    assert_eq!(t.values, ["text"]);
+
+    // A key is normalized on the way in, never hand-typed as a slug (§5.4).
+    let t = resolve(&["Reach Out To Alex"], None).unwrap();
+    assert_eq!(t.key.as_str(), "reach_out_to_alex");
+
+    // Naming nothing is a usage error.
+    assert!(matches!(
+        resolve(&[], None),
+        Err(e) if e.exit_code() == pantheon::ExitCode::Usage
+    ));
+
+    // At a node with no task file yet, the target resolves and `existing` is None —
+    // that is the write that mints it (§8.5).
+    let t = resolve(&["cs", "first_task"], None).unwrap();
+    assert_eq!(t.home.as_str(), "cs");
+    assert!(t.existing.is_none());
+    drop(elsewhere);
 }

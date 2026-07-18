@@ -101,26 +101,6 @@ fn walk(
             let file_name = entry.file_name().to_string_lossy().into_owned();
             let class = classify(&file_name, false, &node.code);
 
-            // Does this file's own identity already answer to the new name?
-            let identity = match &class {
-                FileClass::Partitioned { kind, slug, .. } => Some((kind, slug.clone())),
-                FileClass::EntityNode { kind, .. } => Some((kind, node.label.clone())),
-                FileClass::NamedSeries { kind, name, .. } => Some((kind, name.clone())),
-                _ => None,
-            };
-            if let Some((kind, ident)) = identity
-                && own_kinds.contains(&kind.as_str())
-                && ident == to.slug
-            {
-                return Err(Error::validation(format!(
-                    "{} already names a record at {} — renaming onto it would make the \
-                     two indistinguishable, and there is no history to tell them apart \
-                     again (§7.2, §18)",
-                    to.to_token(),
-                    node.code.as_str()
-                )));
-            }
-
             // Whose refs might point at the old name? Any record's — the cascade
             // spans cores, which is exactly why it is the spine's and not a core's.
             let is_series = match &class {
@@ -129,6 +109,39 @@ fn walk(
                 _ => continue,
             };
             let path = entry.path();
+
+            // Does anything here already answer to the new name? Three of the four
+            // identities are on the file — a slug, a node's definition, a series'
+            // name. The fourth is *inside* it: a determined series has no name of its
+            // own, but each of its name-keyed lines is a record reached by its key
+            // (§5.4), and renaming one onto another would spend the token that told
+            // them apart. Only our own kinds are opened for it.
+            let occupied = match &class {
+                FileClass::Partitioned { kind, slug, .. } if own_kinds.contains(&kind.as_str()) => {
+                    *slug == to.slug
+                }
+                FileClass::EntityNode { kind, .. } if own_kinds.contains(&kind.as_str()) => {
+                    node.label == to.slug
+                }
+                FileClass::NamedSeries { kind, name, .. } if own_kinds.contains(&kind.as_str()) => {
+                    *name == to.slug
+                }
+                FileClass::DeterminedSeries { kind, .. } if own_kinds.contains(&kind.as_str()) => {
+                    crate::validate::series_name_keys(&path)
+                        .map_err(|e| Error::validation(format!("{}: {e}", path.display())))?
+                        .contains(&to.slug)
+                }
+                _ => false,
+            };
+            if occupied {
+                return Err(Error::validation(format!(
+                    "{} already names a record at {} — renaming onto it would make the \
+                     two indistinguishable, and there is no history to tell them apart \
+                     again (§7.2, §18)",
+                    to.to_token(),
+                    node.code.as_str()
+                )));
+            }
             let refs = crate::validate::record_refs(&path, is_series)
                 .map_err(|e| Error::validation(format!("{}: {e}", path.display())))?;
             let count = refs.iter().filter(|r| *r == from).count();

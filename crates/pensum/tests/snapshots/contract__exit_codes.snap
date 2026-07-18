@@ -1,0 +1,32 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 445
+expression: out
+---
+pen acm x -c
+  # a determined series is minted by its determinant
+  => exit 2: pensum's register is nameless and minted by the node's first task, so -c mints nothing (§7.1, §7.3)
+pen acm x -a 260719
+  # a task keys by its name, not a date
+  => exit 2: a task keys by its name, not by a date, so -a keys nothing — a deadline is a Fasti event referencing the task (§5.4, §8.4)
+pen series acm weight
+  # pensum's register is nameless
+  => exit 2: `pen series` takes one node and nothing else: pensum's register is nameless, so there is no collection to name (§7.1, §7.3)
+pen list -k log
+  # a token this core does not own
+  => exit 2: pensum has no "log" token; it declares `task` (§7.1)
+pen get never_written
+  # no task by that key
+  => exit 4: no pensum record keyed never_written (§7.3)
+pen series ac
+  # no register at that node yet
+  => exit 4: no pensum register at ac — a node's first task mints one (§7.3, §8.5)
+pen get buy_milk
+  # one key at two nodes is listed, not guessed
+  => exit 2: buy_milk keys a record at more than one node: acm, ao — name one with -H (§7.3)
+pen get
+  # naming nothing
+  => exit 2: name the pensum record (§7.3)
+pen rm -H acm buy_milk
+  # a mutation piped without -y
+  => exit 5: (a rm plan awaiting -y, not an error)

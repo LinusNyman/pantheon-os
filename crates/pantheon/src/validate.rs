@@ -12,7 +12,7 @@ use crate::Result;
 use crate::classify::{FileClass, classify};
 use crate::code::{Code, NodeName, parse_node_dirname};
 use crate::core::CoreRegistry;
-use crate::envelope::{RawEntity, RawLine, Ref};
+use crate::envelope::{KeyShape, RawEntity, RawLine, Ref};
 use crate::name::is_normalized;
 
 /// A validation finding, reported by path (§10.2).
@@ -332,6 +332,27 @@ pub(crate) fn record_refs(path: &Path, is_series: bool) -> std::result::Result<V
         let e: RawEntity = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
         Ok(e.refs)
     }
+}
+
+/// The **name-keyed** line keys of a series — the identities a series file holds
+/// (§5.4). A date-keyed line is a sample and never a target (I1), so it is skipped
+/// here rather than filtered by every caller.
+///
+/// This is the one read that opens a record file to resolve rather than resting on
+/// its filename (§5.0), which is why the callers gate it on the shape first.
+pub(crate) fn series_name_keys(path: &Path) -> std::result::Result<Vec<String>, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for line in bytes.split(|b| *b == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let l: RawLine = serde_json::from_slice(line).map_err(|e| e.to_string())?;
+        if l.key.classify() == KeyShape::Name {
+            out.push(l.key.as_str().to_string());
+        }
+    }
+    Ok(out)
 }
 
 /// Flag two siblings that resolve to the same code or where one prefix-shadows

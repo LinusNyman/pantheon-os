@@ -1,0 +1,23 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 331
+expression: out
+---
+stdout: {
+  "core": "pensum",
+  "data": {},
+  "home": "ao",
+  "key": "call_bank",
+  "kind": "task",
+  "refs": []
+}
+stderr: {
+  "findings": [
+    {
+      "code": "duplicate_slug",
+      "msg": "pensum:call_bank also names a record at acm — a ref meeting both lists them rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
+      "path": "a_actio/a_c_cura/ac_m_mentis/acm__/acm__task.jsonl",
+      "severity": "warning"
+    }
+  ]
+}

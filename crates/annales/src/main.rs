@@ -470,7 +470,7 @@ fn cmd_rename(cli: &Cli, slug: &str, new: &str) -> Result<Response> {
     )?;
     let new = pantheon::name::normalize_token(new, "series name")?;
 
-    let from = Ref::parse(&format!("{}:{}", Annales::NAME, sref.name))?;
+    let from = Ref::parse(&format!("{}:{}", Annales::NAME, sref.label()))?;
     let to = Ref::parse(&format!("{}:{new}", Annales::NAME))?;
     let own: Vec<&str> = Annales::kinds().iter().map(|(k, _)| *k).collect();
     let cascade = pantheon::plan_cascade(ctx.store.root(), &own, &from, &to)?;
@@ -485,7 +485,7 @@ fn cmd_rename(cli: &Cli, slug: &str, new: &str) -> Result<Response> {
     let moved = ctx.store.relocate_series(&sref, &sref.home, &new)?;
     cascade.apply(ctx.store.root())?;
     Ok(Response::Json(json!({
-        "renamed": { "from": sref.name, "to": new },
+        "renamed": { "from": sref.label(), "to": new },
         "cascade": cascade.to_json(),
         "record": identity(&moved),
     })))
@@ -503,12 +503,12 @@ fn cmd_move(cli: &Cli, slug: &str, to: &str) -> Result<Response> {
     )?;
     let home = Code::parse(to)?;
 
-    let mut change = rename_change("move", &sref, &sref.name.clone(), None);
+    let mut change = rename_change("move", &sref, sref.label(), None);
     change.home = home.as_str().to_string();
     if let Some(pending) = review(cli, &change)? {
         return Ok(pending);
     }
-    let moved = ctx.store.relocate_series(&sref, &home, &sref.name)?;
+    let moved = ctx.store.relocate_series(&sref, &home, sref.label())?;
     Ok(Response::Json(json!({
         "moved": { "from": sref.home.as_str(), "to": home.as_str() },
         "record": identity(&moved),
@@ -531,9 +531,9 @@ fn rename_change(
         core: Annales::NAME.to_string(),
         home: sref.home.as_str().to_string(),
         kind: sref.kind.clone(),
-        series: Some(sref.name.clone()),
+        series: sref.name.clone(),
         // A named series' key is its name — the thing a ref points at (§5.4).
-        key: sref.name.clone(),
+        key: sref.label().to_string(),
         before: Some(identity(sref)),
         after: Some(after),
         cascade,
@@ -703,7 +703,7 @@ fn change(
         core: Annales::NAME.to_string(),
         home: sref.home.as_str().to_string(),
         kind: sref.kind.clone(),
-        series: Some(sref.name.clone()),
+        series: sref.name.clone(),
         key: key.to_string(),
         before,
         after,
@@ -712,7 +712,13 @@ fn change(
 }
 
 fn line_json(sref: &SeriesRef, line: &Line<LogReading>) -> Result<Value> {
-    contract::line_json(Annales::NAME, &sref.home, &sref.kind, &sref.name, line)
+    contract::line_json(
+        Annales::NAME,
+        &sref.home,
+        &sref.kind,
+        sref.name.as_deref(),
+        line,
+    )
 }
 
 fn identity(sref: &SeriesRef) -> Value {
@@ -720,7 +726,7 @@ fn identity(sref: &SeriesRef) -> Value {
         "core": Annales::NAME,
         "home": sref.home.as_str(),
         "kind": sref.kind,
-        "series": sref.name,
+        "series": sref.label(),
     })
 }
 
@@ -740,7 +746,7 @@ fn missing(target: &SeriesTarget) -> Error {
 fn no_line(sref: &SeriesRef, key: &Key) -> Error {
     Error::not_found(format!(
         "no line keyed {key} in series {:?} at {} (§7.2)",
-        sref.name,
+        sref.label(),
         sref.home.as_str()
     ))
 }

@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use crate::classify::{FileClass, classify};
 use crate::code::{Code, CodeForm, NodeName};
 use crate::core::Core;
-use crate::envelope::{Entity, Key, Line, RawLine, Ref};
+use crate::envelope::{Entity, Key, KeyShape, Line, RawLine, Ref};
 use crate::shape::Shape;
 use crate::tree::{Node, TreeRoot, build_tree, resolve_code, resolve_node};
 use crate::{Error, Result};
@@ -35,8 +35,23 @@ use crate::{Error, Result};
 pub struct SeriesRef {
     pub home: Code,
     pub kind: String,
-    pub name: String,
+    /// The hand-chosen name, or `None` where the core's series is **nameless** —
+    /// Pensum's one `task` per node, filed as `[code]__task.jsonl` (§7.1, §7.3).
+    /// `None` is exactly [`FileClass::DeterminedSeries`]: a determined series that
+    /// still *carries* a name (Rationes' `balance`, named for its holding) splits
+    /// into three segments like any other, and only the registry's `named` bit tells
+    /// the two apart (§5.4).
+    pub name: Option<String>,
     pub path: PathBuf,
+}
+
+impl SeriesRef {
+    /// What to call this series in a message. A nameless series has only its token
+    /// to be called by, and that is what a hand typed to reach it (§7.3).
+    #[must_use]
+    pub fn label(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.kind)
+    }
 }
 
 /// Which of the two partitioned filename forms an entity file wears (§5.2). The
@@ -78,7 +93,8 @@ pub struct EntityAddr {
 pub struct PresentLine<T> {
     pub home: Code,
     pub kind: String,
-    pub name: String,
+    /// The series' name, or `None` where the core's series is nameless (§7.1).
+    pub name: Option<String>,
     pub line: Line<T>,
 }
 
@@ -134,12 +150,19 @@ impl<C: Core> Store<C> {
 
     // ── locating ────────────────────────────────────────────────────────────────
 
-    fn series_file_name(home: &Code, kind: &str, name: &str) -> String {
-        format!("{}__{kind}__{name}.jsonl", home.as_str())
+    /// The single place that chooses between the two series filename forms (§5.2) —
+    /// the counterpart of [`Store::entity_file_name`], and held to the same
+    /// discipline: every writer goes through here, so `add`, `move`, and `rename`
+    /// cannot land a record in one form and look for it in the other.
+    fn series_file_name(home: &Code, kind: &str, name: Option<&str>) -> String {
+        match name {
+            Some(name) => format!("{}__{kind}__{name}.jsonl", home.as_str()),
+            None => format!("{}__{kind}.jsonl", home.as_str()),
+        }
     }
 
     /// Where a series lives, whether or not it exists yet (§5.2).
-    pub fn series_path(&self, home: &Code, kind: &str, name: &str) -> Result<PathBuf> {
+    pub fn series_path(&self, home: &Code, kind: &str, name: Option<&str>) -> Result<PathBuf> {
         let node = resolve_code(&self.root, home)?;
         Ok(node
             .join(format!("{}__", home.as_str()))
@@ -186,18 +209,22 @@ impl<C: Core> Store<C> {
                     continue;
                 }
                 let file_name = entry.file_name().to_string_lossy().into_owned();
-                let FileClass::NamedSeries {
-                    kind: found_kind,
-                    name: found_name,
-                    ..
-                } = classify(&file_name, false, &node.code)
-                else {
-                    continue;
+                // Both series filename forms (§5.2): three segments carry a name,
+                // two are the nameless form a determined series wears (§7.1).
+                let (found_kind, found_name) = match classify(&file_name, false, &node.code) {
+                    FileClass::NamedSeries {
+                        kind, name: series, ..
+                    } => (kind, Some(series)),
+                    FileClass::DeterminedSeries { kind, .. } => (kind, None),
+                    _ => continue,
                 };
-                // Another core's series at this node is not ours to count (§5.0).
+                // Another core's series at this node is not ours to count (§5.0). A
+                // name filter asks for a named series, so it never matches a nameless
+                // one — which is why Pensum, having only the one, always filters by
+                // home and token instead (§7.3).
                 if !Self::owns_series_kind(&found_kind)
                     || kind.is_some_and(|want| want != found_kind)
-                    || name.is_some_and(|want| want != found_name)
+                    || name.is_some_and(|want| Some(want) != found_name.as_deref())
                 {
                     continue;
                 }
@@ -273,12 +300,25 @@ impl<C: Core> Store<C> {
         Ok(out)
     }
 
-    /// The present of a series (I1): the line at the latest key. Keys sort
-    /// lexicographically, which for `YYMMDD`(`Thhmm`) is chronological (§5.4).
-    fn present(lines: Vec<Line<C::Record>>) -> Option<Line<C::Record>> {
-        lines
+    /// The present of a series (I1), and the one rule that covers both kinds of key
+    /// (§5.4). A **date-keyed** line is a *sample*, so the series folds to the line at
+    /// the latest key — keys sort lexicographically, which for `YYMMDD`(`Thhmm`) is
+    /// chronological. A **name-keyed** line is a *record* (a Pensum task), so it is
+    /// already its own present and every one survives the fold.
+    ///
+    /// [`Key::classify`] is the whole discriminant, so this holds for any core
+    /// without the spine learning what a token means (I5).
+    fn present(lines: Vec<Line<C::Record>>) -> Vec<Line<C::Record>> {
+        let (mut named, dated): (Vec<_>, Vec<_>) = lines
+            .into_iter()
+            .partition(|line| line.key.classify() == KeyShape::Name);
+        if let Some(latest) = dated
             .into_iter()
             .max_by(|a, b| a.key.as_str().cmp(b.key.as_str()))
+        {
+            named.push(latest);
+        }
+        named
     }
 
     /// `get` for a Series core (§7.2): the named series folded to its present.
@@ -290,10 +330,10 @@ impl<C: Core> Store<C> {
     ) -> Result<PresentLine<C::Record>> {
         let sref = self.locate(name, kind, at)?;
         let lines = self.read_series(&sref)?;
-        let line = Self::present(lines).ok_or_else(|| {
+        let line = Self::present(lines).pop().ok_or_else(|| {
             Error::not_found(format!(
                 "series {:?} at {} holds no readings yet (§7.3)",
-                sref.name,
+                sref.label(),
                 sref.home.as_str()
             ))
         })?;
@@ -306,7 +346,8 @@ impl<C: Core> Store<C> {
     }
 
     /// A subtree walk folded to the present (§7.1): every one of this core's series
-    /// under `at`, each at its latest key.
+    /// under `at`, each folded by the rule above — a date-keyed series to its latest
+    /// key, a name-keyed one to all of its records.
     pub fn fold(
         &self,
         at: Option<&Code>,
@@ -315,11 +356,11 @@ impl<C: Core> Store<C> {
         let mut out = Vec::new();
         for sref in self.find_series(at, kind, None)? {
             let lines = self.read_series(&sref)?;
-            if let Some(line) = Self::present(lines) {
+            for line in Self::present(lines) {
                 out.push(PresentLine {
-                    home: sref.home,
-                    kind: sref.kind,
-                    name: sref.name,
+                    home: sref.home.clone(),
+                    kind: sref.kind.clone(),
+                    name: sref.name.clone(),
                     line,
                 });
             }
@@ -332,7 +373,7 @@ impl<C: Core> Store<C> {
     /// Mint an empty series — the `-c` path (§7.3). A hand-named series is minted
     /// explicitly so a typo cannot conjure one.
     pub fn create_series(&self, home: &Code, kind: &str, name: &str) -> Result<SeriesRef> {
-        let path = self.series_path(home, kind, name)?;
+        let path = self.series_path(home, kind, Some(name))?;
         if path.exists() {
             return Err(Error::validation(format!(
                 "series {name:?} already exists at {} (§7.3)",
@@ -346,8 +387,18 @@ impl<C: Core> Store<C> {
         Ok(SeriesRef {
             home: home.clone(),
             kind: kind.to_string(),
-            name: name.to_string(),
+            name: Some(name.to_string()),
             path,
+        })
+    }
+
+    /// Whether this core files `kind` under a hand-chosen name (§7.1). The first read
+    /// of the `named` bit anywhere: it is what decides whether a missing series file
+    /// is a not-found the hand must answer with `-c`, or one the write mints itself.
+    fn series_is_named(kind: &str) -> Option<bool> {
+        C::kinds().iter().find_map(|(token, shape)| match shape {
+            Shape::Series { named } if *token == kind => Some(*named),
+            _ => None,
         })
     }
 
@@ -356,11 +407,29 @@ impl<C: Core> Store<C> {
     /// carried through verbatim.
     pub fn write_line(&self, sref: &SeriesRef, line: &Line<C::Record>) -> Result<()> {
         if !sref.path.exists() {
-            return Err(Error::not_found(format!(
-                "no series {:?} at {} — mint it with -c (§7.3)",
-                sref.name,
-                sref.home.as_str()
-            )));
+            // A hand-named series is minted explicitly, so a typo cannot conjure one
+            // (§7.3, §18). A determined-name series has nothing to mistype and is
+            // minted by its determinant — for Pensum's nameless `task`, the node's
+            // first task, which is this write.
+            //
+            // Step 7 note: Rationes' `balance` is determined by a *holding entity*,
+            // not by the node, so `rat` must check that determinant exists in its own
+            // bin before writing. The store cannot know — it links no core (I5).
+            if Self::series_is_named(&sref.kind) != Some(false) {
+                return Err(Error::not_found(format!(
+                    "no series {:?} at {} — mint it with -c (§7.3)",
+                    sref.label(),
+                    sref.home.as_str()
+                )));
+            }
+            // The mint rides *inside* the write's own lock rather than preceding it:
+            // `open_for_lock` creates, and the inode re-check retries a writer whose
+            // file was renamed underneath (§6.4). Minting first would be a second,
+            // unsynchronized write — two hands filing a node's first task at once
+            // would each truncate the file the other had just filled.
+            if let Some(parent) = sref.path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
         }
         let encoded = serde_json::to_string(line)?;
         let key = line.key.clone();
@@ -394,7 +463,7 @@ impl<C: Core> Store<C> {
         if !sref.path.exists() {
             return Err(Error::not_found(format!(
                 "no series {:?} at {} (§7.3)",
-                sref.name,
+                sref.label(),
                 sref.home.as_str()
             )));
         }
@@ -422,7 +491,7 @@ impl<C: Core> Store<C> {
         } else {
             Err(Error::not_found(format!(
                 "no line keyed {key} in series {:?} at {} (§7.3)",
-                sref.name,
+                sref.label(),
                 sref.home.as_str()
             )))
         }
@@ -439,7 +508,7 @@ impl<C: Core> Store<C> {
         to_home: &Code,
         to_name: &str,
     ) -> Result<SeriesRef> {
-        let path = self.series_path(to_home, &sref.kind, to_name)?;
+        let path = self.series_path(to_home, &sref.kind, Some(to_name))?;
         if path == sref.path {
             return Ok(sref.clone());
         }
@@ -457,9 +526,190 @@ impl<C: Core> Store<C> {
         Ok(SeriesRef {
             home: to_home.clone(),
             kind: sref.kind.clone(),
-            name: to_name.to_string(),
+            name: Some(to_name.to_string()),
             path,
         })
+    }
+
+    // ── reaching a line by its key (§5.4) ───────────────────────────────────────
+
+    /// Every one of this core's lines keyed `key`, with the series each sits in.
+    ///
+    /// **The one lookup that opens record files** rather than resting on their names
+    /// (§5.0): a name-keyed line's identity is inside its series, so finding it walks
+    /// this core's series in scope and scans their keys. The naming triple isolates
+    /// the walk to the small text, and bulk is never opened (§6.3).
+    pub fn find_line(
+        &self,
+        key: &Key,
+        kind: Option<&str>,
+        at: Option<&Code>,
+    ) -> Result<Vec<(SeriesRef, Line<C::Record>)>> {
+        let mut out = Vec::new();
+        for sref in self.find_series(at, kind, None)? {
+            if let Some(line) = self
+                .read_series(&sref)?
+                .into_iter()
+                .find(|line| line.key == *key)
+            {
+                out.push((sref, line));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Resolve a key to exactly one line (§7.3). Zero is not found (exit `4`); more
+    /// than one is listed with its candidate homes rather than guessed (exit `2`),
+    /// exactly as an ambiguous slug is — a key is unique **per core**, not per node,
+    /// so a lookup with no `-H` is deliberately tree-wide (§5.4).
+    pub fn locate_line(
+        &self,
+        key: &Key,
+        kind: Option<&str>,
+        at: Option<&Code>,
+    ) -> Result<(SeriesRef, Line<C::Record>)> {
+        let mut found = self.find_line(key, kind, at)?;
+        match found.len() {
+            0 => Err(Error::not_found(format!(
+                "no {} record keyed {key} (§7.3)",
+                C::NAME
+            ))),
+            1 => Ok(found.pop().expect("one candidate")),
+            _ => Err(Error::usage(format!(
+                "{key} keys a record at more than one node: {} — name one with -H (§7.3)",
+                found
+                    .iter()
+                    .map(|(s, _)| s.home.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
+    }
+
+    /// This core's lines keyed `key` at some node *other* than `home` — the soft half
+    /// of §5.4's per-core uniqueness. Finding these costs a walk, which is the cost
+    /// the softness exists to avoid paying on every write, so `add` warns and the fix
+    /// is made at the source (§18).
+    pub fn duplicate_keys_elsewhere(
+        &self,
+        home: &Code,
+        key: &Key,
+        kind: Option<&str>,
+    ) -> Result<Vec<SeriesRef>> {
+        Ok(self
+            .find_line(key, kind, None)?
+            .into_iter()
+            .map(|(sref, _)| sref)
+            .filter(|sref| sref.home.as_str() != home.as_str())
+            .collect())
+    }
+
+    /// Re-key one line in place — the primitive behind a name-keyed record's `rename`
+    /// (§7.2), and the counterpart of [`Store::relocate_series`] and
+    /// [`Store::relocate_entity`]. Where those are a file `mv`, this is a rewrite
+    /// *inside* a file: a task's identity is its key, and its key is a line's first
+    /// field rather than a filename (§5.4).
+    ///
+    /// **Call this before [`Cascade`](crate::Cascade)`::apply`, never after** — the
+    /// same ordering as a relocate, for the same reason. Refuses an occupied key
+    /// (exit `3`): the within-file half of the check `plan_cascade` makes tree-wide.
+    /// Untouched lines are carried through byte-for-byte.
+    pub fn rename_line(&self, sref: &SeriesRef, from: &Key, to: &Key) -> Result<()> {
+        if from == to {
+            return Ok(());
+        }
+        let (from, to) = (from.clone(), to.clone());
+        let mut found = false;
+        crate::lock::with_record_lock(&sref.path, |prev| {
+            let text = Self::as_text(prev)?;
+            let mut out = String::with_capacity(text.len());
+            for raw in text.lines() {
+                if raw.trim().is_empty() {
+                    continue;
+                }
+                let mut existing: RawLine = serde_json::from_str(raw)?;
+                if existing.key == to {
+                    return Err(Error::validation(format!(
+                        "{} already keys a record at {} — renaming onto it would make \
+                         the two indistinguishable (§7.2, §18)",
+                        to,
+                        sref.home.as_str()
+                    )));
+                }
+                if existing.key == from {
+                    found = true;
+                    existing.key = to.clone();
+                    out.push_str(&serde_json::to_string(&existing)?);
+                } else {
+                    out.push_str(raw);
+                }
+                out.push('\n');
+            }
+            Ok(out.into_bytes())
+        })?;
+        if found {
+            Ok(())
+        } else {
+            Err(Error::not_found(format!(
+                "no line keyed {from} in series {:?} at {} (§7.3)",
+                sref.label(),
+                sref.home.as_str()
+            )))
+        }
+    }
+
+    /// Re-home one line — the primitive behind a name-keyed record's `move` (§7.2).
+    ///
+    /// Unlike [`Store::relocate_series`] this is **not a file `mv`**: a task's home is
+    /// its node's series file, so re-homing the record moves a *line between two
+    /// files*. Two files means two record locks (§6.4) and no atomicity — `rename`'s
+    /// one-syscall guarantee is simply not available here. So the order is chosen by
+    /// what `pan validate` can say if a crash lands between them:
+    ///
+    /// - **Destination first** leaves the line at *both* nodes. That is the soft
+    ///   `duplicate_slug` finding §5.4 already models, naming both files — precisely
+    ///   the two a hand must look at — every ref still resolves, and the fix is
+    ///   finishing the move.
+    /// - **Source first** leaves it at *neither*, and §18 keeps no copy. Every ref
+    ///   becomes a dangling-ref *error* reported at the referring file, which cannot
+    ///   say where the record went.
+    ///
+    /// One order's crash is a state the lint already describes; the other's is loss
+    /// diagnosed at the wrong file. Destination first, source second.
+    pub fn move_line(&self, from: &SeriesRef, to_home: &Code, key: &Key) -> Result<SeriesRef> {
+        if from.home.as_str() == to_home.as_str() {
+            return Ok(from.clone());
+        }
+        let line = self
+            .read_series(from)?
+            .into_iter()
+            .find(|line| line.key == *key)
+            .ok_or_else(|| {
+                Error::not_found(format!(
+                    "no line keyed {key} in series {:?} at {} (§7.3)",
+                    from.label(),
+                    from.home.as_str()
+                ))
+            })?;
+
+        let dest = SeriesRef {
+            home: to_home.clone(),
+            kind: from.kind.clone(),
+            name: from.name.clone(),
+            path: self.series_path(to_home, &from.kind, from.name.as_deref())?,
+        };
+        // Refusing here rather than clobbering. The window between this check and the
+        // write is the one §6.4 already declines to close — only a tree-wide lock
+        // would, and §18 leaves nowhere to keep one.
+        if dest.path.exists() && self.read_series(&dest)?.iter().any(|line| line.key == *key) {
+            return Err(Error::validation(format!(
+                "{} already holds a record keyed {key} (§7.2)",
+                to_home.as_str()
+            )));
+        }
+        self.write_line(&dest, &line)?;
+        self.remove_line(from, key)?;
+        Ok(dest)
     }
 
     fn as_text(prev: Option<&[u8]>) -> Result<&str> {
