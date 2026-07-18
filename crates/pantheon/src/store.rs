@@ -428,6 +428,40 @@ impl<C: Core> Store<C> {
         }
     }
 
+    /// Move a series file to a new home, a new name, or both — the primitive behind
+    /// a hand-named series' `rename` and `move` (§7.2), and the exact counterpart of
+    /// [`Store::relocate_entity`]. A file `mv`; the lines are not touched.
+    ///
+    /// Refuses to land on an occupied path rather than clobber it (exit `3`).
+    pub fn relocate_series(
+        &self,
+        sref: &SeriesRef,
+        to_home: &Code,
+        to_name: &str,
+    ) -> Result<SeriesRef> {
+        let path = self.series_path(to_home, &sref.kind, to_name)?;
+        if path == sref.path {
+            return Ok(sref.clone());
+        }
+        if path.exists() {
+            return Err(Error::validation(format!(
+                "{} already holds a {:?} series named {to_name:?} (§7.2)",
+                to_home.as_str(),
+                sref.kind
+            )));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(&sref.path, &path)?;
+        Ok(SeriesRef {
+            home: to_home.clone(),
+            kind: sref.kind.clone(),
+            name: to_name.to_string(),
+            path,
+        })
+    }
+
     fn as_text(prev: Option<&[u8]>) -> Result<&str> {
         prev.map(std::str::from_utf8)
             .transpose()
