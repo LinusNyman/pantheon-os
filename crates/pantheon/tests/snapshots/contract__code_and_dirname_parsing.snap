@@ -1,0 +1,14 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: out
+---
+tokenize_compact:
+  a => [Alpha('a')]
+  csa => [Alpha('c'), Alpha('s'), Alpha('a')]
+  asdl01 => [Alpha('a'), Alpha('s'), Alpha('d'), Alpha('l'), Numeric("01")]
+  asdl0103 => [Alpha('a'), Alpha('s'), Alpha('d'), Alpha('l'), Numeric("01"), Numeric("03")]
+parse_node_dirname:
+  a_actio => code=a form=triple char=Some("a") label=actio
+  cs_a_amicitia => code=csa form=triple char=Some("a") label=amicitia
+  csa_john_appleseed_ => code=csa_john_appleseed form=definition_prefix char=None label=john_appleseed
+  csa_x_thing => code=csax form=triple char=Some("x") label=thing

@@ -1,0 +1,31 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: "pretty(&serde_json::to_value(&schema).unwrap())"
+---
+{
+  "format_version": 1,
+  "name": "album",
+  "record": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+      "away": {
+        "description": "Away periods, accumulated in the record (I1).",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "away"
+    ],
+    "title": "Person",
+    "type": "object"
+  },
+  "tokens": [
+    {
+      "shape": "partitioned",
+      "token": "person"
+    }
+  ]
+}

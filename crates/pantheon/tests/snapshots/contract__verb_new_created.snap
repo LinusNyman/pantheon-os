@@ -1,0 +1,16 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: "pretty(&json!({ \"created\": [node] }))"
+---
+{
+  "created": [
+    {
+      "char": "a",
+      "code": "a",
+      "form": "triple",
+      "label": "actio",
+      "parent": "root",
+      "path": "a_actio"
+    }
+  ]
+}

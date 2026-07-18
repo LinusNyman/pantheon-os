@@ -1,0 +1,30 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: out
+---
+csa__  (dir=true)
+  => MetaDir { code: Code("csa") }
+csa__.toml  (dir=false)
+  => Annotation { code: Code("csa") }
+csa__person__alex.json  (dir=false)
+  => Partitioned { code: Code("csa"), kind: "person", slug: "alex" }
+csa_john_appleseed__person.json  (dir=false)
+  => EntityNode { code: Code("csa_john_appleseed"), kind: "person" }
+cso__log__meetings.jsonl  (dir=false)
+  => NamedSeries { code: Code("cso"), kind: "log", name: "meetings" }
+cso__task.jsonl  (dir=false)
+  => DeterminedSeries { code: Code("cso"), kind: "task" }
+csa_doctors_appointment.md  (dir=false)
+  => Document { code: Code("csa"), slug: "doctors_appointment", ext: Md }
+csa__function__balance_check  (dir=false)
+  => Rule { code: Code("csa"), name: "balance_check" }
+csa__function__deploy.sh  (dir=false)
+  => Rule { code: Code("csa"), name: "deploy" }
+csa_x_thing  (dir=true)
+  => NodeDir { name: NodeName { code: Code("csax"), form: Triple, ch: Some(Alpha('x')), label: "thing" } }
+csa_john_appleseed_  (dir=true)
+  => NodeDir { name: NodeName { code: Code("csa_john_appleseed"), form: DefinitionPrefix, ch: None, label: "john_appleseed" } }
+photo.png  (dir=false)
+  => Bulk
+stray_note.txt  (dir=false)
+  => Unclassifiable { reason: "document \"stray_note.txt\" does not carry its node's `csa_` prefix" }

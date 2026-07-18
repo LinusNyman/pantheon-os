@@ -1,0 +1,25 @@
+[package]
+name = "pan"
+version = "0.1.0"
+description = "The PantheonOS structural CLI — codes, files, refs, node annotations over the spine (§5.5)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The `pan` bin, named by its three-char short (§14). A separate crate from the
+# spine so pantheon stays lib-only and UI-free: pan's TUI (§10) will ride a `tui`
+# feature here at step 6, never inside pantheon (porticus → pantheon, I5/§14).
+[[bin]]
+name = "pan"
+path = "src/main.rs"
+
+[dependencies]
+pantheon.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -1132,11 +1132,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "pantheon"
+name = "pan"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "insta",
+ "pantheon",
+ "serde_json",
+]
+
+[[package]]
+name = "pantheon"
+version = "0.1.0"
+dependencies = [
  "fd-lock",
  "insta",
  "jiff",

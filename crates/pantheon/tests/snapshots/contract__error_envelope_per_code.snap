@@ -1,0 +1,9 @@
+---
+source: crates/pantheon/tests/contract.rs
+expression: out
+---
+exit 1 => {"error":{"code":1,"msg":"io failed"}}
+exit 2 => {"error":{"code":2,"msg":"bad flag"}}
+exit 3 => {"error":{"code":3,"msg":"slug collision"}}
+exit 4 => {"error":{"code":4,"msg":"no such node"}}
+exit 6 => {"error":{"code":6,"msg":"under a rule"}}
