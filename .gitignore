@@ -9,8 +9,7 @@ target/
 # Private design docs — kept local, out of the repo (spec sources only)
 /docs/src/*-SPEC.md
 
-# AI assistant / local agent files
-CLAUDE.md
+# AI assistant / local agent files (CLAUDE.md is tracked — repo build guide)
 CLAUDE.local.md
 AGENTS.md
 .claude/
