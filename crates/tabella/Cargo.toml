@@ -22,7 +22,6 @@ clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-gray_matter.workspace = true
 porticus = { workspace = true, optional = true }
 tessera = { workspace = true, optional = true }
 

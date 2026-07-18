@@ -10,9 +10,9 @@ repository.workspace = true
 
 [dependencies]
 # Porticus depends on Pantheon only (I5) — hub-and-spoke, never sideways.
+# It owns the backend and the terminal (§11.1), so it takes ratatui whole and
+# reaches crossterm through the `ratatui::crossterm` re-export, never directly.
 pantheon.workspace = true
 ratatui.workspace = true
-crossterm.workspace = true
-figlet-rs.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true

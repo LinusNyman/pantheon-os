@@ -19,13 +19,16 @@ path = "src/main.rs"
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
+# Every TOML surface is toml_edit's, frontmatter included: the `+++` fence is
+# found by scanning, so no frontmatter crate brings a second parser in (§6.6, §13).
 toml_edit.workspace = true
-gray_matter.workspace = true
-ignore.workspace = true
+walkdir.workspace = true
 fd-lock.workspace = true
 jiff.workspace = true
+unicode-normalization.workspace = true
+shell-words.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
-etcetera.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 

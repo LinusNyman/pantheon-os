@@ -1,7 +1,7 @@
 [package]
 name = "tessera"
 version = "0.1.0"
-description = "Tessera — small droppable tiles that compute derived values from readings and draw via Porticus."
+description = "Tessera — small droppable tiles that compute derived values from readings and draw into a caller-supplied ratatui Buffer."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -10,6 +10,8 @@ repository.workspace = true
 
 [dependencies]
 # Peer of Porticus under the UI layer; depends on Pantheon only for data (I5).
+# A tile draws into a caller-supplied `Buffer` and owns no backend, so it takes
+# ratatui-core, not ratatui — upstream's own rule for widget libraries (§11.2, §13).
 pantheon.workspace = true
-ratatui.workspace = true
+ratatui-core.workspace = true
 serde_json.workspace = true

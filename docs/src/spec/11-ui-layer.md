@@ -1,0 +1,17 @@
+## 11. Porticus & Tessera — the UI layer
+
+Two peer packages under the UI layer — `porticus` over `pantheon` + `ratatui`, `tessera` over `pantheon` + `ratatui-core` (§13) — **neither depends on the other** (I5). A tile draws into a caller-supplied ratatui `Buffer` and takes its theme the same way, so it needs no Porticus; Porticus names no `Tile` and hosts none, the mosaic that arranges them being the lens's own draw-view (§11.2, §12). Porticus has grown its own design surface and now carries a sibling spec, whose own sections this document cites as `P§n`; Tessera stays inline until its tile catalog grows the same way.
+
+### 11.1 Porticus — the chrome
+
+A library over `ratatui` (its `crossterm` re-export included, never a direct dependency — §13): the app shell, the shared keymap, a catalog of views (tree-file, calendar, insights, raw-file) and the overlays that stack above them (title, help, `/` search, confirm), terminal setup/teardown (a `Drop` guard, so a panic that unwinds never leaves the terminal in raw mode), and the theme. Every TUI in the suite — the seven cores, the three lenses, and the two system tools (`pan` §10, `aus` §9.6) — is a Porticus app, so there is one look and one muscle-memory keymap across all twelve.
+
+Porticus owns the runtime and the global keymap; an instrument is a thin provider of its identity, its views, its per-node count (its own items at a node — Pensum's todos there, Album's contacts), its writer, and the action→invocation mapping. The constraints it must honour are the invariants, referenced not redefined: derived-out render (I1), no originated write (I2, §12 — the instrument supplies the core verb, Porticus the confirm), a node rendering identically in every instrument (I3, I8), the JSON boundary (I4), hub-and-spoke linkage (I5), no config or rebindable keys (§18), and a reserved universal keymap in which `?` is always help and `+` always title. A core links Porticus behind its default `tui` feature and drops it for a headless build (§14).
+
+**Design lives in `PORTICUS-SPEC.md`** — the app/view model, the view catalog and per-instrument lineup, the keymap tiers, the `Ident`/theme split (shared palette vs. accent on name and focus), the figlet banner, and the instrument registry (symbol, accent, tagline, lead view). A package spec may *reference* an invariant; it never redefines one.
+
+### 11.2 Tessera — the tiles
+
+Small droppable widgets that **fold core JSON into a present and draw it small** — a counter, a GPA, net worth, the local time where a friend lives, the week of your life and the day in it (from `fasti:vita`, the one slug a tile knows by name). A tile reads whatever cores it finds on `PATH` (I4, §12), stores nothing, and recomputes from the latest readings on each data refresh (I1, §5.0), drawing into the caller's `Buffer`.
+
+It is the only *package* that may fold **across** cores: Porticus fetches nothing, taking everything as JSON already read, and no core reads another (I5, §8.4) — so a friend's clock (Album → an open Fasti residence span → Mappa's `timezone`, §8.2–§8.4) and any present the three lenses share are folded here once rather than three times. Lenses arrange tiles into a **mosaic**, the lens's own draw-view, since a grid of tiles is nothing Porticus can host without importing Tessera (§12). A core may drop in a tile over its own readings, linking `tessera` beside `porticus` behind its `tui` feature (§4, §14) — never one that reaches another core, which is a lens's alone to do (I5, §12).

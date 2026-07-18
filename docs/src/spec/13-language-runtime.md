@@ -1,0 +1,36 @@
+## 13. Language & runtime
+
+**Rust, 2024 edition** — MSRV **1.88**, pinned in `rust-toolchain.toml` (§14): the edition alone wants 1.85, `ratatui` 0.30 sets the real floor. The type system carries the invariants as far as types reach: a reading and a fold are distinct types (I1), and a core's `Record` is an enum over its tokens (§7.1), so a variant the core never declared cannot be built in code. It reaches no further: a token's *legality* is a runtime check against the `kinds()` slice, and a file's shape is checked when it is deserialized, never at compile time (exit `3`, §7.3). What the compiler guarantees is that no hand-written Rust originates an illegal record; what keeps *disk* honest is the owning core's `validate` on write (§6.4), its deserialize on the next read, and `pan validate` on demand (§5.5). `serde` owns the JSON contract (I4).
+
+Versions live in the workspace manifest (§14); one appears here only where it carries a design consequence — `ratatui` 0.30, whose `ratatui-core` split is what lets Tessera and Porticus be peers on disk and not only in the diagram, and whose 1.88 floor sets the MSRV above the edition's.
+
+| Concern | Crate | Note |
+|---|---|---|
+| TUI + input | `ratatui` (0.30.x) | Porticus links it whole — it owns the backend and the terminal (§11.1). `crossterm` arrives through the `ratatui::crossterm` re-export, never as a direct dependency, so the backend and the version an app types against cannot drift |
+| Tiles | `ratatui-core` | Tessera draws into a caller-supplied `Buffer` and owns no backend (§11.2); upstream's own rule is that widget libraries take `ratatui-core` and applications take `ratatui`. Both resolve to one `ratatui-core`, so a tile's `Buffer` *is* the chrome's |
+| CLI | `clap` (derive) | all twelve bins (§4). The implicit `add` (§7.3) is not a clap feature — there is no default subcommand — so each **core** bin pre-passes argv by §7.3's ambiguity rule: verbs are a closed reserved set and win, anything else is `add`'s. `pan`, `aus`, and the lenses have no implicit verb and need no pre-pass — `add` is a core's default, not every bin's (§7.3) |
+| Serialization | `serde` + `serde_json` | `.json` entities and `.jsonl` series — the contract |
+| JSON Schema | `schemars` | derives the `schema` verb (§7.2) from record types |
+| TOML | `toml_edit` | *every* TOML surface — node annotations and document frontmatter alike (§6.6) — format-preserving, so a rewrite by code or LLM keeps comments and ordering (I8) |
+| Name normalization | `unicode-normalization` | NFC for typed tokens, composed *after* std's `to_lowercase`, in the order §5.1 states them; the keep-set is std's `char::is_alphanumeric` |
+| Tree walk | `walkdir` | resolution and folds (§5.0, §6.3); visits only node dirs and their meta dirs |
+| File locks | `fd-lock` | one advisory lock per record file (§6.4); cross-platform |
+| Plan tokens | `sha2` | hashes the computed change for `--dry-run` / `--plan` (§7.3) |
+| Editor launch | `shell-words` | splits `$VISUAL`/`$EDITOR` into argv so `code -w` works (§7.3); the child is spawned directly, never through `sh -c` |
+| Time / keys | `jiff` | dates, timestamps, `YYMMDD` keys; it carries the tz database a friend's local clock needs (§8.2, §11.2) |
+| Errors | `thiserror` (libs) + `anyhow` (bins) | §7.3's exit codes are contract, so a bin maps a typed error to its code and to `{"error":{"code":…,"msg":…}}` at the edge — never `anyhow`'s prose |
+| Tests | `insta` + `cargo-nextest` | snapshot the JSON contract |
+
+**The plan token needs a named hash.** `--dry-run` prints it in one process and `-y --plan` re-checks it in another, possibly a differently-versioned binary (§7.3, §15.5) — so std's `DefaultHasher`, documented as unstable across Rust releases, cannot carry it. `sha2` over the canonical JSON of the computed change hashes the same wherever it is recomputed.
+
+**The walk is `walkdir`, not `ignore`, and it needs no ignore rules.** What must never be descended into — a git checkout at a project node, a `node_modules`, a photo library — is already excluded *by name*: the walk visits node dirs and their meta dirs only (§5.0, §6.3), and bulk (§6.5) carries no node name, so it is never opened. That filter is the naming triple's (§5.1) and it is total — nothing need be listed as ignorable, and a new kind of bulk is skipped the day it lands, having never been named a node. That totality is the **fold's**, and it is exactly why `pan validate` does not share it: a directory that has stopped being a legal node — the orphan a crashed rename leaves (§10.2) — is excluded by the same rule that excludes a photo library, so the one walk that must see it descends past the filter instead of trusting it. `ignore` adds only a way to break it: it honours `.gitignore` by default and reads ignore files from *parent* directories, so a `.gitignore` sitting above `$PANTHEON_ROOT` could silently decide which of your records a fold sees — a file outside the tree governing the tree, against §18. What remains of its draw is a parallel walker the personal scale of §5.0 never asked for.
+
+**Frontmatter needs no parser of its own.** A document's `+++` fence is found by scanning for it, and the TOML between is `toml_edit`'s like every other TOML in the system (§6.6): one fence, one parser, one format-preserving path. A frontmatter crate would buy delimiter configuration and engine dispatch the spec has already spent — `+++` is fixed (§6.6) and YAML is a non-goal (§18) — at the price of a second, non-preserving TOML parser under a rule that says there is one (I8).
+
+**The keep-set is a property, not a category.** §5.1 keeps Unicode alphabetic-or-numeric and states why; what it costs here is nothing — that is exactly what std's `char::is_alphanumeric` tests, so no regex crate is needed. The property is Unicode's `Alphabetic` (letters + `Nl` + `Other_Alphabetic`), which is what reaches the `Mn`/`Mc` combining marks §5.1's reason turns on. `å ä ö` are unaffected either way; NFC is what makes their composed and decomposed spellings compare equal (§5.1).
+
+**What deliberately has no crate.** The TTY rule that decides table-versus-JSON everywhere (§7.3) is std's `IsTerminal`. The detached `aus run` hook (§9.4) is std's `Command` with `process_group(0)` on Unix and the `DETACHED_PROCESS` creation flag on Windows. Both are std calls behind a crate-shaped temptation.
+
+Auspex additionally needs `tracing`, and its output is **stderr only**: inherited when a hand runs `aus run` or `aus plan`, discarded when a core spawns the hook detached (§9.4). It is never a file — a log the engine kept would be the rule state and the audit sink §18 forbids. There is no cache dir (§9.4, §18) and **no default root to resolve**: `$PANTHEON_ROOT` is named or the command is a usage error (§6.2), so the cross-platform home-finding a default would need — `etcetera`'s job, and the row it used to hold here — is a crate the decision spends rather than buys. There is no filesystem watcher and no daemon (§9.4).
+
+A crate earns a row by carrying a decision above; the rest are added when the need arises rather than declared ahead of it — `figlet-rs` for Porticus's banner is `PORTICUS-SPEC.md`'s to name when the chrome is built (§11.1).
