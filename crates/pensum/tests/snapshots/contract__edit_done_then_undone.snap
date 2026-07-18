@@ -1,0 +1,26 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 185
+expression: out
+---
+done:   {
+  "core": "pensum",
+  "data": {
+    "done": "260719",
+    "note": "the 2% one"
+  },
+  "home": "acm",
+  "key": "buy_milk",
+  "kind": "task",
+  "refs": []
+}
+undone: {
+  "core": "pensum",
+  "data": {
+    "note": "the 2% one"
+  },
+  "home": "acm",
+  "key": "buy_milk",
+  "kind": "task",
+  "refs": []
+}

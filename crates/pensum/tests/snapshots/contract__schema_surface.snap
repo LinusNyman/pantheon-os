@@ -1,0 +1,38 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 126
+expression: pretty(&value)
+---
+{
+  "format_version": 1,
+  "name": "pensum",
+  "record": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "One task — the `data` half of a series line (§5.4).\n\nThe task's key (its name) and its `refs` ride in the envelope, and its home,\ncore, and kind are the file's location and name (I3), so none of them is stored\nhere. What is left is the two things a hand actually says about a task: whether\nit is done, and anything it wanted to write past the name.\n\nThere is deliberately **no due date**. Placement is Fasti's tense, not Pensum's\n(§2, §8.4) — a deadline is a Fasti `event` referencing `pensum:<key>`, which is\nan edge like every other (I9). A due field here would be the first half of a\nscheduler, and §18 forbids the second.",
+    "properties": {
+      "done": {
+        "description": "The date the doing was done (`YYMMDD`), absent while it is still intended.\n\nA date rather than a flag, because \"done\" is a thing that happened on a day\nand the record may as well say which. Marking it is an ordinary `edit`: the\nline is rewritten in place, never stacked with a second (I1, §6.1).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "note": {
+        "description": "What a hand typed past the task's name — the editor form's buffer (§7.3).",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "Task",
+    "type": "object"
+  },
+  "tokens": [
+    {
+      "named": false,
+      "shape": "series",
+      "token": "task"
+    }
+  ]
+}

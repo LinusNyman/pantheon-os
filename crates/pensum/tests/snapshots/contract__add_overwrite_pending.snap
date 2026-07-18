@@ -1,0 +1,34 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 157
+expression: pretty(&redact(pending))
+---
+{
+  "change": {
+    "after": {
+      "core": "pensum",
+      "data": {
+        "note": "the 2% one"
+      },
+      "home": "acm",
+      "key": "buy_milk",
+      "kind": "task",
+      "refs": []
+    },
+    "before": {
+      "core": "pensum",
+      "data": {},
+      "home": "acm",
+      "key": "buy_milk",
+      "kind": "task",
+      "refs": []
+    },
+    "core": "pensum",
+    "home": "acm",
+    "key": "buy_milk",
+    "kind": "task",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

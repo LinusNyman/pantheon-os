@@ -1,0 +1,25 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 169
+expression: pretty(&redact(value))
+---
+{
+  "change": {
+    "after": {
+      "core": "pensum",
+      "data": {},
+      "home": "acm",
+      "key": "reach_out_to_alex",
+      "kind": "task",
+      "refs": []
+    },
+    "before": null,
+    "core": "pensum",
+    "home": "acm",
+    "key": "reach_out_to_alex",
+    "kind": "task",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

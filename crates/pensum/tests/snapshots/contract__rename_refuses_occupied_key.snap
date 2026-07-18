@@ -1,0 +1,7 @@
+---
+source: crates/pensum/tests/contract.rs
+assertion_line: 221
+expression: out
+---
+onto call_alex => exit 3: {"error":{"code":3,"msg":"pensum:call_alex already names a record at acm — renaming onto it would make the two indistinguishable, and there is no history to tell them apart again (§7.2, §18)"}}
+onto email_alex => exit 3: {"error":{"code":3,"msg":"pensum:email_alex already names a record at ao — renaming onto it would make the two indistinguishable, and there is no history to tell them apart again (§7.2, §18)"}}
