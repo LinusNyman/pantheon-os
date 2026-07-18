@@ -441,9 +441,13 @@ fn records_resolve_through_pan() {
     let alb_bin = PathBuf::from(env!("CARGO_BIN_EXE_alb"));
     let bin_dir = alb_bin.parent().unwrap();
     let pan_bin = bin_dir.join("pan");
+    // Cargo builds `alb` for this test (CARGO_BIN_EXE_alb) but not `pan`, which
+    // belongs to another crate — so the workspace bins must be built first. CI does
+    // that in the `nextest + insta` job; locally, `cargo build --workspace --bins`.
+    // Failing loudly beats skipping: a gate that quietly passes is not a gate.
     assert!(
         pan_bin.exists(),
-        "this gate needs `pan` built beside `alb`: run `cargo build --workspace` \
+        "this gate needs `pan` built beside `alb`: run `cargo build --workspace --bins` \
          (looked in {})",
         bin_dir.display()
     );
