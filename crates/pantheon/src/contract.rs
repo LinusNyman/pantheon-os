@@ -604,19 +604,7 @@ pub fn resolve_entity_target<C: Core>(
     let &EntityQuery {
         kind, home, pwd, ..
     } = query;
-    let mut home = home.map(Code::parse).transpose()?;
-    let mut rest = query.positionals;
-
-    // A lone leading token is a home only if it names one *and* something follows it
-    // to be the name; `-H` is how you force the home reading of a single token.
-    if home.is_none()
-        && let Some((first, tail)) = rest.split_first()
-        && !tail.is_empty()
-        && let Some(code) = as_node_code(store.root(), first)
-    {
-        home = Some(code);
-        rest = tail;
-    }
+    let (home, rest) = peel_home(store, home, query.positionals)?;
 
     let slug = match rest {
         [] => {
@@ -642,6 +630,107 @@ pub fn resolve_entity_target<C: Core>(
         home,
         kind: kind.to_string(),
         slug,
+        existing,
+    })
+}
+
+/// Peel an optional leading home token off the positionals (§7.3). A lone leading
+/// token is classified deterministically: it names a node in the tree → home;
+/// otherwise it stays where it is, to be read as the record's own name.
+///
+/// The token is a home only if something **follows** it to be that name — `alb csa`
+/// files a person called `csa`, it does not address the node with the name missing.
+/// A stated `-H` short-circuits the probe entirely, which is the escape hatch for a
+/// name that happens to spell a node code.
+fn peel_home<'a, C: Core>(
+    store: &Store<C>,
+    stated: Option<&str>,
+    positionals: &'a [String],
+) -> Result<(Option<Code>, &'a [String])> {
+    if let Some(stated) = stated {
+        return Ok((Some(Code::parse(stated)?), positionals));
+    }
+    if let Some((first, tail)) = positionals.split_first()
+        && !tail.is_empty()
+        && let Some(code) = as_node_code(store.root(), first)
+    {
+        return Ok((Some(code), tail));
+    }
+    Ok((None, positionals))
+}
+
+// ── the keyed target: a home, a record's own name, and what follows it ───────
+
+/// A resolved keyed-line target: which record, at which node, and the positionals
+/// left over once the home and the key were consumed.
+pub struct RegisterTarget {
+    pub home: Code,
+    pub kind: String,
+    /// The record's identity — the name a hand gave, normalized to its slug (§5.4).
+    pub key: Key,
+    pub values: Vec<String>,
+    /// The node's determined series, if it exists yet — `None` at a node whose first
+    /// task this is (§7.3, §8.5).
+    pub existing: Option<SeriesRef>,
+}
+
+/// What a determined-series write knows before the tree is walked (§7.3).
+///
+/// Deliberately neither a [`TargetQuery`] nor an [`EntityQuery`]. A series verb
+/// infers a *container* that must already exist and a partitioned `add` **is** the
+/// record it creates; this third form has no container to name — the node implies it
+/// — and the record it creates is a *line inside* one, minted by that same write
+/// where the file is not there yet (§8.5, §18).
+pub struct RegisterQuery<'a> {
+    /// Which of the core's tokens is meant — for a write, exactly one (§7.2).
+    pub kind: &'a str,
+    /// `-H`, if given.
+    pub home: Option<&'a str>,
+    /// The leading positionals, still unclassified.
+    pub positionals: &'a [String],
+    /// The locus; `None` reads the process's working directory (§7.3).
+    pub pwd: Option<&'a Path>,
+}
+
+/// Read `[home] <name> [value…]` into a keyed address (§7.3).
+///
+/// With no series name to type, §7.3's four inference forms have nowhere to put a
+/// collection token and collapse to this one. What is left is `[home] <name>` — the
+/// grammar [`resolve_entity_target`] reads — followed by whatever the verb takes,
+/// which is what stops this being total on arity the way that one is: at two tokens
+/// `pen acm reach_out_to_alex` and `pen reach_out_to_alex "call re: contract"` are
+/// the same shape. §7.3's own rule decides between them, and `-H` forces either
+/// reading — the probe never runs when a home is stated.
+pub fn resolve_register_target<C: Core>(
+    store: &Store<C>,
+    query: &RegisterQuery<'_>,
+) -> Result<RegisterTarget> {
+    let &RegisterQuery { kind, pwd, .. } = query;
+    let (home, rest) = peel_home(store, query.home, query.positionals)?;
+    let Some((first, values)) = rest.split_first() else {
+        return Err(Error::usage(format!("name the {} record (§7.3)", C::NAME)));
+    };
+    let key = Key::parse(first)?;
+    let home = match home {
+        Some(home) => home,
+        None => code_at_path(store.root(), pwd)?,
+    };
+    // The node's own series, which the write mints if this is its first record.
+    // Nothing to search for: a nameless series' location is settled by its home and
+    // its token, so this is one `exists` and not the subtree walk `find_series` would
+    // make — which would reach *past* this node and answer with a child's file.
+    let path = store.series_path(&home, kind, None)?;
+    let existing = path.exists().then(|| SeriesRef {
+        home: home.clone(),
+        kind: kind.to_string(),
+        name: None,
+        path,
+    });
+    Ok(RegisterTarget {
+        home,
+        kind: kind.to_string(),
+        key,
+        values: values.to_vec(),
         existing,
     })
 }

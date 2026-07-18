@@ -1313,3 +1313,75 @@ fn moving_onto_an_occupied_key_is_refused_rather_than_clobbering() {
     assert_eq!(store.read_series(&dest).unwrap().len(), 2);
     drop(root);
 }
+
+#[test]
+fn the_keyed_target_probes_its_leading_token_for_a_node_code() {
+    let (root, store) = tasked_root();
+    let elsewhere = root.join("cs_something_else");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+
+    let resolve = |positionals: &[&str], home: Option<&str>| {
+        let owned: Vec<String> = positionals.iter().map(|s| (*s).to_string()).collect();
+        pantheon::contract::resolve_register_target(
+            &store,
+            &pantheon::RegisterQuery {
+                kind: "task",
+                home,
+                positionals: &owned,
+                // A locus that is not one of the codes under test, so an accidental
+                // fallback cannot be mistaken for a correct probe.
+                pwd: Some(
+                    root.join("c_contextus/c_s_societas/cs_o_officium")
+                        .as_path(),
+                ),
+            },
+        )
+    };
+
+    // `csa` is a code and something follows it: home, then key.
+    let t = resolve(&["csa", "reach_out_to_alex"], None).unwrap();
+    assert_eq!(t.home.as_str(), "csa");
+    assert_eq!(t.key.as_str(), "reach_out_to_alex");
+    assert!(t.values.is_empty());
+    assert!(t.existing.is_some(), "csa already holds a task series");
+
+    // Not a code: key, then the trailing value stream. Home falls to the locus.
+    let t = resolve(&["reach_out_to_alex", "call re: the contract"], None).unwrap();
+    assert_eq!(t.home.as_str(), "cso");
+    assert_eq!(t.key.as_str(), "reach_out_to_alex");
+    assert_eq!(t.values, ["call re: the contract"]);
+
+    // Three tokens are unambiguous.
+    let t = resolve(&["csa", "reach_out_to_alex", "text"], None).unwrap();
+    assert_eq!(
+        (t.home.as_str(), t.key.as_str()),
+        ("csa", "reach_out_to_alex")
+    );
+    assert_eq!(t.values, ["text"]);
+
+    // A lone token is the key — a home with the name missing addresses nothing.
+    let t = resolve(&["csa"], None).unwrap();
+    assert_eq!((t.home.as_str(), t.key.as_str()), ("cso", "csa"));
+
+    // `-H` short-circuits the probe, so a task really named `csa` is reachable.
+    let t = resolve(&["csa", "text"], Some("csa")).unwrap();
+    assert_eq!((t.home.as_str(), t.key.as_str()), ("csa", "csa"));
+    assert_eq!(t.values, ["text"]);
+
+    // A key is normalized on the way in, never hand-typed as a slug (§5.4).
+    let t = resolve(&["Reach Out To Alex"], None).unwrap();
+    assert_eq!(t.key.as_str(), "reach_out_to_alex");
+
+    // Naming nothing is a usage error.
+    assert!(matches!(
+        resolve(&[], None),
+        Err(e) if e.exit_code() == pantheon::ExitCode::Usage
+    ));
+
+    // At a node with no task file yet, the target resolves and `existing` is None —
+    // that is the write that mints it (§8.5).
+    let t = resolve(&["cs", "first_task"], None).unwrap();
+    assert_eq!(t.home.as_str(), "cs");
+    assert!(t.existing.is_none());
+    drop(elsewhere);
+}

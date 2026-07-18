@@ -48,7 +48,8 @@ pub use cascade::{Cascade, RefRewrite, plan_cascade};
 pub use classify::{DocExt, FileClass, classify};
 pub use code::{CharToken, Code, CodeForm, NodeName};
 pub use contract::{
-    Checkpoint, Edited, EntityQuery, EntityTarget, RecordChange, Response, SeriesTarget,
+    Checkpoint, Edited, EntityQuery, EntityTarget, RecordChange, RegisterQuery, RegisterTarget,
+    Response, SeriesTarget,
 };
 pub use core::{Core, CoreRegistry, DiscoveredCore};
 pub use envelope::{Entity, Frontmatter, Key, KeyShape, Line, RawEntity, RawLine, Ref};
