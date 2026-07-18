@@ -208,12 +208,17 @@ fn run(cli: &Cli) -> Result<RunOk> {
             "migrate",
             "a later step; no prior format version yet",
         )),
-        Cmd::MvFile { .. } => Err(not_implemented("mv-file", "step 3")),
-        Cmd::Mv { .. } => Err(not_implemented("mv", "step 3")),
-        Cmd::Rm { .. } => Err(not_implemented("rm", "step 3")),
-        Cmd::Rename { .. } => Err(not_implemented("rename", "step 3")),
-        Cmd::RenamePrefix { .. } => Err(not_implemented("rename-prefix", "step 3")),
-        Cmd::RenamePattern { .. } => Err(not_implemented("rename-pattern", "step 3")),
+        // Step 3 landed the *record*-level cascade (§5.4): renaming a record re-slugs
+        // it and rewrites the `core:slug` refs pointing at it. These six are the
+        // *node*-level one (§10.1), which is a different and larger job — a node's
+        // code is its path, so a rename rewrites every child directory name and file
+        // prefix under the branch, plus every rule header naming the code (§9.2).
+        Cmd::MvFile { .. } => Err(not_implemented("mv-file", NODE_CASCADE)),
+        Cmd::Mv { .. } => Err(not_implemented("mv", NODE_CASCADE)),
+        Cmd::Rm { .. } => Err(not_implemented("rm", NODE_CASCADE)),
+        Cmd::Rename { .. } => Err(not_implemented("rename", NODE_CASCADE)),
+        Cmd::RenamePrefix { .. } => Err(not_implemented("rename-prefix", NODE_CASCADE)),
+        Cmd::RenamePattern { .. } => Err(not_implemented("rename-pattern", NODE_CASCADE)),
     }
 }
 
@@ -360,6 +365,12 @@ fn confirm(plan_json: &Value) -> bool {
     let mut line = String::new();
     io::stdin().read_line(&mut line).is_ok() && matches!(line.trim(), "y" | "Y" | "yes")
 }
+
+/// What the six structural mutators are waiting on (§10.1). Named once, because a
+/// core's refusal points a hand at `pan rename --def` and `pan mv` — those are the
+/// permanently correct answers (§7.2), so the message they arrive at should say what
+/// is actually missing rather than a step number that has since gone by.
+const NODE_CASCADE: &str = "the node-level path cascade, §10.1";
 
 fn not_implemented(verb: &str, when: &str) -> Error {
     Error::runtime(format!("`pan {verb}` is not implemented yet ({when})"))

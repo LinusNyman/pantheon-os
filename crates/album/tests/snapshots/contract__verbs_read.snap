@@ -1,0 +1,105 @@
+---
+source: crates/album/tests/contract.rs
+expression: out
+---
+$ alb get mara
+{
+  "core": "album",
+  "data": {
+    "away": [
+      {
+        "from": "260601",
+        "to": "260615"
+      }
+    ],
+    "gender": "female"
+  },
+  "home": "csa",
+  "kind": "person",
+  "refs": [],
+  "slug": "mara"
+}
+
+$ alb get john_appleseed
+{
+  "core": "album",
+  "data": {},
+  "home": "csa_john_appleseed",
+  "kind": "person",
+  "refs": [],
+  "slug": "john_appleseed"
+}
+
+$ alb list
+[
+  {
+    "core": "album",
+    "data": {},
+    "home": "csa",
+    "kind": "group",
+    "refs": [],
+    "slug": "book_club"
+  },
+  {
+    "core": "album",
+    "data": {
+      "away": [
+        {
+          "from": "260601",
+          "to": "260615"
+        }
+      ],
+      "gender": "female"
+    },
+    "home": "csa",
+    "kind": "person",
+    "refs": [],
+    "slug": "mara"
+  },
+  {
+    "core": "album",
+    "data": {},
+    "home": "csa_john_appleseed",
+    "kind": "person",
+    "refs": [],
+    "slug": "john_appleseed"
+  },
+  {
+    "core": "album",
+    "data": {},
+    "home": "cso",
+    "kind": "organization",
+    "refs": [],
+    "slug": "dare_robotics"
+  }
+]
+
+$ alb list -k group
+[
+  {
+    "core": "album",
+    "data": {},
+    "home": "csa",
+    "kind": "group",
+    "refs": [],
+    "slug": "book_club"
+  }
+]
+
+$ alb where dare_robotics
+{
+  "core": "album",
+  "home": "cso",
+  "kind": "organization",
+  "path": "c_contextus/c_s_societas/cs_o_officium/cso__/cso__organization__dare_robotics.json",
+  "slug": "dare_robotics"
+}
+
+$ alb where john_appleseed
+{
+  "core": "album",
+  "home": "csa_john_appleseed",
+  "kind": "person",
+  "path": "c_contextus/c_s_societas/cs_a_amicitia/csa_john_appleseed_/csa_john_appleseed__/csa_john_appleseed__person.json",
+  "slug": "john_appleseed"
+}

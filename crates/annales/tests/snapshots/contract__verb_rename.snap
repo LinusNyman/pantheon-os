@@ -1,0 +1,22 @@
+---
+source: crates/annales/tests/contract.rs
+expression: pretty(&renamed)
+---
+{
+  "cascade": [
+    {
+      "path": "e_ego/e_c_corpus/ec_v_valetudo/ecv__/ecv__log__mood.jsonl",
+      "refs": 1
+    }
+  ],
+  "record": {
+    "core": "annales",
+    "home": "ecv",
+    "kind": "log",
+    "series": "weight"
+  },
+  "renamed": {
+    "from": "wieght",
+    "to": "weight"
+  }
+}

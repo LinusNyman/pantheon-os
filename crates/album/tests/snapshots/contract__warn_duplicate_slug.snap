@@ -1,0 +1,14 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&findings)
+---
+{
+  "findings": [
+    {
+      "code": "duplicate_slug",
+      "msg": "album:alex also names a record at csa — a ref meeting both lists them rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
+      "path": "c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__alex.json",
+      "severity": "warning"
+    }
+  ]
+}

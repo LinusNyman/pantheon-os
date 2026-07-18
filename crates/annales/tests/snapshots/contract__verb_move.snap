@@ -1,0 +1,16 @@
+---
+source: crates/annales/tests/contract.rs
+expression: pretty(&moved)
+---
+{
+  "moved": {
+    "from": "ecv",
+    "to": "ec"
+  },
+  "record": {
+    "core": "annales",
+    "home": "ec",
+    "kind": "log",
+    "series": "weight"
+  }
+}

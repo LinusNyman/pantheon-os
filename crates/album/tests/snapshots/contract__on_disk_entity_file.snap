@@ -1,0 +1,12 @@
+---
+source: crates/album/tests/contract.rs
+expression: raw.clone()
+---
+{
+  "refs": [
+    "album:book_club"
+  ],
+  "data": {
+    "closeness": "close"
+  }
+}

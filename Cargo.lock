@@ -20,6 +20,7 @@ dependencies = [
  "insta",
  "pantheon",
  "porticus",
+ "schemars",
  "serde",
  "serde_json",
  "tessera",

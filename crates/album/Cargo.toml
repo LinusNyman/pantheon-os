@@ -1,7 +1,7 @@
 [package]
 name = "album"
 version = "0.1.0"
-description = "Album — societas agents (who). A kind-partitioned register of people and organizations."
+description = "Album — societas agents (who). A partitioned register of the people, organizations, and groups you know."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -22,6 +22,7 @@ clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+schemars.workspace = true   # `Core::Record: JsonSchema` — the `schema` verb (§7.2)
 porticus = { workspace = true, optional = true }
 tessera = { workspace = true, optional = true }
 

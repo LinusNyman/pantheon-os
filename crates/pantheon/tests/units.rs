@@ -274,3 +274,461 @@ fn a_stale_plan_token_is_a_validation_error() {
     let err = plan.check_token("deadbeef").unwrap_err();
     assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
 }
+
+#[test]
+fn validate_reports_a_cross_node_duplicate_softly() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    for (code, dir) in [("csa", "csa"), ("cso", "cso")] {
+        write_record(
+            &root,
+            code,
+            &format!("{dir}__person__alex.json"),
+            r#"{"refs":[],"data":{}}"#,
+        );
+    }
+
+    let findings = validate(&root, &album_registry()).unwrap();
+    let dupes: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == FindingCode::DuplicateSlug)
+        .collect();
+    // Every file holding the name is named — the fix is made at the source (§5.4).
+    assert_eq!(dupes.len(), 2, "{findings:?}");
+    assert!(
+        dupes
+            .iter()
+            .all(|f| f.severity == pantheon::Severity::Warning)
+    );
+    assert!(dupes[0].msg.contains("album:alex"), "{:?}", dupes[0].msg);
+    // Soft: a warning is not a validation failure (§5.4, §18).
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.severity == pantheon::Severity::Error),
+        "a duplicate slug must never harden into an error: {findings:?}"
+    );
+
+    // One name at one node is not a duplicate, however many kinds the core has.
+    let clean = fresh_root();
+    mint(&clean, "root", triple("c", "contextus"));
+    mint(&clean, "c", triple("s", "societas"));
+    mint(&clean, "cs", triple("a", "amicitia"));
+    write_record(
+        &clean,
+        "csa",
+        "csa__person__alex.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    assert!(validate(&clean, &album_registry()).unwrap().is_empty());
+}
+
+#[test]
+fn a_change_body_names_a_series_only_when_there_is_one() {
+    let base = pantheon::RecordChange {
+        verb: "add",
+        core: "annales".to_string(),
+        home: "ecv".to_string(),
+        kind: "log".to_string(),
+        series: Some("weight".to_string()),
+        key: "260718".to_string(),
+        before: None,
+        after: Some(serde_json::json!({"values": ["78.4"]})),
+        cascade: None,
+    };
+
+    // The plan token is redacted in every snapshot, so it is pinned here instead:
+    // this is the exact byte string a Series change has always hashed. An edit to
+    // `body()` that reorders, adds, or renames a key breaks *this* rather than
+    // silently invalidating every token a hand is holding (§7.3).
+    let series_body = r#"{"after":{"values":["78.4"]},"before":null,"core":"annales","home":"ecv","key":"260718","kind":"log","series":"weight","verb":"add"}"#;
+    let token_of = |c: &pantheon::RecordChange| c.to_json()["change"].to_string();
+    assert_eq!(token_of(&base), series_body);
+
+    // A partitioned core keeps no series, so the key is absent rather than hollow —
+    // and the cascade appears only on the verb that has one.
+    let entity = pantheon::RecordChange {
+        core: "album".to_string(),
+        kind: "person".to_string(),
+        series: None,
+        key: "mara".to_string(),
+        ..base.clone()
+    };
+    let body = token_of(&entity);
+    assert!(!body.contains("series"), "{body}");
+    assert!(!body.contains("cascade"), "{body}");
+
+    let renamed = pantheon::RecordChange {
+        verb: "rename",
+        cascade: Some(serde_json::json!([{"path": "x", "refs": 1}])),
+        ..entity.clone()
+    };
+    assert!(token_of(&renamed).contains("cascade"));
+    // And the cascade is part of the identity it guards: a tree that grew a fourth
+    // ref since the review must not pass the token check (§7.3).
+    assert_ne!(entity.token(), renamed.token());
+}
+
+// ── the partitioned register (§6.1, step 3) ─────────────────────────────────
+
+/// A stand-in for Album: three tokens, all partitioned, one flat record.
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default, Debug)]
+struct Agent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    closeness: Option<String>,
+}
+
+struct Reg;
+impl pantheon::Core for Reg {
+    type Record = Agent;
+    const NAME: &'static str = "album";
+    fn kinds() -> &'static [(&'static str, Shape)] {
+        &[
+            ("person", Shape::Partitioned),
+            ("organization", Shape::Partitioned),
+            ("group", Shape::Partitioned),
+        ]
+    }
+    fn validate(_record: &Agent) -> pantheon::Result<()> {
+        Ok(())
+    }
+}
+
+/// `c` → `cs` → `csa`, plus a `cso` sibling and a definition-prefix node under `csa`.
+fn societas_root() -> PathBuf {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    mint(
+        &root,
+        "csa",
+        NewSpec::Def {
+            definition: "john_appleseed",
+        },
+    );
+    root
+}
+
+fn code(s: &str) -> Code {
+    Code::parse(s).unwrap()
+}
+
+fn addr(home: &str, kind: &str, slug: &str) -> pantheon::EntityAddr {
+    pantheon::EntityAddr {
+        home: code(home),
+        kind: kind.to_string(),
+        slug: slug.to_string(),
+    }
+}
+
+fn file_name_of(path: &Path) -> String {
+    path.file_name().unwrap().to_string_lossy().into_owned()
+}
+
+#[test]
+fn an_entity_writes_and_reads_back_by_slug() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    let record = Agent {
+        closeness: Some("close".to_string()),
+    };
+    let written = store
+        .write_entity(&addr("csa", "person", "mara"), vec![], &record)
+        .unwrap();
+    assert_eq!(file_name_of(&written.path), "csa__person__mara.json");
+    assert_eq!(written.form, pantheon::EntityForm::Partitioned);
+
+    let (eref, entity) = store.get_entity("mara", None, None).unwrap();
+    assert_eq!(eref.home.as_str(), "csa");
+    assert_eq!(eref.kind, "person");
+    assert_eq!(entity.data.closeness.as_deref(), Some("close"));
+}
+
+#[test]
+fn an_entity_at_its_own_node_drops_the_slug_segment() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    // The slug *is* the node's definition, so the filename carries only the kind (§5.2).
+    let written = store
+        .write_entity(
+            &addr("csa_john_appleseed", "person", "john_appleseed"),
+            vec![],
+            &Agent::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        file_name_of(&written.path),
+        "csa_john_appleseed__person.json"
+    );
+    assert_eq!(written.form, pantheon::EntityForm::AsNode);
+
+    // And the walk supplies the slug the filename does not carry.
+    let (eref, _) = store.get_entity("john_appleseed", None, None).unwrap();
+    assert_eq!(eref.slug, "john_appleseed");
+    assert_eq!(eref.form, pantheon::EntityForm::AsNode);
+
+    // A *different* slug at that same node is an ordinary partitioned file.
+    let other = store
+        .write_entity(
+            &addr("csa_john_appleseed", "person", "someone_else"),
+            vec![],
+            &Agent::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        file_name_of(&other.path),
+        "csa_john_appleseed__person__someone_else.json"
+    );
+}
+
+#[test]
+fn a_slug_another_kind_holds_is_taken_at_that_node() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    store
+        .write_entity(
+            &addr("csa", "group", "book_club"),
+            vec![],
+            &Agent::default(),
+        )
+        .unwrap();
+    // Two files, one ref — the filesystem would permit what the ref namespace does not.
+    let taken = store.slug_taken_at(&code("csa"), "book_club").unwrap();
+    assert_eq!(taken.unwrap().kind, "group");
+    assert!(store.slug_taken_at(&code("csa"), "mara").unwrap().is_none());
+    // Another node is another matter — that check is a walk, so it stays soft.
+    assert!(
+        store
+            .slug_taken_at(&code("cso"), "book_club")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_cross_node_duplicate_stays_soft_but_is_reported() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    for home in ["csa", "cso"] {
+        store
+            .write_entity(&addr(home, "person", "alex"), vec![], &Agent::default())
+            .unwrap();
+    }
+    // Both were written: nothing hard refused them (§5.4, §18).
+    assert_eq!(
+        store.find_entities(None, None, Some("alex")).unwrap().len(),
+        2
+    );
+    let elsewhere = store
+        .duplicate_slugs_elsewhere(&code("csa"), "alex")
+        .unwrap();
+    assert_eq!(elsewhere.len(), 1);
+    assert_eq!(elsewhere[0].home.as_str(), "cso");
+    // But a resolve meeting two lists them rather than guessing (§7.3).
+    let err = store.get_entity("alex", None, None).unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Usage);
+    // Scoped to one node it is unambiguous again.
+    assert!(store.get_entity("alex", None, Some(&code("cso"))).is_ok());
+}
+
+#[test]
+fn relocate_is_the_one_primitive_behind_move_kind_and_rename() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    let e = store
+        .write_entity(&addr("csa", "person", "johnn"), vec![], &Agent::default())
+        .unwrap();
+
+    // rename: a new slug.
+    let e = store
+        .relocate_entity(&e, &addr("csa", "person", "john"))
+        .unwrap();
+    assert_eq!(file_name_of(&e.path), "csa__person__john.json");
+    // edit -k: a new kind, same slug.
+    let e = store
+        .relocate_entity(&e, &addr("csa", "organization", "john"))
+        .unwrap();
+    assert_eq!(file_name_of(&e.path), "csa__organization__john.json");
+    // move: a new home.
+    let e = store
+        .relocate_entity(&e, &addr("cso", "organization", "john"))
+        .unwrap();
+    assert_eq!(e.home.as_str(), "cso");
+    assert!(e.path.exists());
+    assert_eq!(
+        store
+            .find_entities(Some(&code("csa")), None, None)
+            .unwrap()
+            .len(),
+        0
+    );
+
+    // And it refuses to clobber an occupied path rather than overwrite it.
+    store
+        .write_entity(&addr("cso", "person", "mara"), vec![], &Agent::default())
+        .unwrap();
+    let err = store
+        .relocate_entity(&e, &addr("cso", "person", "mara"))
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+}
+
+// ── the rename cascade (§5.4, step 3) ───────────────────────────────────────
+
+const OWN: &[&str] = &["person", "organization", "group"];
+
+fn r(token: &str) -> Ref {
+    Ref::parse(token).unwrap()
+}
+
+#[test]
+fn the_cascade_rewrites_refs_across_cores_and_shapes() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    store
+        .write_entity(
+            &addr("csa", "person", "mara"),
+            vec![r("album:johnn"), r("album:book_club")],
+            &Agent::default(),
+        )
+        .unwrap();
+    // Another core's series, pointing at the same person (§5.4).
+    write_record(
+        &root,
+        "cso",
+        "cso__log__standups.jsonl",
+        "{\"key\":\"260718\",\"refs\":[\"album:johnn\"],\"data\":{\"values\":[\"ok\"]}}\n\
+         {\"key\":\"260719\",\"refs\":[],\"data\":{\"values\":[\"none\"]}}\n",
+    );
+
+    let plan = pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:john")).unwrap();
+    assert_eq!(plan.totals(), (2, 2), "two refs, in two files");
+    plan.apply(&root).unwrap();
+
+    // The entity's ref moved; its sibling ref did not.
+    let (_, mara) = store.get_entity("mara", None, None).unwrap();
+    let tokens: Vec<String> = mara.refs.iter().map(pantheon::Ref::to_token).collect();
+    assert_eq!(tokens, vec!["album:john", "album:book_club"]);
+
+    // And so did the other core's line — without disturbing the one beside it.
+    let series = std::fs::read_to_string(
+        resolve_code(&root, &code("cso"))
+            .unwrap()
+            .join("cso__")
+            .join("cso__log__standups.jsonl"),
+    )
+    .unwrap();
+    assert!(series.contains(r#""refs":["album:john"]"#), "{series}");
+    assert!(
+        series.contains(r#"{"key":"260719","refs":[],"data":{"values":["none"]}}"#),
+        "the untouched line is carried through verbatim: {series}"
+    );
+}
+
+#[test]
+fn the_cascade_leaves_the_data_half_alone() {
+    let root = societas_root();
+    // A record whose `data` a core owns and the spine must not touch (I5) — note the
+    // key order, which a parse-and-reserialize round trip would sort.
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        "{\n  \"refs\": [\n    \"album:johnn\"\n  ],\n  \"data\": {\n    \"zeta\": \"1\",\n    \"alpha\": \"2\"\n  }\n}\n",
+    );
+    pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:john"))
+        .unwrap()
+        .apply(&root)
+        .unwrap();
+
+    let after = std::fs::read_to_string(
+        resolve_code(&root, &code("csa"))
+            .unwrap()
+            .join("csa__")
+            .join("csa__person__mara.json"),
+    )
+    .unwrap();
+    assert!(after.contains("album:john"));
+    let zeta = after.find("zeta").expect("zeta survives");
+    let alpha = after.find("alpha").expect("alpha survives");
+    assert!(
+        zeta < alpha,
+        "data key order is the core's, not ours: {after}"
+    );
+}
+
+#[test]
+fn the_cascade_refuses_an_occupied_slug() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    for (home, slug) in [("csa", "johnn"), ("cso", "john")] {
+        store
+            .write_entity(&addr(home, "person", slug), vec![], &Agent::default())
+            .unwrap();
+    }
+    // Tree-wide and hard, unlike `add`'s cross-node warning (§7.2 vs §18).
+    let err = pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:john")).unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+
+    // A free name is fine, and a name held by *another* core's record is not ours.
+    assert!(pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:jon")).is_ok());
+    write_record(
+        &root,
+        "csa",
+        "csa__location__jon.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    assert!(pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:jon")).is_ok());
+}
+
+#[test]
+fn a_cascade_with_nothing_to_rewrite_is_a_clean_no_op() {
+    let root = societas_root();
+    let plan = pantheon::plan_cascade(&root, OWN, &r("album:nobody"), &r("album:someone")).unwrap();
+    assert_eq!(plan.totals(), (0, 0));
+    assert_eq!(plan.to_json(), serde_json::json!([]));
+    plan.apply(&root).unwrap();
+}
+
+#[test]
+fn a_cascade_plan_is_stable_so_its_token_is() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    for slug in ["a", "b", "c", "d"] {
+        store
+            .write_entity(
+                &addr("csa", "person", slug),
+                vec![r("album:johnn")],
+                &Agent::default(),
+            )
+            .unwrap();
+    }
+    let once = pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:john")).unwrap();
+    let twice = pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:john")).unwrap();
+    assert_eq!(
+        once.to_json(),
+        twice.to_json(),
+        "readdir order must not leak"
+    );
+    assert_eq!(once.totals(), (4, 4));
+}
+
+#[test]
+fn the_entity_walk_counts_only_this_cores_kinds() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    store
+        .write_entity(&addr("csa", "person", "mara"), vec![], &Agent::default())
+        .unwrap();
+    // Another core's entity, and this core's own series, at the same node (§5.0).
+    write_record(&root, "csa", "csa__location__home.json", "{\"data\":{}}\n");
+    write_record(&root, "csa", "csa__log__weight.jsonl", "");
+    let found = store.find_entities(None, None, None).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].slug, "mara");
+}

@@ -1,0 +1,32 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&resolved)
+---
+{
+  "ambiguous": [],
+  "resolved": [
+    {
+      "core": "album",
+      "home": "csa",
+      "kind": "person",
+      "path": "c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__mara.json",
+      "ref": "album:mara",
+      "shape": {
+        "shape": "partitioned"
+      },
+      "slug": "mara"
+    },
+    {
+      "core": "album",
+      "home": "csa_john_appleseed",
+      "kind": "person",
+      "path": "c_contextus/c_s_societas/cs_a_amicitia/csa_john_appleseed_/csa_john_appleseed__/csa_john_appleseed__person.json",
+      "ref": "album:john_appleseed",
+      "shape": {
+        "shape": "partitioned"
+      },
+      "slug": "john_appleseed"
+    }
+  ],
+  "unresolved": []
+}

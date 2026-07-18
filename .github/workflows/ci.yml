@@ -38,6 +38,12 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+      # A core's contract test drives its own binary via CARGO_BIN_EXE_<name>, which
+      # cargo builds for it. But the integration gates cross tools — `alb` writes and
+      # `pan resolve` reads it back over PATH (§5.0, I5) — and cargo builds no bin for
+      # a crate that is not the one under test. Build them all first, or those gates
+      # fail on a missing binary rather than on what they are meant to prove.
+      - run: cargo build --workspace --bins
       # --no-tests=pass: a stub workspace has no tests yet; that is success, not failure.
       - run: cargo nextest run --workspace --all-features --no-tests=pass
       # insta snapshots are asserted inside the tests above; fail if any are pending.

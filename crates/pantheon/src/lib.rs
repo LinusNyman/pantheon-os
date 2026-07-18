@@ -24,6 +24,7 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::doc_markdown)]
 
+pub mod cascade;
 pub mod classify;
 pub mod code;
 pub mod contract;
@@ -43,9 +44,12 @@ pub mod store;
 pub mod tree;
 pub mod validate;
 
+pub use cascade::{Cascade, RefRewrite, plan_cascade};
 pub use classify::{DocExt, FileClass, classify};
 pub use code::{CharToken, Code, CodeForm, NodeName};
-pub use contract::{Checkpoint, Edited, RecordChange, Response, SeriesTarget};
+pub use contract::{
+    Checkpoint, Edited, EntityQuery, EntityTarget, RecordChange, Response, SeriesTarget,
+};
 pub use core::{Core, CoreRegistry, DiscoveredCore};
 pub use envelope::{Entity, Frontmatter, Key, KeyShape, Line, RawEntity, RawLine, Ref};
 pub use error::{Error, ExitCode, Result};
@@ -58,6 +62,6 @@ pub use resolve::{RefOutcome, Resolution, resolve_all};
 pub use root::resolve_root;
 pub use schema::{CoreSchema, TokenSchema, schema};
 pub use shape::Shape;
-pub use store::{PresentLine, SeriesRef, Store};
-pub use tree::{Node, TreeRoot, build_tree, resolve_code};
+pub use store::{EntityAddr, EntityForm, EntityRef, PresentLine, SeriesRef, Store};
+pub use tree::{Node, TreeRoot, build_tree, resolve_code, resolve_node};
 pub use validate::{Finding, FindingCode, Severity, validate};

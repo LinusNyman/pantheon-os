@@ -1,0 +1,12 @@
+---
+source: crates/album/tests/contract.rs
+expression: after.clone()
+---
+{
+  "refs": [
+    "album:john"
+  ],
+  "data": {
+    "closeness": "close"
+  }
+}

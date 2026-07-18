@@ -1,0 +1,92 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&schema)
+---
+{
+  "format_version": 1,
+  "name": "album",
+  "record": {
+    "$defs": {
+      "Away": {
+        "description": "A period an agent is away (§8.1). Keys are `YYMMDD`, the same shape a series key\nwears (§5.4), and `to` is absent while the period is still open.\n\nThis is the list-valued field §6.1 describes: an entity was never a sample, so\nthe history worth keeping accumulates *inside* the object rather than becoming a\nseries. A lens overlays it on a timeline by reading Album's JSON (§8.4, §12);\nAlbum itself knows nothing about timelines.",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "from"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "One agent — the `data` half of an entity file (§6.1).\n\nIts `refs` ride in the envelope, and its home, core, kind, and slug are the\nfile's location and name (I3), so none of them is stored here. Nor is a display\nname: a name and its slug are one thing and are never allowed to differ (§5.4),\nso `rename` is the only way a name changes and there is no second copy to drift.\n\nOne flat struct rather than an enum over the three kinds. §7.1 asks for an enum\nwhere a core declares two *shapes*; Album's three tokens are one shape and one\nprimitive. Making it an enum would turn `edit -k person→organization` into a\nrecord transformation, when §7.2 says it is a file rename and nothing more — and\nwould have `schemars` emit a tagged union when §18 forbids writing a variant tag.\nAn organization simply leaves `gender` absent.",
+    "properties": {
+      "away": {
+        "description": "Periods away, accumulated in the record (§6.1).",
+        "items": {
+          "$ref": "#/$defs/Away"
+        },
+        "type": "array"
+      },
+      "closeness": {
+        "description": "How close the bond is — a field, because a person is not filed by it (§2).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "gender": {
+        "description": "What a form of address is **derived** from, never the address itself (§8.1).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "note": {
+        "description": "A hand's remark on this agent.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "origin": {
+        "description": "Where you met them — provenance, which is never a home (I3, §8.1).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "role": {
+        "description": "What they are to you. A role is a field for the same reason: it changes\nwithout the person becoming someone else.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "Agent",
+    "type": "object"
+  },
+  "tokens": [
+    {
+      "shape": "partitioned",
+      "token": "person"
+    },
+    {
+      "shape": "partitioned",
+      "token": "organization"
+    },
+    {
+      "shape": "partitioned",
+      "token": "group"
+    }
+  ]
+}

@@ -237,8 +237,8 @@ fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         >(1))?)),
         Cmd::Version => Ok(Response::Json(version_json())),
         Cmd::Help => Ok(Response::Json(help_json())),
-        Cmd::Rename { .. } => Err(not_implemented("rename")),
-        Cmd::Move { .. } => Err(not_implemented("move")),
+        Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
+        Cmd::Move { slug, to } => cmd_move(cli, slug, to),
     }
 }
 
@@ -454,6 +454,92 @@ fn cmd_series(
     )?))
 }
 
+/// Rename a log and cascade every ref pointing at it (§7.2, §5.4).
+///
+/// A hand-named series is a ref target by its name (`annales:meetings`, §5.4), so
+/// this is the same operation Album's `rename` is, over a different shape — which is
+/// the point: the cascade is the spine's, and no core touches another core's records
+/// to run it (I5).
+fn cmd_rename(cli: &Cli, slug: &str, new: &str) -> Result<Response> {
+    refuse_under_rule(cli, "rename")?;
+    let ctx = Ctx::open(cli)?;
+    let sref = ctx.store.locate(
+        &pantheon::name::normalize_token(slug, "series name")?,
+        Some(&ctx.kind),
+        cli.home.as_deref().map(Code::parse).transpose()?.as_ref(),
+    )?;
+    let new = pantheon::name::normalize_token(new, "series name")?;
+
+    let from = Ref::parse(&format!("{}:{}", Annales::NAME, sref.name))?;
+    let to = Ref::parse(&format!("{}:{new}", Annales::NAME))?;
+    let own: Vec<&str> = Annales::kinds().iter().map(|(k, _)| *k).collect();
+    let cascade = pantheon::plan_cascade(ctx.store.root(), &own, &from, &to)?;
+
+    let change = rename_change("rename", &sref, &new, Some(cascade.to_json()));
+    if let Some(pending) = review(cli, &change)? {
+        return Ok(pending);
+    }
+    // The series' own file moves first, so a crash mid-cascade leaves refs dangling
+    // on the *old* name — which `pan validate` reports naming the files still to fix
+    // (§5.4, §10.1).
+    let moved = ctx.store.relocate_series(&sref, &sref.home, &new)?;
+    cascade.apply(ctx.store.root())?;
+    Ok(Response::Json(json!({
+        "renamed": { "from": sref.name, "to": new },
+        "cascade": cascade.to_json(),
+        "record": identity(&moved),
+    })))
+}
+
+/// Re-home a log (§7.2). A file `mv` between meta dirs, touching no refs — a ref
+/// carries no path, so it survives a re-home untouched (§5.4).
+fn cmd_move(cli: &Cli, slug: &str, to: &str) -> Result<Response> {
+    refuse_under_rule(cli, "move")?;
+    let ctx = Ctx::open(cli)?;
+    let sref = ctx.store.locate(
+        &pantheon::name::normalize_token(slug, "series name")?,
+        Some(&ctx.kind),
+        cli.home.as_deref().map(Code::parse).transpose()?.as_ref(),
+    )?;
+    let home = Code::parse(to)?;
+
+    let mut change = rename_change("move", &sref, &sref.name.clone(), None);
+    change.home = home.as_str().to_string();
+    if let Some(pending) = review(cli, &change)? {
+        return Ok(pending);
+    }
+    let moved = ctx.store.relocate_series(&sref, &home, &sref.name)?;
+    Ok(Response::Json(json!({
+        "moved": { "from": sref.home.as_str(), "to": home.as_str() },
+        "record": identity(&moved),
+    })))
+}
+
+/// The change a structural verb reviews. Unlike a line write there is no record
+/// body to show — a series' identity *is* what moves — so `before`/`after` carry
+/// the identity rather than a reading (§7.3).
+fn rename_change(
+    verb: &'static str,
+    sref: &SeriesRef,
+    new: &str,
+    cascade: Option<Value>,
+) -> RecordChange {
+    let mut after = identity(sref);
+    after["series"] = Value::String(new.to_string());
+    RecordChange {
+        verb,
+        core: Annales::NAME.to_string(),
+        home: sref.home.as_str().to_string(),
+        kind: sref.kind.clone(),
+        series: Some(sref.name.clone()),
+        // A named series' key is its name — the thing a ref points at (§5.4).
+        key: sref.name.clone(),
+        before: Some(identity(sref)),
+        after: Some(after),
+        cascade,
+    }
+}
+
 fn cmd_where(cli: &Cli, tokens: &[String]) -> Result<Response> {
     let ctx = Ctx::open(cli)?;
     let target = ctx.read_target(cli, tokens)?;
@@ -617,10 +703,11 @@ fn change(
         core: Annales::NAME.to_string(),
         home: sref.home.as_str().to_string(),
         kind: sref.kind.clone(),
-        series: sref.name.clone(),
+        series: Some(sref.name.clone()),
         key: key.to_string(),
         before,
         after,
+        cascade: None,
     }
 }
 
@@ -655,13 +742,6 @@ fn no_line(sref: &SeriesRef, key: &Key) -> Error {
         "no line keyed {key} in series {:?} at {} (§7.2)",
         sref.name,
         sref.home.as_str()
-    ))
-}
-
-fn not_implemented(verb: &str) -> Error {
-    Error::runtime(format!(
-        "`ann {verb}` is not implemented yet: it cascades `annales:<name>` refs tree-wide, which \
-         lands with Album (step 3, §7.2)"
     ))
 }
 

@@ -1,0 +1,18 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&moved)
+---
+{
+  "moved": {
+    "from": "csa",
+    "to": "cso"
+  },
+  "record": {
+    "core": "album",
+    "data": {},
+    "home": "cso",
+    "kind": "person",
+    "refs": [],
+    "slug": "alex"
+  }
+}

@@ -68,10 +68,45 @@ pub fn resolve_all(root: &Path, reg: &CoreRegistry, refs: &[Ref]) -> Result<Vec<
         .collect())
 }
 
-/// The set of resolvable `(core, slug)` identifiers in the tree — what a dangling-ref
-/// check tests against (§5.4).
-pub fn identifier_set(root: &Path, reg: &CoreRegistry) -> Result<HashSet<(String, String)>> {
-    Ok(build_index(root, reg)?.into_keys().collect())
+/// One identifier that more than one of a core's records answers to (§5.4).
+#[derive(Clone, Debug)]
+pub struct DuplicateIdentifier {
+    pub reference: Ref,
+    /// Every record holding the name, by path — at least two.
+    pub at: Vec<Resolution>,
+}
+
+/// The tree's resolvable identifiers, and those more than one record answers to.
+///
+/// One walk answers both questions, because they are the same index read two ways: a
+/// ref resolving to *nothing* dangles, and a ref resolving to *two things* is a
+/// cross-node duplicate (§5.4). Building this twice would pay the walk twice, which
+/// is the cost the softness of the duplicate rule exists to avoid (§18).
+pub struct Identifiers {
+    /// What a dangling-ref check tests against.
+    pub known: HashSet<(String, String)>,
+    /// What a duplicate-slug check reports — soft, always (§5.4, §18).
+    pub duplicates: Vec<DuplicateIdentifier>,
+}
+
+/// Walk the tree's records once and index them by identifier (§5.0, §5.4).
+pub fn identifiers(root: &Path, reg: &CoreRegistry) -> Result<Identifiers> {
+    let mut known = HashSet::new();
+    let mut duplicates = Vec::new();
+    for (key, mut at) in build_index(root, reg)? {
+        known.insert(key);
+        if at.len() > 1 {
+            // Sorted so a finding list is stable across runs whatever order the
+            // filesystem handed the entries back in.
+            at.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+            duplicates.push(DuplicateIdentifier {
+                reference: at[0].reference.clone(),
+                at,
+            });
+        }
+    }
+    duplicates.sort_by(|a, b| a.reference.to_token().cmp(&b.reference.to_token()));
+    Ok(Identifiers { known, duplicates })
 }
 
 /// Assemble the `pan resolve` contract JSON (§5.5): three arrays, always present, so

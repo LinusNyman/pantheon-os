@@ -256,6 +256,58 @@ fn write_verbs_are_refused_under_a_rule() {
     assert_eq!(code, 0);
 }
 
+// ── the structural verbs, over the spine's cascade (§7.2, §5.4) ─────────────
+
+#[test]
+fn verb_rename_cascades_refs() {
+    let root = fresh_root();
+    ann(&root, &["ecv", "wieght", "-c"]);
+    ann(&root, &["ecv", "wieght", "78.4", "-a", "260718"]);
+    // A referrer written by hand rather than by a core: the cascade is the spine's,
+    // and it rewrites whatever record points at the name — including, in the real
+    // tree, another core's (§5.4, I5).
+    let referrer = root.join("e_ego/e_c_corpus/ec_v_valetudo/ecv__/ecv__log__mood.jsonl");
+    std::fs::write(
+        &referrer,
+        "{\"key\":\"260718\",\"refs\":[\"annales:wieght\"],\"data\":{\"values\":[\"ok\"]}}\n",
+    )
+    .unwrap();
+
+    let (code, renamed) = ann(&root, &["rename", "wieght", "weight", "-y"]);
+    assert_eq!(code, 0);
+    insta::assert_snapshot!("verb_rename", pretty(&renamed));
+
+    // The ref followed, and the line beside it is untouched.
+    let after = std::fs::read_to_string(&referrer).unwrap();
+    assert!(after.contains("annales:weight"), "{after}");
+    assert!(after.contains(r#""values":["ok"]"#), "{after}");
+    // The readings survived the file rename.
+    let (code, series) = ann(&root, &["series", "weight"]);
+    assert_eq!(code, 0);
+    assert_eq!(series[0]["data"]["values"], json!(["78.4"]));
+}
+
+#[test]
+fn verb_move_rehomes_without_touching_refs() {
+    let root = fresh_root();
+    ann(&root, &["ecv", "weight", "-c"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+
+    let (code, moved) = ann(&root, &["move", "weight", "--to", "ec", "-y"]);
+    assert_eq!(code, 0);
+    insta::assert_snapshot!("verb_move", pretty(&moved));
+    // The file wears its new home's code (§5.2).
+    assert!(
+        root.join("e_ego/e_c_corpus/ec__/ec__log__weight.jsonl")
+            .exists()
+    );
+    assert!(
+        !root
+            .join("e_ego/e_c_corpus/ec_v_valetudo/ecv__/ecv__log__weight.jsonl")
+            .exists()
+    );
+}
+
 // ── the path is the home (I3) ───────────────────────────────────────────────
 
 #[test]

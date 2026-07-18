@@ -1,0 +1,35 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&redact(pending))
+---
+{
+  "change": {
+    "after": {
+      "core": "album",
+      "data": {
+        "role": "friend"
+      },
+      "home": "csa",
+      "kind": "person",
+      "refs": [],
+      "slug": "john_appleseed"
+    },
+    "before": {
+      "core": "album",
+      "data": {
+        "closeness": "close"
+      },
+      "home": "csa",
+      "kind": "person",
+      "refs": [],
+      "slug": "john_appleseed"
+    },
+    "core": "album",
+    "home": "csa",
+    "key": "john_appleseed",
+    "kind": "person",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

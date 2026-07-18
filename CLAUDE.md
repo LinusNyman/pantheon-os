@@ -71,6 +71,10 @@ Build order step 1 (Pantheon spine + `pan`) is the next real work.
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets --all-features -- -W clippy::pedantic -D warnings
+cargo build --workspace --bins                                 # REQUIRED before tests: a core's contract
+                                                               # test drives another tool's binary (`alb` writes,
+                                                               # `pan resolve` reads back), and cargo builds no
+                                                               # bin for a crate that is not under test
 cargo nextest run --workspace --all-features --no-tests=pass   # falls back to `cargo test` if nextest absent
 cargo build --workspace                                        # CI also cross-builds 5 targets
 cargo audit                                                    # advisories

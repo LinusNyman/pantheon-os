@@ -1,0 +1,15 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&rekinded)
+---
+{
+  "core": "album",
+  "data": {
+    "origin": "a job fair",
+    "role": "employer"
+  },
+  "home": "csa",
+  "kind": "organization",
+  "refs": [],
+  "slug": "dare_robotics"
+}
