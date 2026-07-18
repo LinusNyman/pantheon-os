@@ -1062,3 +1062,85 @@ fn a_writer_whose_file_was_renamed_underneath_retries() {
     );
     assert!(out.contains("written_by_b"), "B's write must land: {out:?}");
 }
+
+#[test]
+fn the_cascade_refuses_renaming_a_task_onto_an_occupied_key() {
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"reach_out_to_alex\",\"refs\":[],\"data\":{}}\n\
+         {\"key\":\"call_alex\",\"refs\":[],\"data\":{}}\n",
+    );
+    let own = ["task"];
+    let from = Ref::parse("pensum:reach_out_to_alex").unwrap();
+
+    // Onto a key its own file already holds.
+    let err = pantheon::plan_cascade(&root, &own, &from, &Ref::parse("pensum:call_alex").unwrap())
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+
+    // And onto one another node holds — the check is tree-wide (§7.2).
+    write_record(
+        &root,
+        "cso",
+        "cso__task.jsonl",
+        "{\"key\":\"ring_alex\",\"refs\":[],\"data\":{}}\n",
+    );
+    assert!(
+        pantheon::plan_cascade(&root, &own, &from, &Ref::parse("pensum:ring_alex").unwrap())
+            .is_err()
+    );
+
+    // A free name still plans cleanly.
+    let clean = pantheon::plan_cascade(
+        &root,
+        &own,
+        &from,
+        &Ref::parse("pensum:email_alex").unwrap(),
+    )
+    .unwrap();
+    assert!(clean.rewrites.is_empty());
+}
+
+#[test]
+fn a_task_key_is_not_an_identity_to_a_core_that_does_not_own_the_token() {
+    // `own_kinds` is the calling core's, so Album renaming an entity never trips
+    // over a Pensum task that happens to share the name (I5, §5.4).
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"mara\",\"refs\":[],\"data\":{}}\n",
+    );
+    let plan = pantheon::plan_cascade(
+        &root,
+        &["person"],
+        &Ref::parse("album:maara").unwrap(),
+        &Ref::parse("album:mara").unwrap(),
+    );
+    assert!(plan.is_ok(), "another core's key is not ours to guard");
+}
+
+#[test]
+fn a_date_keyed_line_never_blocks_a_rename() {
+    // A sample is not an identity (I1), so it cannot occupy a name.
+    let root = societas_root();
+    write_record(
+        &root,
+        "csa",
+        "csa__task.jsonl",
+        "{\"key\":\"260718\",\"refs\":[],\"data\":{}}\n",
+    );
+    assert!(
+        pantheon::plan_cascade(
+            &root,
+            &["task"],
+            &Ref::parse("pensum:a").unwrap(),
+            &Ref::parse("pensum:260718").unwrap(),
+        )
+        .is_ok()
+    );
+}
