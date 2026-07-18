@@ -82,6 +82,13 @@ pub fn resolve_code(root: &Path, code: &Code) -> Result<PathBuf> {
     descend(root, code).map(|(_, path)| path)
 }
 
+/// Resolve a code to its identity *and* its path. A partitioned write needs the
+/// identity too: whether the node is definition-prefix, and what its definition is,
+/// is what decides between the two entity filename forms (§5.2).
+pub fn resolve_node(root: &Path, code: &Code) -> Result<(NodeName, PathBuf)> {
+    descend(root, code)
+}
+
 fn build_node(nn: NodeName, path: PathBuf) -> Result<Node> {
     let mut children = Vec::new();
     for (child_nn, child_path) in read_child_nodes(&path, Some(&nn.code))? {

@@ -58,6 +58,6 @@ pub use resolve::{RefOutcome, Resolution, resolve_all};
 pub use root::resolve_root;
 pub use schema::{CoreSchema, TokenSchema, schema};
 pub use shape::Shape;
-pub use store::{PresentLine, SeriesRef, Store};
-pub use tree::{Node, TreeRoot, build_tree, resolve_code};
+pub use store::{EntityAddr, EntityForm, EntityRef, PresentLine, SeriesRef, Store};
+pub use tree::{Node, TreeRoot, build_tree, resolve_code, resolve_node};
 pub use validate::{Finding, FindingCode, Severity, validate};

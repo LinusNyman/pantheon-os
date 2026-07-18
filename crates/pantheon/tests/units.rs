@@ -274,3 +274,224 @@ fn a_stale_plan_token_is_a_validation_error() {
     let err = plan.check_token("deadbeef").unwrap_err();
     assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
 }
+
+// ── the partitioned register (§6.1, step 3) ─────────────────────────────────
+
+/// A stand-in for Album: three tokens, all partitioned, one flat record.
+#[derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema, Default, Debug)]
+struct Agent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    closeness: Option<String>,
+}
+
+struct Reg;
+impl pantheon::Core for Reg {
+    type Record = Agent;
+    const NAME: &'static str = "album";
+    fn kinds() -> &'static [(&'static str, Shape)] {
+        &[
+            ("person", Shape::Partitioned),
+            ("organization", Shape::Partitioned),
+            ("group", Shape::Partitioned),
+        ]
+    }
+    fn validate(_record: &Agent) -> pantheon::Result<()> {
+        Ok(())
+    }
+}
+
+/// `c` → `cs` → `csa`, plus a `cso` sibling and a definition-prefix node under `csa`.
+fn societas_root() -> PathBuf {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    mint(
+        &root,
+        "csa",
+        NewSpec::Def {
+            definition: "john_appleseed",
+        },
+    );
+    root
+}
+
+fn code(s: &str) -> Code {
+    Code::parse(s).unwrap()
+}
+
+fn addr(home: &str, kind: &str, slug: &str) -> pantheon::EntityAddr {
+    pantheon::EntityAddr {
+        home: code(home),
+        kind: kind.to_string(),
+        slug: slug.to_string(),
+    }
+}
+
+fn file_name_of(path: &Path) -> String {
+    path.file_name().unwrap().to_string_lossy().into_owned()
+}
+
+#[test]
+fn an_entity_writes_and_reads_back_by_slug() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    let record = Agent {
+        closeness: Some("close".to_string()),
+    };
+    let written = store
+        .write_entity(&addr("csa", "person", "mara"), vec![], &record)
+        .unwrap();
+    assert_eq!(file_name_of(&written.path), "csa__person__mara.json");
+    assert_eq!(written.form, pantheon::EntityForm::Partitioned);
+
+    let (eref, entity) = store.get_entity("mara", None, None).unwrap();
+    assert_eq!(eref.home.as_str(), "csa");
+    assert_eq!(eref.kind, "person");
+    assert_eq!(entity.data.closeness.as_deref(), Some("close"));
+}
+
+#[test]
+fn an_entity_at_its_own_node_drops_the_slug_segment() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    // The slug *is* the node's definition, so the filename carries only the kind (§5.2).
+    let written = store
+        .write_entity(
+            &addr("csa_john_appleseed", "person", "john_appleseed"),
+            vec![],
+            &Agent::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        file_name_of(&written.path),
+        "csa_john_appleseed__person.json"
+    );
+    assert_eq!(written.form, pantheon::EntityForm::AsNode);
+
+    // And the walk supplies the slug the filename does not carry.
+    let (eref, _) = store.get_entity("john_appleseed", None, None).unwrap();
+    assert_eq!(eref.slug, "john_appleseed");
+    assert_eq!(eref.form, pantheon::EntityForm::AsNode);
+
+    // A *different* slug at that same node is an ordinary partitioned file.
+    let other = store
+        .write_entity(
+            &addr("csa_john_appleseed", "person", "someone_else"),
+            vec![],
+            &Agent::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        file_name_of(&other.path),
+        "csa_john_appleseed__person__someone_else.json"
+    );
+}
+
+#[test]
+fn a_slug_another_kind_holds_is_taken_at_that_node() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    store
+        .write_entity(
+            &addr("csa", "group", "book_club"),
+            vec![],
+            &Agent::default(),
+        )
+        .unwrap();
+    // Two files, one ref — the filesystem would permit what the ref namespace does not.
+    let taken = store.slug_taken_at(&code("csa"), "book_club").unwrap();
+    assert_eq!(taken.unwrap().kind, "group");
+    assert!(store.slug_taken_at(&code("csa"), "mara").unwrap().is_none());
+    // Another node is another matter — that check is a walk, so it stays soft.
+    assert!(
+        store
+            .slug_taken_at(&code("cso"), "book_club")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn a_cross_node_duplicate_stays_soft_but_is_reported() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    for home in ["csa", "cso"] {
+        store
+            .write_entity(&addr(home, "person", "alex"), vec![], &Agent::default())
+            .unwrap();
+    }
+    // Both were written: nothing hard refused them (§5.4, §18).
+    assert_eq!(
+        store.find_entities(None, None, Some("alex")).unwrap().len(),
+        2
+    );
+    let elsewhere = store
+        .duplicate_slugs_elsewhere(&code("csa"), "alex")
+        .unwrap();
+    assert_eq!(elsewhere.len(), 1);
+    assert_eq!(elsewhere[0].home.as_str(), "cso");
+    // But a resolve meeting two lists them rather than guessing (§7.3).
+    let err = store.get_entity("alex", None, None).unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Usage);
+    // Scoped to one node it is unambiguous again.
+    assert!(store.get_entity("alex", None, Some(&code("cso"))).is_ok());
+}
+
+#[test]
+fn relocate_is_the_one_primitive_behind_move_kind_and_rename() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    let e = store
+        .write_entity(&addr("csa", "person", "johnn"), vec![], &Agent::default())
+        .unwrap();
+
+    // rename: a new slug.
+    let e = store
+        .relocate_entity(&e, &addr("csa", "person", "john"))
+        .unwrap();
+    assert_eq!(file_name_of(&e.path), "csa__person__john.json");
+    // edit -k: a new kind, same slug.
+    let e = store
+        .relocate_entity(&e, &addr("csa", "organization", "john"))
+        .unwrap();
+    assert_eq!(file_name_of(&e.path), "csa__organization__john.json");
+    // move: a new home.
+    let e = store
+        .relocate_entity(&e, &addr("cso", "organization", "john"))
+        .unwrap();
+    assert_eq!(e.home.as_str(), "cso");
+    assert!(e.path.exists());
+    assert_eq!(
+        store
+            .find_entities(Some(&code("csa")), None, None)
+            .unwrap()
+            .len(),
+        0
+    );
+
+    // And it refuses to clobber an occupied path rather than overwrite it.
+    store
+        .write_entity(&addr("cso", "person", "mara"), vec![], &Agent::default())
+        .unwrap();
+    let err = store
+        .relocate_entity(&e, &addr("cso", "person", "mara"))
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+}
+
+#[test]
+fn the_entity_walk_counts_only_this_cores_kinds() {
+    let root = societas_root();
+    let store = pantheon::Store::<Reg>::new(&root);
+    store
+        .write_entity(&addr("csa", "person", "mara"), vec![], &Agent::default())
+        .unwrap();
+    // Another core's entity, and this core's own series, at the same node (§5.0).
+    write_record(&root, "csa", "csa__location__home.json", "{\"data\":{}}\n");
+    write_record(&root, "csa", "csa__log__weight.jsonl", "");
+    let found = store.find_entities(None, None, None).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].slug, "mara");
+}
