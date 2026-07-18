@@ -1,0 +1,10 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&rename)
+---
+{
+  "error": {
+    "code": 2,
+    "msg": "\"john_appleseed\" is an entity-as-node: its slug is its node's definition, so renaming it renames the node, which no core may do — use `pan rename csa_john_appleseed --def <new>` (§5.5, §7.2)"
+  }
+}

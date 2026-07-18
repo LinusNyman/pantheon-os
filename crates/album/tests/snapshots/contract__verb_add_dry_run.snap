@@ -1,0 +1,24 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&redact(plan))
+---
+{
+  "change": {
+    "after": {
+      "core": "album",
+      "data": {},
+      "home": "csa",
+      "kind": "person",
+      "refs": [],
+      "slug": "mara"
+    },
+    "before": null,
+    "core": "album",
+    "home": "csa",
+    "key": "mara",
+    "kind": "person",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

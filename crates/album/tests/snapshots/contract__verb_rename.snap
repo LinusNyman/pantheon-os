@@ -1,0 +1,24 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&renamed)
+---
+{
+  "cascade": [
+    {
+      "path": "c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__mara.json",
+      "refs": 1
+    }
+  ],
+  "record": {
+    "core": "album",
+    "data": {},
+    "home": "csa",
+    "kind": "person",
+    "refs": [],
+    "slug": "john"
+  },
+  "renamed": {
+    "from": "johnn",
+    "to": "john"
+  }
+}

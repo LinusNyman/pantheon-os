@@ -1,0 +1,14 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&fresh)
+---
+{
+  "core": "album",
+  "data": {
+    "closeness": "close"
+  },
+  "home": "csa",
+  "kind": "person",
+  "refs": [],
+  "slug": "john_appleseed"
+}

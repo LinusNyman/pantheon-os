@@ -1,0 +1,10 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "csa already holds \"book_club\" as a group: two kinds spell two files but only one `album:book_club`, so the ref would be ambiguous (§5.4, §18)"
+  }
+}

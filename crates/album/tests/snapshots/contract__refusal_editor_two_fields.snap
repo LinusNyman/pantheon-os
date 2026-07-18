@@ -1,0 +1,10 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 2,
+    "msg": "the editor form opens one value, and 2 fields were named: role, note (§7.3)"
+  }
+}

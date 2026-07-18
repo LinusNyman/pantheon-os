@@ -1,0 +1,10 @@
+---
+source: crates/album/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "album:john already names a record at cso — renaming onto it would make the two indistinguishable, and there is no history to tell them apart again (§7.2, §18)"
+  }
+}
