@@ -642,7 +642,7 @@ pub fn resolve_entity_target<C: Core>(
 /// files a person called `csa`, it does not address the node with the name missing.
 /// A stated `-H` short-circuits the probe entirely, which is the escape hatch for a
 /// name that happens to spell a node code.
-fn peel_home<'a, C: Core>(
+pub fn peel_home<'a, C: Core>(
     store: &Store<C>,
     stated: Option<&str>,
     positionals: &'a [String],
