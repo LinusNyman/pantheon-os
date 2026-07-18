@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use crate::classify::{FileClass, classify};
 use crate::code::{Code, CodeForm, NodeName};
 use crate::core::Core;
-use crate::envelope::{Entity, Key, Line, RawLine, Ref};
+use crate::envelope::{Entity, Key, KeyShape, Line, RawLine, Ref};
 use crate::shape::Shape;
 use crate::tree::{Node, TreeRoot, build_tree, resolve_code, resolve_node};
 use crate::{Error, Result};
@@ -35,8 +35,23 @@ use crate::{Error, Result};
 pub struct SeriesRef {
     pub home: Code,
     pub kind: String,
-    pub name: String,
+    /// The hand-chosen name, or `None` where the core's series is **nameless** —
+    /// Pensum's one `task` per node, filed as `[code]__task.jsonl` (§7.1, §7.3).
+    /// `None` is exactly [`FileClass::DeterminedSeries`]: a determined series that
+    /// still *carries* a name (Rationes' `balance`, named for its holding) splits
+    /// into three segments like any other, and only the registry's `named` bit tells
+    /// the two apart (§5.4).
+    pub name: Option<String>,
     pub path: PathBuf,
+}
+
+impl SeriesRef {
+    /// What to call this series in a message. A nameless series has only its token
+    /// to be called by, and that is what a hand typed to reach it (§7.3).
+    #[must_use]
+    pub fn label(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.kind)
+    }
 }
 
 /// Which of the two partitioned filename forms an entity file wears (§5.2). The
@@ -78,7 +93,8 @@ pub struct EntityAddr {
 pub struct PresentLine<T> {
     pub home: Code,
     pub kind: String,
-    pub name: String,
+    /// The series' name, or `None` where the core's series is nameless (§7.1).
+    pub name: Option<String>,
     pub line: Line<T>,
 }
 
@@ -134,12 +150,19 @@ impl<C: Core> Store<C> {
 
     // ── locating ────────────────────────────────────────────────────────────────
 
-    fn series_file_name(home: &Code, kind: &str, name: &str) -> String {
-        format!("{}__{kind}__{name}.jsonl", home.as_str())
+    /// The single place that chooses between the two series filename forms (§5.2) —
+    /// the counterpart of [`Store::entity_file_name`], and held to the same
+    /// discipline: every writer goes through here, so `add`, `move`, and `rename`
+    /// cannot land a record in one form and look for it in the other.
+    fn series_file_name(home: &Code, kind: &str, name: Option<&str>) -> String {
+        match name {
+            Some(name) => format!("{}__{kind}__{name}.jsonl", home.as_str()),
+            None => format!("{}__{kind}.jsonl", home.as_str()),
+        }
     }
 
     /// Where a series lives, whether or not it exists yet (§5.2).
-    pub fn series_path(&self, home: &Code, kind: &str, name: &str) -> Result<PathBuf> {
+    pub fn series_path(&self, home: &Code, kind: &str, name: Option<&str>) -> Result<PathBuf> {
         let node = resolve_code(&self.root, home)?;
         Ok(node
             .join(format!("{}__", home.as_str()))
@@ -186,18 +209,22 @@ impl<C: Core> Store<C> {
                     continue;
                 }
                 let file_name = entry.file_name().to_string_lossy().into_owned();
-                let FileClass::NamedSeries {
-                    kind: found_kind,
-                    name: found_name,
-                    ..
-                } = classify(&file_name, false, &node.code)
-                else {
-                    continue;
+                // Both series filename forms (§5.2): three segments carry a name,
+                // two are the nameless form a determined series wears (§7.1).
+                let (found_kind, found_name) = match classify(&file_name, false, &node.code) {
+                    FileClass::NamedSeries {
+                        kind, name: series, ..
+                    } => (kind, Some(series)),
+                    FileClass::DeterminedSeries { kind, .. } => (kind, None),
+                    _ => continue,
                 };
-                // Another core's series at this node is not ours to count (§5.0).
+                // Another core's series at this node is not ours to count (§5.0). A
+                // name filter asks for a named series, so it never matches a nameless
+                // one — which is why Pensum, having only the one, always filters by
+                // home and token instead (§7.3).
                 if !Self::owns_series_kind(&found_kind)
                     || kind.is_some_and(|want| want != found_kind)
-                    || name.is_some_and(|want| want != found_name)
+                    || name.is_some_and(|want| Some(want) != found_name.as_deref())
                 {
                     continue;
                 }
@@ -273,12 +300,25 @@ impl<C: Core> Store<C> {
         Ok(out)
     }
 
-    /// The present of a series (I1): the line at the latest key. Keys sort
-    /// lexicographically, which for `YYMMDD`(`Thhmm`) is chronological (§5.4).
-    fn present(lines: Vec<Line<C::Record>>) -> Option<Line<C::Record>> {
-        lines
+    /// The present of a series (I1), and the one rule that covers both kinds of key
+    /// (§5.4). A **date-keyed** line is a *sample*, so the series folds to the line at
+    /// the latest key — keys sort lexicographically, which for `YYMMDD`(`Thhmm`) is
+    /// chronological. A **name-keyed** line is a *record* (a Pensum task), so it is
+    /// already its own present and every one survives the fold.
+    ///
+    /// [`Key::classify`] is the whole discriminant, so this holds for any core
+    /// without the spine learning what a token means (I5).
+    fn present(lines: Vec<Line<C::Record>>) -> Vec<Line<C::Record>> {
+        let (mut named, dated): (Vec<_>, Vec<_>) = lines
+            .into_iter()
+            .partition(|line| line.key.classify() == KeyShape::Name);
+        if let Some(latest) = dated
             .into_iter()
             .max_by(|a, b| a.key.as_str().cmp(b.key.as_str()))
+        {
+            named.push(latest);
+        }
+        named
     }
 
     /// `get` for a Series core (§7.2): the named series folded to its present.
@@ -290,10 +330,10 @@ impl<C: Core> Store<C> {
     ) -> Result<PresentLine<C::Record>> {
         let sref = self.locate(name, kind, at)?;
         let lines = self.read_series(&sref)?;
-        let line = Self::present(lines).ok_or_else(|| {
+        let line = Self::present(lines).pop().ok_or_else(|| {
             Error::not_found(format!(
                 "series {:?} at {} holds no readings yet (§7.3)",
-                sref.name,
+                sref.label(),
                 sref.home.as_str()
             ))
         })?;
@@ -306,7 +346,8 @@ impl<C: Core> Store<C> {
     }
 
     /// A subtree walk folded to the present (§7.1): every one of this core's series
-    /// under `at`, each at its latest key.
+    /// under `at`, each folded by the rule above — a date-keyed series to its latest
+    /// key, a name-keyed one to all of its records.
     pub fn fold(
         &self,
         at: Option<&Code>,
@@ -315,11 +356,11 @@ impl<C: Core> Store<C> {
         let mut out = Vec::new();
         for sref in self.find_series(at, kind, None)? {
             let lines = self.read_series(&sref)?;
-            if let Some(line) = Self::present(lines) {
+            for line in Self::present(lines) {
                 out.push(PresentLine {
-                    home: sref.home,
-                    kind: sref.kind,
-                    name: sref.name,
+                    home: sref.home.clone(),
+                    kind: sref.kind.clone(),
+                    name: sref.name.clone(),
                     line,
                 });
             }
@@ -332,22 +373,37 @@ impl<C: Core> Store<C> {
     /// Mint an empty series — the `-c` path (§7.3). A hand-named series is minted
     /// explicitly so a typo cannot conjure one.
     pub fn create_series(&self, home: &Code, kind: &str, name: &str) -> Result<SeriesRef> {
-        let path = self.series_path(home, kind, name)?;
+        let path = self.series_path(home, kind, Some(name))?;
         if path.exists() {
             return Err(Error::validation(format!(
                 "series {name:?} already exists at {} (§7.3)",
                 home.as_str()
             )));
         }
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        crate::lock::with_record_lock(&path, |_| Ok(Vec::new()))?;
+        Self::touch_series(&path)?;
         Ok(SeriesRef {
             home: home.clone(),
             kind: kind.to_string(),
-            name: name.to_string(),
+            name: Some(name.to_string()),
             path,
+        })
+    }
+
+    /// Bring a series file into being, empty, through the record lock (§6.4).
+    fn touch_series(path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::lock::with_record_lock(path, |_| Ok(Vec::new()))
+    }
+
+    /// Whether this core files `kind` under a hand-chosen name (§7.1). The first read
+    /// of the `named` bit anywhere: it is what decides whether a missing series file
+    /// is a not-found the hand must answer with `-c`, or one the write mints itself.
+    fn series_is_named(kind: &str) -> Option<bool> {
+        C::kinds().iter().find_map(|(token, shape)| match shape {
+            Shape::Series { named } if *token == kind => Some(*named),
+            _ => None,
         })
     }
 
@@ -356,11 +412,22 @@ impl<C: Core> Store<C> {
     /// carried through verbatim.
     pub fn write_line(&self, sref: &SeriesRef, line: &Line<C::Record>) -> Result<()> {
         if !sref.path.exists() {
-            return Err(Error::not_found(format!(
-                "no series {:?} at {} — mint it with -c (§7.3)",
-                sref.name,
-                sref.home.as_str()
-            )));
+            // A hand-named series is minted explicitly, so a typo cannot conjure one
+            // (§7.3, §18). A determined-name series has nothing to mistype and is
+            // minted by its determinant — for Pensum's nameless `task`, the node's
+            // first task, which is this write.
+            //
+            // Step 7 note: Rationes' `balance` is determined by a *holding entity*,
+            // not by the node, so `rat` must check that determinant exists in its own
+            // bin before writing. The store cannot know — it links no core (I5).
+            if Self::series_is_named(&sref.kind) != Some(false) {
+                return Err(Error::not_found(format!(
+                    "no series {:?} at {} — mint it with -c (§7.3)",
+                    sref.label(),
+                    sref.home.as_str()
+                )));
+            }
+            Self::touch_series(&sref.path)?;
         }
         let encoded = serde_json::to_string(line)?;
         let key = line.key.clone();
@@ -394,7 +461,7 @@ impl<C: Core> Store<C> {
         if !sref.path.exists() {
             return Err(Error::not_found(format!(
                 "no series {:?} at {} (§7.3)",
-                sref.name,
+                sref.label(),
                 sref.home.as_str()
             )));
         }
@@ -422,7 +489,7 @@ impl<C: Core> Store<C> {
         } else {
             Err(Error::not_found(format!(
                 "no line keyed {key} in series {:?} at {} (§7.3)",
-                sref.name,
+                sref.label(),
                 sref.home.as_str()
             )))
         }
@@ -439,7 +506,7 @@ impl<C: Core> Store<C> {
         to_home: &Code,
         to_name: &str,
     ) -> Result<SeriesRef> {
-        let path = self.series_path(to_home, &sref.kind, to_name)?;
+        let path = self.series_path(to_home, &sref.kind, Some(to_name))?;
         if path == sref.path {
             return Ok(sref.clone());
         }
@@ -457,7 +524,7 @@ impl<C: Core> Store<C> {
         Ok(SeriesRef {
             home: to_home.clone(),
             kind: sref.kind.clone(),
-            name: to_name.to_string(),
+            name: Some(to_name.to_string()),
             path,
         })
     }

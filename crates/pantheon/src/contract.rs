@@ -445,7 +445,13 @@ pub fn resolve_series_target<C: Core>(
         }
         // home only — infer iff the node holds exactly one of the tool's own series.
         (Some(home), None) => {
-            let mut found = store.find_series(Some(&home), Some(kind), None)?;
+            // The four forms are the *hand-named* path (§7.3): a nameless series has
+            // no name for a hand to have omitted, so it is not a candidate here.
+            let mut found: Vec<SeriesRef> = store
+                .find_series(Some(&home), Some(kind), None)?
+                .into_iter()
+                .filter(|s| s.name.is_some())
+                .collect();
             match found.len() {
                 0 => Err(Error::not_found(format!(
                     "no {} series at {} to append to — mint one with -c (§7.3)",
@@ -457,7 +463,7 @@ pub fn resolve_series_target<C: Core>(
                     Ok(SeriesTarget {
                         home,
                         kind: series.kind.clone(),
-                        name: series.name.clone(),
+                        name: series.name.clone().expect("named by the filter above"),
                         values,
                         existing: Some(series),
                     })
@@ -466,7 +472,7 @@ pub fn resolve_series_target<C: Core>(
                     "{} holds more than one {} series: {} — name one (§7.3)",
                     home.as_str(),
                     C::NAME,
-                    join(found.iter().map(|s| s.name.as_str()))
+                    join(found.iter().map(SeriesRef::label))
                 ))),
             }
         }
@@ -682,22 +688,31 @@ fn join<'a>(items: impl Iterator<Item = &'a str>) -> String {
 /// One record as the contract emits it. The envelope on disk is `{key,refs,data}`;
 /// the home, core, kind, and series come from the file's location and name (I3) and
 /// are added here so a reader of the JSON alone knows what it is looking at.
+///
+/// `series` is **absent** — not null — where the core's series is determined (§9.6):
+/// there is no name to report, and a hollow key would read as one withheld. This is
+/// the same conditional insert [`RecordChange::body`] makes.
 pub fn line_json<T: Serialize>(
     core: &str,
     home: &Code,
     kind: &str,
-    series: &str,
+    series: Option<&str>,
     line: &Line<T>,
 ) -> Result<Value> {
-    Ok(json!({
-        "core": core,
-        "home": home.as_str(),
-        "kind": kind,
-        "series": series,
-        "key": line.key.as_str(),
-        "refs": line.refs.iter().map(Ref::to_token).collect::<Vec<_>>(),
-        "data": serde_json::to_value(&line.data)?,
-    }))
+    let mut out = serde_json::Map::new();
+    out.insert("core".into(), json!(core));
+    out.insert("home".into(), json!(home.as_str()));
+    out.insert("kind".into(), json!(kind));
+    if let Some(series) = series {
+        out.insert("series".into(), json!(series));
+    }
+    out.insert("key".into(), json!(line.key.as_str()));
+    out.insert(
+        "refs".into(),
+        json!(line.refs.iter().map(Ref::to_token).collect::<Vec<_>>()),
+    );
+    out.insert("data".into(), serde_json::to_value(&line.data)?);
+    Ok(Value::Object(out))
 }
 
 /// A series' present, as [`line_json`] (§7.2).
@@ -706,7 +721,7 @@ pub fn present_json<T: Serialize>(core: &str, present: &PresentLine<T>) -> Resul
         core,
         &present.home,
         &present.kind,
-        &present.name,
+        present.name.as_deref(),
         &present.line,
     )
 }
@@ -715,7 +730,7 @@ pub fn present_json<T: Serialize>(core: &str, present: &PresentLine<T>) -> Resul
 pub fn series_json<T: Serialize>(core: &str, sref: &SeriesRef, lines: &[Line<T>]) -> Result<Value> {
     let rows = lines
         .iter()
-        .map(|line| line_json(core, &sref.home, &sref.kind, &sref.name, line))
+        .map(|line| line_json(core, &sref.home, &sref.kind, sref.name.as_deref(), line))
         .collect::<Result<Vec<_>>>()?;
     Ok(Value::Array(rows))
 }
