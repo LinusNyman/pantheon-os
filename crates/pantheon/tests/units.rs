@@ -1144,3 +1144,172 @@ fn a_date_keyed_line_never_blocks_a_rename() {
         .is_ok()
     );
 }
+
+// ── reaching, re-keying, and re-homing a line (§5.4, §7.2) ──────────────────
+
+/// A tree with one task at `csa` and two at `cso`, all through the store.
+fn tasked_root() -> (PathBuf, pantheon::Store<Nameless>) {
+    let root = societas_root();
+    let store = pantheon::Store::<Nameless>::new(&root);
+    for (code, keys) in [
+        ("csa", &["reach_out_to_alex"][..]),
+        ("cso", &["file_taxes", "book_flights"][..]),
+    ] {
+        let home = Code::parse(code).unwrap();
+        let sref = SeriesRef {
+            home: home.clone(),
+            kind: "task".to_string(),
+            name: None,
+            path: store.series_path(&home, "task", None).unwrap(),
+        };
+        for key in keys {
+            store.write_line(&sref, &line(key)).unwrap();
+        }
+    }
+    (root, store)
+}
+
+#[test]
+fn a_key_is_reached_tree_wide_and_ambiguity_is_listed_not_guessed() {
+    let (root, store) = tasked_root();
+    let (sref, found) = store
+        .locate_line(&Key::parse("file_taxes").unwrap(), None, None)
+        .unwrap();
+    assert_eq!(sref.home.as_str(), "cso");
+    assert_eq!(found.key.as_str(), "file_taxes");
+
+    let missing = store
+        .locate_line(&Key::parse("never_written").unwrap(), None, None)
+        .unwrap_err();
+    assert_eq!(missing.exit_code(), pantheon::ExitCode::NotFound);
+
+    // The same key at two nodes: listed with its homes, never guessed (§7.3).
+    let home = Code::parse("csa").unwrap();
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&home, "task", None).unwrap(),
+    };
+    store.write_line(&sref, &line("file_taxes")).unwrap();
+    let ambiguous = store
+        .locate_line(&Key::parse("file_taxes").unwrap(), None, None)
+        .unwrap_err();
+    assert_eq!(ambiguous.exit_code(), pantheon::ExitCode::Usage);
+
+    // And that second one is the soft cross-node duplicate `add` warns on (§5.4).
+    let elsewhere = store
+        .duplicate_keys_elsewhere(&home, &Key::parse("file_taxes").unwrap(), None)
+        .unwrap();
+    assert_eq!(elsewhere.len(), 1);
+    assert_eq!(elsewhere[0].home.as_str(), "cso");
+    drop(root);
+}
+
+#[test]
+fn renaming_a_line_moves_its_key_and_leaves_its_neighbours_verbatim() {
+    let (root, store) = tasked_root();
+    let home = Code::parse("cso").unwrap();
+    let path = store.series_path(&home, "task", None).unwrap();
+    let sref = SeriesRef {
+        home: home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: path.clone(),
+    };
+    let before: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+
+    store
+        .rename_line(
+            &sref,
+            &Key::parse("file_taxes").unwrap(),
+            &Key::parse("do_the_taxes").unwrap(),
+        )
+        .unwrap();
+
+    let after: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert!(after[0].contains("do_the_taxes"));
+    assert_eq!(after[1], before[1], "an untouched line is carried verbatim");
+
+    // Onto a key the same file already holds: exit 3, and nothing is written.
+    let err = store
+        .rename_line(
+            &sref,
+            &Key::parse("do_the_taxes").unwrap(),
+            &Key::parse("book_flights").unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap().lines().count(),
+        2,
+        "a refused rename writes nothing"
+    );
+    drop(root);
+}
+
+#[test]
+fn moving_a_line_lands_it_at_the_destination_and_drops_the_source() {
+    let (root, store) = tasked_root();
+    let from_home = Code::parse("cso").unwrap();
+    let to_home = Code::parse("csa").unwrap();
+    let source = SeriesRef {
+        home: from_home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&from_home, "task", None).unwrap(),
+    };
+    let key = Key::parse("file_taxes").unwrap();
+
+    let dest = store.move_line(&source, &to_home, &key).unwrap();
+    assert_eq!(dest.home.as_str(), "csa");
+    assert!(dest.path.ends_with("csa__task.jsonl"));
+
+    // Exactly one home holds it now — the move is not a copy.
+    let found = store.find_line(&key, None, None).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].0.home.as_str(), "csa");
+    // The line the source keeps is untouched.
+    let left = store.read_series(&source).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].key.as_str(), "book_flights");
+    drop(root);
+}
+
+#[test]
+fn moving_onto_an_occupied_key_is_refused_rather_than_clobbering() {
+    let (root, store) = tasked_root();
+    let from_home = Code::parse("cso").unwrap();
+    let to_home = Code::parse("csa").unwrap();
+    let source = SeriesRef {
+        home: from_home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&from_home, "task", None).unwrap(),
+    };
+    // Give the destination a task of the same name first.
+    let dest = SeriesRef {
+        home: to_home.clone(),
+        kind: "task".to_string(),
+        name: None,
+        path: store.series_path(&to_home, "task", None).unwrap(),
+    };
+    store.write_line(&dest, &line("file_taxes")).unwrap();
+
+    let err = store
+        .move_line(&source, &to_home, &Key::parse("file_taxes").unwrap())
+        .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+    // Both sides intact: a refused move loses nothing.
+    assert_eq!(store.read_series(&source).unwrap().len(), 2);
+    assert_eq!(store.read_series(&dest).unwrap().len(), 2);
+    drop(root);
+}

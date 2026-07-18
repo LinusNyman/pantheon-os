@@ -531,6 +531,187 @@ impl<C: Core> Store<C> {
         })
     }
 
+    // ── reaching a line by its key (§5.4) ───────────────────────────────────────
+
+    /// Every one of this core's lines keyed `key`, with the series each sits in.
+    ///
+    /// **The one lookup that opens record files** rather than resting on their names
+    /// (§5.0): a name-keyed line's identity is inside its series, so finding it walks
+    /// this core's series in scope and scans their keys. The naming triple isolates
+    /// the walk to the small text, and bulk is never opened (§6.3).
+    pub fn find_line(
+        &self,
+        key: &Key,
+        kind: Option<&str>,
+        at: Option<&Code>,
+    ) -> Result<Vec<(SeriesRef, Line<C::Record>)>> {
+        let mut out = Vec::new();
+        for sref in self.find_series(at, kind, None)? {
+            if let Some(line) = self
+                .read_series(&sref)?
+                .into_iter()
+                .find(|line| line.key == *key)
+            {
+                out.push((sref, line));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Resolve a key to exactly one line (§7.3). Zero is not found (exit `4`); more
+    /// than one is listed with its candidate homes rather than guessed (exit `2`),
+    /// exactly as an ambiguous slug is — a key is unique **per core**, not per node,
+    /// so a lookup with no `-H` is deliberately tree-wide (§5.4).
+    pub fn locate_line(
+        &self,
+        key: &Key,
+        kind: Option<&str>,
+        at: Option<&Code>,
+    ) -> Result<(SeriesRef, Line<C::Record>)> {
+        let mut found = self.find_line(key, kind, at)?;
+        match found.len() {
+            0 => Err(Error::not_found(format!(
+                "no {} record keyed {key} (§7.3)",
+                C::NAME
+            ))),
+            1 => Ok(found.pop().expect("one candidate")),
+            _ => Err(Error::usage(format!(
+                "{key} keys a record at more than one node: {} — name one with -H (§7.3)",
+                found
+                    .iter()
+                    .map(|(s, _)| s.home.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
+    }
+
+    /// This core's lines keyed `key` at some node *other* than `home` — the soft half
+    /// of §5.4's per-core uniqueness. Finding these costs a walk, which is the cost
+    /// the softness exists to avoid paying on every write, so `add` warns and the fix
+    /// is made at the source (§18).
+    pub fn duplicate_keys_elsewhere(
+        &self,
+        home: &Code,
+        key: &Key,
+        kind: Option<&str>,
+    ) -> Result<Vec<SeriesRef>> {
+        Ok(self
+            .find_line(key, kind, None)?
+            .into_iter()
+            .map(|(sref, _)| sref)
+            .filter(|sref| sref.home.as_str() != home.as_str())
+            .collect())
+    }
+
+    /// Re-key one line in place — the primitive behind a name-keyed record's `rename`
+    /// (§7.2), and the counterpart of [`Store::relocate_series`] and
+    /// [`Store::relocate_entity`]. Where those are a file `mv`, this is a rewrite
+    /// *inside* a file: a task's identity is its key, and its key is a line's first
+    /// field rather than a filename (§5.4).
+    ///
+    /// **Call this before [`Cascade`](crate::Cascade)`::apply`, never after** — the
+    /// same ordering as a relocate, for the same reason. Refuses an occupied key
+    /// (exit `3`): the within-file half of the check `plan_cascade` makes tree-wide.
+    /// Untouched lines are carried through byte-for-byte.
+    pub fn rename_line(&self, sref: &SeriesRef, from: &Key, to: &Key) -> Result<()> {
+        if from == to {
+            return Ok(());
+        }
+        let (from, to) = (from.clone(), to.clone());
+        let mut found = false;
+        crate::lock::with_record_lock(&sref.path, |prev| {
+            let text = Self::as_text(prev)?;
+            let mut out = String::with_capacity(text.len());
+            for raw in text.lines() {
+                if raw.trim().is_empty() {
+                    continue;
+                }
+                let mut existing: RawLine = serde_json::from_str(raw)?;
+                if existing.key == to {
+                    return Err(Error::validation(format!(
+                        "{} already keys a record at {} — renaming onto it would make \
+                         the two indistinguishable (§7.2, §18)",
+                        to,
+                        sref.home.as_str()
+                    )));
+                }
+                if existing.key == from {
+                    found = true;
+                    existing.key = to.clone();
+                    out.push_str(&serde_json::to_string(&existing)?);
+                } else {
+                    out.push_str(raw);
+                }
+                out.push('\n');
+            }
+            Ok(out.into_bytes())
+        })?;
+        if found {
+            Ok(())
+        } else {
+            Err(Error::not_found(format!(
+                "no line keyed {from} in series {:?} at {} (§7.3)",
+                sref.label(),
+                sref.home.as_str()
+            )))
+        }
+    }
+
+    /// Re-home one line — the primitive behind a name-keyed record's `move` (§7.2).
+    ///
+    /// Unlike [`Store::relocate_series`] this is **not a file `mv`**: a task's home is
+    /// its node's series file, so re-homing the record moves a *line between two
+    /// files*. Two files means two record locks (§6.4) and no atomicity — `rename`'s
+    /// one-syscall guarantee is simply not available here. So the order is chosen by
+    /// what `pan validate` can say if a crash lands between them:
+    ///
+    /// - **Destination first** leaves the line at *both* nodes. That is the soft
+    ///   `duplicate_slug` finding §5.4 already models, naming both files — precisely
+    ///   the two a hand must look at — every ref still resolves, and the fix is
+    ///   finishing the move.
+    /// - **Source first** leaves it at *neither*, and §18 keeps no copy. Every ref
+    ///   becomes a dangling-ref *error* reported at the referring file, which cannot
+    ///   say where the record went.
+    ///
+    /// One order's crash is a state the lint already describes; the other's is loss
+    /// diagnosed at the wrong file. Destination first, source second.
+    pub fn move_line(&self, from: &SeriesRef, to_home: &Code, key: &Key) -> Result<SeriesRef> {
+        if from.home.as_str() == to_home.as_str() {
+            return Ok(from.clone());
+        }
+        let line = self
+            .read_series(from)?
+            .into_iter()
+            .find(|line| line.key == *key)
+            .ok_or_else(|| {
+                Error::not_found(format!(
+                    "no line keyed {key} in series {:?} at {} (§7.3)",
+                    from.label(),
+                    from.home.as_str()
+                ))
+            })?;
+
+        let dest = SeriesRef {
+            home: to_home.clone(),
+            kind: from.kind.clone(),
+            name: from.name.clone(),
+            path: self.series_path(to_home, &from.kind, from.name.as_deref())?,
+        };
+        // Refusing here rather than clobbering. The window between this check and the
+        // write is the one §6.4 already declines to close — only a tree-wide lock
+        // would, and §18 leaves nowhere to keep one.
+        if dest.path.exists() && self.read_series(&dest)?.iter().any(|line| line.key == *key) {
+            return Err(Error::validation(format!(
+                "{} already holds a record keyed {key} (§7.2)",
+                to_home.as_str()
+            )));
+        }
+        self.write_line(&dest, &line)?;
+        self.remove_line(from, key)?;
+        Ok(dest)
+    }
+
     fn as_text(prev: Option<&[u8]>) -> Result<&str> {
         prev.map(std::str::from_utf8)
             .transpose()
