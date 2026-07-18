@@ -7,8 +7,13 @@
 //! key, how a home and a series are *found* rather than invented, and how a record
 //! is shaped into the emitted JSON.
 //!
-//! Step 2 lands the Series-shaped executors, the shape Annales exercises (§8.6).
-//! The Partitioned and Document paths grow here with the cores that exercise them.
+//! Step 2 landed the Series-shaped executors (§8.6); step 3 the Partitioned ones
+//! (§8.1). The Document path grows here with the core that exercises it (step 5).
+//!
+//! The two target resolvers stay separate on purpose. A series verb infers a
+//! *container that must already exist*, so its grammar is about finding one; a
+//! partitioned `add` **is** the record it creates (§18), so its grammar is only
+//! `[home] <name>` and arity is the whole of the discipline.
 
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -19,9 +24,9 @@ use sha2::{Digest, Sha256};
 
 use crate::code::{Code, parse_node_dirname};
 use crate::core::Core;
-use crate::envelope::{Key, Line, Ref};
+use crate::envelope::{Entity, Key, Line, Ref};
 use crate::name::normalize_token;
-use crate::store::{PresentLine, SeriesRef, Store};
+use crate::store::{EntityRef, PresentLine, SeriesRef, Store};
 use crate::tree::resolve_code;
 use crate::{Error, Result};
 
@@ -92,26 +97,41 @@ pub struct RecordChange {
     pub core: String,
     pub home: String,
     pub kind: String,
-    pub series: String,
+    /// Which collection the record sits in — `None` for a partitioned core, which
+    /// keeps no series to name (§7.1).
+    pub series: Option<String>,
+    /// The record's identity: a series line's key, or an entity's slug — its *name*
+    /// is its key, since a partitioned entity stores none (§5.4, §18).
     pub key: String,
     /// The record as it stands, if it already exists — what an overwrite replaces.
     pub before: Option<Value>,
     /// The record as it would stand; `None` for a removal.
     pub after: Option<Value>,
+    /// What a rename would rewrite elsewhere in the tree (§5.4). It rides in the
+    /// change — and so in the token — because a review showing three refs must not
+    /// be applied against a tree that has since grown a fourth (§7.3).
+    pub cascade: Option<Value>,
 }
 
 impl RecordChange {
     fn body(&self) -> Value {
-        json!({
-            "verb": self.verb,
-            "core": self.core,
-            "home": self.home,
-            "kind": self.kind,
-            "series": self.series,
-            "key": self.key,
-            "before": self.before,
-            "after": self.after,
-        })
+        // Built as a map rather than a literal so a shape that has no series (or no
+        // cascade) omits the key entirely rather than carrying a hollow one.
+        let mut body = serde_json::Map::new();
+        body.insert("verb".into(), json!(self.verb));
+        body.insert("core".into(), json!(self.core));
+        body.insert("home".into(), json!(self.home));
+        body.insert("kind".into(), json!(self.kind));
+        if let Some(series) = &self.series {
+            body.insert("series".into(), json!(series));
+        }
+        body.insert("key".into(), json!(self.key));
+        body.insert("before".into(), self.before.clone().unwrap_or(Value::Null));
+        body.insert("after".into(), self.after.clone().unwrap_or(Value::Null));
+        if let Some(cascade) = &self.cascade {
+            body.insert("cascade".into(), cascade.clone());
+        }
+        Value::Object(body)
     }
 
     /// A hash of the exact computed change (§7.3). Deterministic: serde_json sorts
@@ -528,6 +548,85 @@ fn classify_tokens<'a, C: Core>(
     Ok((home, name, rest))
 }
 
+// ── the partitioned target: a home and a name, never a value stream (§7.3) ────
+
+/// A resolved entity target: which slug, at which node, under which token.
+pub struct EntityTarget {
+    pub home: Code,
+    pub kind: String,
+    pub slug: String,
+    /// The entity file, if it already exists — `Some` makes a write an overwrite.
+    pub existing: Option<EntityRef>,
+}
+
+/// What a partitioned verb knows before the tree is walked (§7.3). Deliberately not
+/// a [`TargetQuery`]: a series verb infers a *container that must already exist*,
+/// while a partitioned `add` **is** the record it creates (§18), so there is nothing
+/// to find and no trailing value stream to separate.
+pub struct EntityQuery<'a> {
+    /// Which of the core's tokens is meant — for a write, exactly one (§7.2).
+    pub kind: &'a str,
+    /// `-H`, if given.
+    pub home: Option<&'a str>,
+    /// The leading positionals, still unclassified.
+    pub positionals: &'a [String],
+    /// The locus; `None` reads the process's working directory (§7.3).
+    pub pwd: Option<&'a Path>,
+}
+
+/// Read `[home] <name>` into an address (§7.3). Total on arity: one token is a name
+/// (or a home with the name missing), two are a home and a name, and three or more
+/// is a usage error rather than a silent join — `alb csa john appleseed` must refuse,
+/// because a name that quietly became `john` would be the wrong record forever.
+pub fn resolve_entity_target<C: Core>(
+    store: &Store<C>,
+    query: &EntityQuery<'_>,
+) -> Result<EntityTarget> {
+    let &EntityQuery {
+        kind, home, pwd, ..
+    } = query;
+    let mut home = home.map(Code::parse).transpose()?;
+    let mut rest = query.positionals;
+
+    // A lone leading token is a home only if it names one *and* something follows it
+    // to be the name; `-H` is how you force the home reading of a single token.
+    if home.is_none()
+        && let Some((first, tail)) = rest.split_first()
+        && !tail.is_empty()
+        && let Some(code) = as_node_code(store.root(), first)
+    {
+        home = Some(code);
+        rest = tail;
+    }
+
+    let slug = match rest {
+        [] => {
+            return Err(Error::usage(format!("name the {} record (§7.3)", C::NAME)));
+        }
+        [one] => normalize_token(one, "name")?,
+        [first, ..] => {
+            let joined =
+                crate::name::normalize(&rest.join("_")).unwrap_or_else(|| (*first).to_string());
+            return Err(Error::usage(format!(
+                "a name is one token, and {} were given — did you mean {joined:?}? (§5.1, §7.3)",
+                rest.len()
+            )));
+        }
+    };
+
+    let home = match home {
+        Some(home) => home,
+        None => code_at_path(store.root(), pwd)?,
+    };
+    let existing = store.slug_taken_at(&home, &slug)?;
+    Ok(EntityTarget {
+        home,
+        kind: kind.to_string(),
+        slug,
+        existing,
+    })
+}
+
 /// Whether a token names a node in the tree — the classification that tells a home
 /// token from a series name (§7.3).
 fn as_node_code(root: &Path, token: &str) -> Option<Code> {
@@ -613,6 +712,38 @@ pub fn fold_json<T: Serialize>(core: &str, folded: &[PresentLine<T>]) -> Result<
     let rows = folded
         .iter()
         .map(|present| present_json(core, present))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Value::Array(rows))
+}
+
+/// One entity as the contract emits it. The envelope on disk is `{refs,data}`; the
+/// home, core, kind, and slug are the file's location and name (I3) and are added
+/// here so a reader of the JSON alone knows what it is looking at. There is no
+/// `key` — an entity's *name* is its key, and no `series` — there is none (§18).
+pub fn entity_json<T: Serialize>(
+    core: &str,
+    eref: &EntityRef,
+    entity: &Entity<T>,
+) -> Result<Value> {
+    Ok(json!({
+        "core": core,
+        "home": eref.home.as_str(),
+        "kind": eref.kind,
+        "slug": eref.slug,
+        "refs": entity.refs.iter().map(Ref::to_token).collect::<Vec<_>>(),
+        "data": serde_json::to_value(&entity.data)?,
+    }))
+}
+
+/// A fold across a subtree, one row per entity (§7.2). Unlike a series fold nothing
+/// is collapsed: an entity is not a sample, so each file is already its own present.
+pub fn entity_fold_json<T: Serialize>(
+    core: &str,
+    folded: &[(EntityRef, Entity<T>)],
+) -> Result<Value> {
+    let rows = folded
+        .iter()
+        .map(|(eref, entity)| entity_json(core, eref, entity))
         .collect::<Result<Vec<_>>>()?;
     Ok(Value::Array(rows))
 }

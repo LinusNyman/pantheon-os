@@ -617,10 +617,11 @@ fn change(
         core: Annales::NAME.to_string(),
         home: sref.home.as_str().to_string(),
         kind: sref.kind.clone(),
-        series: sref.name.clone(),
+        series: Some(sref.name.clone()),
         key: key.to_string(),
         before,
         after,
+        cascade: None,
     }
 }
 

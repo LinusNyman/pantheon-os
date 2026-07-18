@@ -275,6 +275,52 @@ fn a_stale_plan_token_is_a_validation_error() {
     assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
 }
 
+#[test]
+fn a_change_body_names_a_series_only_when_there_is_one() {
+    let base = pantheon::RecordChange {
+        verb: "add",
+        core: "annales".to_string(),
+        home: "ecv".to_string(),
+        kind: "log".to_string(),
+        series: Some("weight".to_string()),
+        key: "260718".to_string(),
+        before: None,
+        after: Some(serde_json::json!({"values": ["78.4"]})),
+        cascade: None,
+    };
+
+    // The plan token is redacted in every snapshot, so it is pinned here instead:
+    // this is the exact byte string a Series change has always hashed. An edit to
+    // `body()` that reorders, adds, or renames a key breaks *this* rather than
+    // silently invalidating every token a hand is holding (§7.3).
+    let series_body = r#"{"after":{"values":["78.4"]},"before":null,"core":"annales","home":"ecv","key":"260718","kind":"log","series":"weight","verb":"add"}"#;
+    let token_of = |c: &pantheon::RecordChange| c.to_json()["change"].to_string();
+    assert_eq!(token_of(&base), series_body);
+
+    // A partitioned core keeps no series, so the key is absent rather than hollow —
+    // and the cascade appears only on the verb that has one.
+    let entity = pantheon::RecordChange {
+        core: "album".to_string(),
+        kind: "person".to_string(),
+        series: None,
+        key: "mara".to_string(),
+        ..base.clone()
+    };
+    let body = token_of(&entity);
+    assert!(!body.contains("series"), "{body}");
+    assert!(!body.contains("cascade"), "{body}");
+
+    let renamed = pantheon::RecordChange {
+        verb: "rename",
+        cascade: Some(serde_json::json!([{"path": "x", "refs": 1}])),
+        ..entity.clone()
+    };
+    assert!(token_of(&renamed).contains("cascade"));
+    // And the cascade is part of the identity it guards: a tree that grew a fourth
+    // ref since the review must not pass the token check (§7.3).
+    assert_ne!(entity.token(), renamed.token());
+}
+
 // ── the partitioned register (§6.1, step 3) ─────────────────────────────────
 
 /// A stand-in for Album: three tokens, all partitioned, one flat record.
