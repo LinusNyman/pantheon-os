@@ -1,0 +1,35 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 307
+expression: out
+---
+ann ecv wieght 1 -a 260718
+  # a typo cannot conjure a series
+  => exit 4: no annales series "wieght" at ecv — mint it with -c (§7.3)
+ann nosuch 1 -a 260718
+  # no such series, tree-wide
+  => exit 4: no annales series named "nosuch" — mint it with -c (§7.3)
+ann weight 1 -c
+  # -c is refused on an inference form
+  => exit 2: -c needs the home and the series both named; it is refused on an inference form (§7.3)
+ann rm 999999 --series weight -y
+  # no line at that key
+  => exit 4: no line keyed 999999 in series "weight" at ecv (§7.2)
+ann list -k task
+  # a token this core does not own
+  => exit 2: annales has no "task" token; it declares `log` (§7.1)
+ann ecv weight    -a 260722
+  # a blank reading value
+  => exit 3: reading value 0 is blank; a value nobody can read is not a fact (§8.6)
+ann ecv weight 1 -a 260718
+  # an overwrite, piped, without -y
+  => exit 5: a pending add awaiting review
+ann ecv 1 -a 260718
+  # two series at the node: ambiguous
+  => exit 2: ecv holds more than one annales series: places, weight — name one (§7.3)
+ann ecv weight 1 -a sometime
+  # a malformed --at
+  => exit 2: -a takes YYMMDD, YYMMDDThhmm, or hhmm; got "sometime" (§7.3)
+ann ecv weight 1 -a 260723 -r office
+  # a malformed reference
+  => exit 2: reference "office" is not `core:slug`

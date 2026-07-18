@@ -1,0 +1,18 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 123
+expression: pretty(&edited)
+---
+{
+  "core": "annales",
+  "data": {
+    "values": [
+      "79.0"
+    ]
+  },
+  "home": "ecv",
+  "key": "260718",
+  "kind": "log",
+  "refs": [],
+  "series": "weight"
+}

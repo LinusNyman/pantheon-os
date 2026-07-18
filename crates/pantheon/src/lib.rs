@@ -8,8 +8,10 @@
 //! discovery (§7.1) · [`schema`] the discovery surface (§7.2) · [`root`] root
 //! resolution (§6.2) · [`tree`] the walk (§5.0) · [`resolve`] `core:slug` →
 //! record (§5.0) · [`validate`] the cross-cutting lint (§5.5) · [`lock`] the record
-//! write primitive (§6.4) · [`plan`] planned transactions (§10.1) · [`meta`] node
-//! annotations (§5.2) · [`error`] exit codes (§7.3).
+//! write primitive (§6.4) · [`store`] the verb machinery (§7.1) · [`contract`] the
+//! verb runner every core's CLI ends in (§7.1, §7.3) · [`plan`] planned
+//! transactions (§10.1) · [`meta`] node annotations (§5.2) · [`error`] exit codes
+//! (§7.3).
 
 // Pedantic is on in CI (`-W clippy::pedantic -D warnings`); we satisfy it. The five
 // lints allowed below are the conventional pedantic-noise set: doc/naming-preference
@@ -24,6 +26,7 @@
 
 pub mod classify;
 pub mod code;
+pub mod contract;
 pub mod core;
 pub mod envelope;
 pub mod error;
@@ -42,6 +45,7 @@ pub mod validate;
 
 pub use classify::{DocExt, FileClass, classify};
 pub use code::{CharToken, Code, CodeForm, NodeName};
+pub use contract::{Checkpoint, RecordChange, Response, SeriesTarget};
 pub use core::{Core, CoreRegistry, DiscoveredCore};
 pub use envelope::{Entity, Frontmatter, Key, KeyShape, Line, RawEntity, RawLine, Ref};
 pub use error::{Error, ExitCode, Result};
@@ -54,6 +58,6 @@ pub use resolve::{RefOutcome, Resolution, resolve_all};
 pub use root::resolve_root;
 pub use schema::{CoreSchema, TokenSchema, schema};
 pub use shape::Shape;
-pub use store::Store;
+pub use store::{PresentLine, SeriesRef, Store};
 pub use tree::{Node, TreeRoot, build_tree, resolve_code};
 pub use validate::{Finding, FindingCode, Severity, validate};

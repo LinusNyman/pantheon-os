@@ -3,17 +3,46 @@
 //! shape) rewrite an entity `.json`, add/edit/rm a keyed line in a `.jsonl` series,
 //! or rewrite a document, each under the file lock (§6.4).
 //!
-//! Step 1 lands the type and its signatures — the substrate every later core
-//! compiles against. The verb bodies firm up with the first core (Annales, step 2):
-//! a verb with no core to exercise it cannot be honestly snapshot-frozen.
+//! Step 2 (Annales) lands the **Series** paths — the one shape its `log` token
+//! exercises (§8.6). The Partitioned and Document paths stay deferred until the
+//! cores that exercise them (Album step 3, Tabella step 5): a verb with no core to
+//! exercise it cannot be honestly snapshot-frozen.
+//!
+//! A series file is `[code]__[kind]__[name].jsonl` in its node's meta dir (§5.2),
+//! one [`Line`] per keyed record. A write rewrites the whole file under the record
+//! lock, leaving untouched lines byte-for-byte as they were — the file stays a thing
+//! a hand can read and edit (I6, I8).
 
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use crate::classify::{FileClass, classify};
 use crate::code::Code;
 use crate::core::Core;
-use crate::envelope::{Line, Ref};
+use crate::envelope::{Key, Line, RawLine, Ref};
+use crate::shape::Shape;
+use crate::tree::{Node, TreeRoot, build_tree, resolve_code};
 use crate::{Error, Result};
+
+/// One of this core's series files, located in the tree (§5.2). The home, kind, and
+/// name are the file's location and name, never read from inside it (I3).
+#[derive(Clone, Debug)]
+pub struct SeriesRef {
+    pub home: Code,
+    pub kind: String,
+    pub name: String,
+    pub path: PathBuf,
+}
+
+/// A series folded to its present (I1): the line at the latest key, carrying the
+/// series it came from — a fold across a subtree loses that otherwise.
+#[derive(Clone, Debug)]
+pub struct PresentLine<T> {
+    pub home: Code,
+    pub kind: String,
+    pub name: String,
+    pub line: Line<T>,
+}
 
 /// The subtree-scoped store over one core's records (§7.1).
 pub struct Store<C: Core> {
@@ -30,38 +59,368 @@ impl<C: Core> Store<C> {
         }
     }
 
-    /// Validate, then write by the token's shape, under the record lock (§6.4, §7.1).
-    pub fn write(
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    // ── the core's own tokens (§5.0: another core's series is not ours to count) ──
+
+    /// This core's tokens stored as a series (§7.1).
+    fn series_kinds() -> impl Iterator<Item = &'static str> {
+        C::kinds()
+            .iter()
+            .filter(|(_, shape)| matches!(shape, Shape::Series { .. }))
+            .map(|(token, _)| *token)
+    }
+
+    /// Whether `kind` is one of this core's series tokens.
+    pub fn owns_series_kind(kind: &str) -> bool {
+        Self::series_kinds().any(|k| k == kind)
+    }
+
+    /// The core's sole series token. A core declaring more than one must be told
+    /// which with `-k` (§7.2); a core keeping no series cannot take a series verb.
+    pub fn sole_series_kind() -> Result<&'static str> {
+        let mut kinds = Self::series_kinds();
+        let first = kinds
+            .next()
+            .ok_or_else(|| Error::usage(format!("{} keeps no series (§7.1)", C::NAME)))?;
+        if kinds.next().is_some() {
+            return Err(Error::usage(format!(
+                "{} declares more than one series token; name one with -k (§7.2)",
+                C::NAME
+            )));
+        }
+        Ok(first)
+    }
+
+    // ── locating ────────────────────────────────────────────────────────────────
+
+    fn series_file_name(home: &Code, kind: &str, name: &str) -> String {
+        format!("{}__{kind}__{name}.jsonl", home.as_str())
+    }
+
+    /// Where a series lives, whether or not it exists yet (§5.2).
+    pub fn series_path(&self, home: &Code, kind: &str, name: &str) -> Result<PathBuf> {
+        let node = resolve_code(&self.root, home)?;
+        Ok(node
+            .join(format!("{}__", home.as_str()))
+            .join(Self::series_file_name(home, kind, name)))
+    }
+
+    /// Every one of this core's series in the tree (or under `at`), optionally
+    /// filtered by token and name. The walk reads filenames only (I5, §5.0).
+    pub fn find_series(
+        &self,
+        at: Option<&Code>,
+        kind: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Vec<SeriesRef>> {
+        let nodes = match build_tree(&self.root, at)? {
+            TreeRoot::Forest(nodes) => nodes,
+            TreeRoot::Subtree(node) => vec![node],
+        };
+        let mut out = Vec::new();
+        for node in &nodes {
+            Self::collect_series(node, kind, name, &mut out)?;
+        }
+        out.sort_by(|a, b| {
+            a.home
+                .as_str()
+                .cmp(b.home.as_str())
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        Ok(out)
+    }
+
+    fn collect_series(
+        node: &Node,
+        kind: Option<&str>,
+        name: Option<&str>,
+        out: &mut Vec<SeriesRef>,
+    ) -> Result<()> {
+        // Records live in the node's meta dir (§5.2).
+        let meta = node.path.join(format!("{}__", node.code.as_str()));
+        if meta.is_dir() {
+            for entry in std::fs::read_dir(&meta)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() {
+                    continue;
+                }
+                let file_name = entry.file_name().to_string_lossy().into_owned();
+                let FileClass::NamedSeries {
+                    kind: found_kind,
+                    name: found_name,
+                    ..
+                } = classify(&file_name, false, &node.code)
+                else {
+                    continue;
+                };
+                // Another core's series at this node is not ours to count (§5.0).
+                if !Self::owns_series_kind(&found_kind)
+                    || kind.is_some_and(|want| want != found_kind)
+                    || name.is_some_and(|want| want != found_name)
+                {
+                    continue;
+                }
+                out.push(SeriesRef {
+                    home: node.code.clone(),
+                    kind: found_kind,
+                    name: found_name,
+                    path: entry.path(),
+                });
+            }
+        }
+        for child in &node.children {
+            Self::collect_series(child, kind, name, out)?;
+        }
+        Ok(())
+    }
+
+    /// Resolve a series by name to exactly one file (§7.3). Zero is not found (exit
+    /// `4`); more than one is reported with its candidate homes rather than guessed
+    /// (exit `2`).
+    pub fn locate(&self, name: &str, kind: Option<&str>, at: Option<&Code>) -> Result<SeriesRef> {
+        let mut found = self.find_series(at, kind, Some(name))?;
+        match found.len() {
+            0 => Err(Error::not_found(format!(
+                "no {} series named {name:?} (§7.3)",
+                C::NAME
+            ))),
+            1 => Ok(found.pop().expect("one candidate")),
+            _ => Err(Error::usage(format!(
+                "series {name:?} is at more than one node: {} — name one with -H (§7.3)",
+                found
+                    .iter()
+                    .map(|s| s.home.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
+    }
+
+    // ── reading ─────────────────────────────────────────────────────────────────
+
+    /// Read a collection whole (§7.2).
+    pub fn read_series(&self, sref: &SeriesRef) -> Result<Vec<Line<C::Record>>> {
+        let text = match std::fs::read_to_string(&sref.path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Error::not_found(format!(
+                    "no series {:?} at {} (§7.3)",
+                    sref.name,
+                    sref.home.as_str()
+                )));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        Self::parse_lines(&text, &sref.path)
+    }
+
+    fn parse_lines(text: &str, path: &Path) -> Result<Vec<Line<C::Record>>> {
+        let mut out = Vec::new();
+        for (i, raw) in text.lines().enumerate() {
+            if raw.trim().is_empty() {
+                continue;
+            }
+            let line: Line<C::Record> = serde_json::from_str(raw).map_err(|e| {
+                Error::validation(format!(
+                    "{}: line {} does not parse: {e}",
+                    path.display(),
+                    i + 1
+                ))
+            })?;
+            out.push(line);
+        }
+        Ok(out)
+    }
+
+    /// The present of a series (I1): the line at the latest key. Keys sort
+    /// lexicographically, which for `YYMMDD`(`Thhmm`) is chronological (§5.4).
+    fn present(lines: Vec<Line<C::Record>>) -> Option<Line<C::Record>> {
+        lines
+            .into_iter()
+            .max_by(|a, b| a.key.as_str().cmp(b.key.as_str()))
+    }
+
+    /// `get` for a Series core (§7.2): the named series folded to its present.
+    pub fn get(
+        &self,
+        name: &str,
+        kind: Option<&str>,
+        at: Option<&Code>,
+    ) -> Result<PresentLine<C::Record>> {
+        let sref = self.locate(name, kind, at)?;
+        let lines = self.read_series(&sref)?;
+        let line = Self::present(lines).ok_or_else(|| {
+            Error::not_found(format!(
+                "series {:?} at {} holds no readings yet (§7.3)",
+                sref.name,
+                sref.home.as_str()
+            ))
+        })?;
+        Ok(PresentLine {
+            home: sref.home,
+            kind: sref.kind,
+            name: sref.name,
+            line,
+        })
+    }
+
+    /// A subtree walk folded to the present (§7.1): every one of this core's series
+    /// under `at`, each at its latest key.
+    pub fn fold(
+        &self,
+        at: Option<&Code>,
+        kind: Option<&str>,
+    ) -> Result<Vec<PresentLine<C::Record>>> {
+        let mut out = Vec::new();
+        for sref in self.find_series(at, kind, None)? {
+            let lines = self.read_series(&sref)?;
+            if let Some(line) = Self::present(lines) {
+                out.push(PresentLine {
+                    home: sref.home,
+                    kind: sref.kind,
+                    name: sref.name,
+                    line,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    // ── writing (§6.4: every write under the record lock) ───────────────────────
+
+    /// Mint an empty series — the `-c` path (§7.3). A hand-named series is minted
+    /// explicitly so a typo cannot conjure one.
+    pub fn create_series(&self, home: &Code, kind: &str, name: &str) -> Result<SeriesRef> {
+        let path = self.series_path(home, kind, name)?;
+        if path.exists() {
+            return Err(Error::validation(format!(
+                "series {name:?} already exists at {} (§7.3)",
+                home.as_str()
+            )));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::lock::with_record_lock(&path, |_| Ok(Vec::new()))?;
+        Ok(SeriesRef {
+            home: home.clone(),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            path,
+        })
+    }
+
+    /// Add or overwrite one keyed line (§6.1). A correction rewrites the keyed line
+    /// in place; it never stacks a second (I1). Lines the write does not touch are
+    /// carried through verbatim.
+    pub fn write_line(&self, sref: &SeriesRef, line: &Line<C::Record>) -> Result<()> {
+        if !sref.path.exists() {
+            return Err(Error::not_found(format!(
+                "no series {:?} at {} — mint it with -c (§7.3)",
+                sref.name,
+                sref.home.as_str()
+            )));
+        }
+        let encoded = serde_json::to_string(line)?;
+        let key = line.key.clone();
+        crate::lock::with_record_lock(&sref.path, move |prev| {
+            let text = Self::as_text(prev)?;
+            let mut out = String::with_capacity(text.len() + encoded.len() + 1);
+            let mut replaced = false;
+            for raw in text.lines() {
+                if raw.trim().is_empty() {
+                    continue;
+                }
+                let existing: RawLine = serde_json::from_str(raw)?;
+                if !replaced && existing.key == key {
+                    out.push_str(&encoded);
+                    replaced = true;
+                } else {
+                    out.push_str(raw);
+                }
+                out.push('\n');
+            }
+            if !replaced {
+                out.push_str(&encoded);
+                out.push('\n');
+            }
+            Ok(out.into_bytes())
+        })
+    }
+
+    /// Drop one keyed line (§7.2). Irreversible — §18 keeps no history.
+    pub fn remove_line(&self, sref: &SeriesRef, key: &Key) -> Result<()> {
+        if !sref.path.exists() {
+            return Err(Error::not_found(format!(
+                "no series {:?} at {} (§7.3)",
+                sref.name,
+                sref.home.as_str()
+            )));
+        }
+        let key = key.clone();
+        let mut found = false;
+        crate::lock::with_record_lock(&sref.path, |prev| {
+            let text = Self::as_text(prev)?;
+            let mut out = String::with_capacity(text.len());
+            for raw in text.lines() {
+                if raw.trim().is_empty() {
+                    continue;
+                }
+                let existing: RawLine = serde_json::from_str(raw)?;
+                if existing.key == key {
+                    found = true;
+                    continue;
+                }
+                out.push_str(raw);
+                out.push('\n');
+            }
+            Ok(out.into_bytes())
+        })?;
+        if found {
+            Ok(())
+        } else {
+            Err(Error::not_found(format!(
+                "no line keyed {key} in series {:?} at {} (§7.3)",
+                sref.name,
+                sref.home.as_str()
+            )))
+        }
+    }
+
+    fn as_text(prev: Option<&[u8]>) -> Result<&str> {
+        prev.map(std::str::from_utf8)
+            .transpose()
+            .map_err(|e| Error::runtime(format!("series file is not UTF-8: {e}")))
+            .map(Option::unwrap_or_default)
+    }
+
+    // ── deferred: the shapes no core exercises yet (§7.1) ────────────────────────
+
+    /// Rewrite a partitioned entity `.json` — lands with Album (step 3).
+    pub fn write_entity(
         &self,
         home: &Code,
         kind: &str,
-        key_or_slug: &str,
+        slug: &str,
         refs: Vec<Ref>,
         record: &C::Record,
     ) -> Result<()> {
-        let _ = (&self.root, home, kind, key_or_slug, refs, record);
+        let _ = (&self.root, home, kind, slug, refs, record);
         Err(deferred())
     }
 
-    /// A subtree walk folded to the present (§7.1).
-    pub fn fold(&self, at: Option<&Code>, kind: Option<&str>) -> Result<Vec<C::Record>> {
-        let _ = (&self.root, at, kind);
-        Err(deferred())
-    }
-
-    /// Read one entity by slug (§7.1).
-    pub fn get(&self, slug: &str) -> Result<C::Record> {
+    /// Read one partitioned entity by slug — lands with Album (step 3).
+    pub fn get_entity(&self, slug: &str) -> Result<C::Record> {
         let _ = (&self.root, slug);
-        Err(deferred())
-    }
-
-    /// Read a series collection (§7.1).
-    pub fn series(&self, name: &str) -> Result<Vec<Line<C::Record>>> {
-        let _ = (&self.root, name);
         Err(deferred())
     }
 }
 
 fn deferred() -> Error {
-    Error::runtime("Store verbs land with the first core (step 2, §7.1)")
+    Error::runtime(
+        "the Partitioned and Document verb paths land with Album (step 3) and Tabella (step 5), §7.1",
+    )
 }

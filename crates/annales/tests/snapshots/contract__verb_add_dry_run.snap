@@ -1,0 +1,31 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 146
+expression: pretty(&redact(plan))
+---
+{
+  "change": {
+    "after": {
+      "core": "annales",
+      "data": {
+        "values": [
+          "78.4"
+        ]
+      },
+      "home": "ecv",
+      "key": "260718",
+      "kind": "log",
+      "refs": [],
+      "series": "weight"
+    },
+    "before": null,
+    "core": "annales",
+    "home": "ecv",
+    "key": "260718",
+    "kind": "log",
+    "series": "weight",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}
