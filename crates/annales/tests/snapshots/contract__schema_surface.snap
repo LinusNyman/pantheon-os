@@ -1,0 +1,38 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 80
+expression: pretty(&schema)
+---
+{
+  "format_version": 1,
+  "name": "annales",
+  "record": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "One reading in a log — the `data` half of a series line (§5.4).\n\nThe reading's key (its date) and its `refs` ride in the envelope, and its home,\ncore, kind, and series name are the file's location and name (I3), so none of\nthem is stored here. What is left is what a hand actually gave: the positional\nvalues it typed, and an optional note.\n\nValues stay strings on disk. A weight is `\"78.4\"`, not a float that a JSON\nreader might round or reformat — a record is read by hand as often as by code\n(I6, I8), and Annales logs prose as readily as numbers.",
+    "properties": {
+      "note": {
+        "description": "A hand's remark on this reading.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "values": {
+        "description": "What was read, in the order it was given. Empty for a line whose whole\ncontent is its references — a \"where you've been\" fact is its `mappa:` ref.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "title": "LogReading",
+    "type": "object"
+  },
+  "tokens": [
+    {
+      "named": true,
+      "shape": "series",
+      "token": "log"
+    }
+  ]
+}

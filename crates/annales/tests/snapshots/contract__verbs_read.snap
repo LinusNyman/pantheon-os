@@ -1,0 +1,99 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 188
+expression: out
+---
+series weight:
+[
+  {
+    "core": "annales",
+    "data": {
+      "values": [
+        "78.4"
+      ]
+    },
+    "home": "ecv",
+    "key": "260718",
+    "kind": "log",
+    "refs": [],
+    "series": "weight"
+  },
+  {
+    "core": "annales",
+    "data": {
+      "values": [
+        "79.1"
+      ]
+    },
+    "home": "ecv",
+    "key": "260719",
+    "kind": "log",
+    "refs": [],
+    "series": "weight"
+  }
+]
+series weight --from 260719:
+[
+  {
+    "core": "annales",
+    "data": {
+      "values": [
+        "79.1"
+      ]
+    },
+    "home": "ecv",
+    "key": "260719",
+    "kind": "log",
+    "refs": [],
+    "series": "weight"
+  }
+]
+get weight:
+{
+  "core": "annales",
+  "data": {
+    "values": [
+      "79.1"
+    ]
+  },
+  "home": "ecv",
+  "key": "260719",
+  "kind": "log",
+  "refs": [],
+  "series": "weight"
+}
+list:
+[
+  {
+    "core": "annales",
+    "data": {},
+    "home": "ecv",
+    "key": "260718",
+    "kind": "log",
+    "refs": [
+      "mappa:office"
+    ],
+    "series": "places"
+  },
+  {
+    "core": "annales",
+    "data": {
+      "values": [
+        "79.1"
+      ]
+    },
+    "home": "ecv",
+    "key": "260719",
+    "kind": "log",
+    "refs": [],
+    "series": "weight"
+  }
+]
+where weight:
+{
+  "core": "annales",
+  "home": "ecv",
+  "kind": "log",
+  "path": "e_ego/e_c_corpus/ec_v_valetudo/ecv__/ecv__log__weight.jsonl",
+  "series": "weight"
+}

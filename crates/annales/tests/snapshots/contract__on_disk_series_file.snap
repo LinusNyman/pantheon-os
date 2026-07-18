@@ -1,0 +1,7 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 215
+expression: on_disk
+---
+{"key":"260718","refs":[],"data":{"values":["78.4"]}}
+{"key":"260719","refs":[],"data":{"values":["79.1"],"note":"after a run"}}

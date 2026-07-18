@@ -1,0 +1,13 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 91
+expression: pretty(&created)
+---
+{
+  "created": {
+    "core": "annales",
+    "home": "ecv",
+    "kind": "log",
+    "series": "weight"
+  }
+}

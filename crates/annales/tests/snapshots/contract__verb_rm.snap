@@ -1,0 +1,8 @@
+---
+source: crates/annales/tests/contract.rs
+assertion_line: 137
+expression: pretty(&deleted)
+---
+{
+  "deleted": "260718"
+}
