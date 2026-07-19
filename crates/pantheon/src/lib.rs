@@ -43,6 +43,7 @@ pub mod root;
 pub mod schema;
 pub mod shape;
 pub mod store;
+pub mod table;
 pub mod tree;
 pub mod validate;
 

@@ -20,8 +20,6 @@ use pantheon::{
     resolve_all, resolve_code, resolve_root, set_annotations, validate,
 };
 
-mod render;
-
 #[derive(Parser)]
 #[command(
     name = "pan",
@@ -152,11 +150,11 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(&cli) {
         Ok(RunOk::Json(value)) => {
-            render::emit(&value, as_json(&cli));
+            pantheon::contract::emit(&value, as_json(&cli));
             ExitCode::from(0)
         }
         Ok(RunOk::JsonExit(value, code)) => {
-            render::emit(&value, as_json(&cli));
+            pantheon::contract::emit(&value, as_json(&cli));
             ExitCode::from(code)
         }
         Ok(RunOk::Raw(text)) => {

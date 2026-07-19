@@ -50,16 +50,16 @@ pub fn format_is_json(force: Option<bool>) -> bool {
     force.unwrap_or_else(|| !io::stdout().is_terminal())
 }
 
-/// Render a contract value: compact down a pipe, pretty for a reader. (A real
-/// table is later polish; the data is identical either way.)
+/// Render a contract value: compact down a pipe, a table for a reader (§7.3).
+///
+/// The one rendering path in the suite — `pan` and every core reach it here, so a
+/// table is written once rather than per bin (I4). The table itself knows nothing
+/// about any core: it reads whatever keys the value carries (I5, [`crate::table`]).
 pub fn emit(value: &Value, as_json: bool) {
     if as_json {
         println!("{value}");
     } else {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
-        );
+        print!("{}", crate::table::render(value));
     }
 }
 
