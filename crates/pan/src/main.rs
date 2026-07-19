@@ -7,6 +7,7 @@
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::too_many_lines)]
 
+use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -136,8 +137,11 @@ enum Cmd {
         code: Option<String>,
     },
     /// `pan <code>` — code ↔ path, label, symbol, keywords (§5.5).
-    #[command(external_subcommand)]
-    Lookup(Vec<String>),
+    ///
+    /// Hidden because a hand never types it: [`with_lookup_verb`] inserts it when the
+    /// first word is not a verb, exactly as a core's pre-pass inserts `add` (§7.3).
+    #[command(hide = true)]
+    Lookup { code: String },
 }
 
 /// What a command produced.
@@ -150,8 +154,64 @@ enum RunOk {
     Raw(String),
 }
 
+/// `pan`'s verbs (§5.5). A closed reserved set, like a core's twelve: a verb wins over
+/// a node code, which is the ambiguity rule §7.3 already states.
+const VERBS: &[&str] = &[
+    "tree",
+    "resolve",
+    "cd",
+    "init",
+    "constitution",
+    "doctor",
+    "migrate",
+    "validate",
+    "annotate",
+    "new",
+    "rename",
+    "mv",
+    "mv-file",
+    "rm",
+    "rename-prefix",
+    "rename-pattern",
+    "lookup",
+    "help",
+];
+
+/// The global flags that take a separate value — what the verb scan steps over to find
+/// the first *word*. (`--flag=value` needs no entry: it is one token.)
+const VALUE_FLAGS: &[&str] = &["-C", "--root", "-f", "--format"];
+
+/// Insert the implicit `lookup` verb where the first word is a code (§5.5, §7.3).
+///
+/// `pan <code>` is an implicit verb exactly as `add` is a core's, so it wants the same
+/// treatment: a pre-pass rather than clap's `external_subcommand`, which swallowed the
+/// **rest of the line** — flags included. `pan csa -f table` silently ignored `-f`,
+/// because clap handed `["csa", "-f", "table"]` to the subcommand as opaque words and
+/// the global flags were never parsed. A universal flag that is quietly dropped is
+/// worse than one refused (§7.3).
+fn with_lookup_verb(raw: impl Iterator<Item = OsString>) -> Vec<OsString> {
+    let argv: Vec<OsString> = raw.collect();
+    let mut at = 1;
+    while let Some(token) = argv.get(at).map(|t| t.to_string_lossy().into_owned()) {
+        if !token.starts_with('-') {
+            break;
+        }
+        at += usize::from(VALUE_FLAGS.contains(&token.as_str())) + 1;
+    }
+    // Nothing but flags: `--help`/`--version`, or a bare short (the TUI, §7.3).
+    let Some(word) = argv.get(at) else {
+        return argv;
+    };
+    if VERBS.contains(&word.to_string_lossy().as_ref()) {
+        return argv;
+    }
+    let mut argv = argv;
+    argv.insert(at, OsString::from("lookup"));
+    argv
+}
+
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(with_lookup_verb(std::env::args_os()));
     match run(&cli) {
         Ok(RunOk::Json(value)) => {
             pantheon::contract::emit(&value, as_json(&cli));
@@ -235,8 +295,8 @@ fn run(cli: &Cli) -> Result<RunOk> {
         Cmd::Init { shell } => Ok(RunOk::Raw(init_wrapper(*shell))),
         // (Tree handled above with Option<&str>.)
         Cmd::Annotate { code, set } => cmd_annotate(cli, code, set),
-        Cmd::Lookup(args) => cmd_lookup(cli, args),
-        Cmd::Constitution { .. } => Err(not_implemented("constitution", "step 6")),
+        Cmd::Lookup { code } => cmd_lookup(cli, code),
+        Cmd::Constitution { code } => cmd_constitution(cli, code.as_deref()),
         // Infallible: an app that is absent, errors, or answers with nonsense is simply
         // not installed, which is a finding rather than a failure (§5.0, §5.5).
         Cmd::Doctor => Ok(cmd_doctor()),
@@ -353,6 +413,81 @@ fn cmd_cd(cli: &Cli, target: Option<&str>) -> Result<RunOk> {
     Ok(RunOk::Raw(format!("{}\n", path.display())))
 }
 
+/// The seven placement rules (§2), plus a node's keywords where one is named (§5.5).
+///
+/// Emitted so **a human and an LLM file alike** (I8). The rules are the constitution of
+/// *your* tree exactly as they are of the reference tree — there is no schema, and this
+/// is what stands in for one.
+///
+/// The text is held here rather than read from the spec at runtime: nothing outside the
+/// tree is Pantheon's to depend on (§18), and a doc file is not shipped beside a binary.
+/// It is prose a hand reads, so it lives where the verb is.
+const PLACEMENT_RULES: &[(&str, &str)] = &[
+    (
+        "home only",
+        "One home per record; the path *is* the home (I3).",
+    ),
+    (
+        "sort by what it is",
+        "By essence, never by material or by where it surfaces — a \"media\" or \
+         \"digital\" node sorts by format, which is a surface, not a kind.",
+    ),
+    (
+        "states in being, change in doing",
+        "A node for a being (person, place, thing, state) belongs in a being-branch, a \
+         node for a doing in Actio; beings never nest under doings. This cuts the tree, \
+         never the cores — a record still homes at what it is about.",
+    ),
+    (
+        "fields, not nodes",
+        "Closeness, role, motive, obligation, origin, format colour a record; they are \
+         never branches.",
+    ),
+    (
+        "relationships are edges",
+        "An entity is filed once; membership, association and provenance are references \
+         (I9). Nest only when X is part of the substance of Y; reference when X belongs \
+         to, relates to, or came from Y — and never reproduce one branch's structure \
+         inside another.",
+    ),
+    (
+        "aboutness, not provenance",
+        "A record homes at what it is about, not at the activity or context that \
+         produced it; origin is an edge, reconstructed by query.",
+    ),
+    (
+        "the reality test",
+        "A node is real only if distinct things are filed there and it is reviewed apart \
+         (I7); a blank sub-level is a finished answer, not a gap.",
+    ),
+];
+
+fn cmd_constitution(cli: &Cli, code: Option<&str>) -> Result<RunOk> {
+    let rules: Vec<Value> = PLACEMENT_RULES
+        .iter()
+        .enumerate()
+        .map(|(i, (name, rule))| json!({ "n": i + 1, "name": name, "rule": rule }))
+        .collect();
+
+    // A node's keywords are what the constitution is *for* at that node: they are the
+    // annotation written for an LLM to file by (§5.2, §6.6).
+    let node = match code {
+        None => Value::Null,
+        Some(code) => {
+            let root = resolve_root(cli.root.as_deref())?;
+            let code = Code::parse(code)?;
+            let ann = read_annotations(&root, &code).unwrap_or_default();
+            json!({
+                "code": code.as_str(),
+                "keywords": ann.keywords,
+                "explanation": ann.explanation,
+            })
+        }
+    };
+
+    Ok(RunOk::Json(json!({ "rules": rules, "node": node })))
+}
+
 fn cmd_annotate(cli: &Cli, code: &str, set: &[String]) -> Result<RunOk> {
     let root = resolve_root(cli.root.as_deref())?;
     let code = Code::parse(code)?;
@@ -375,11 +510,8 @@ fn cmd_annotate(cli: &Cli, code: &str, set: &[String]) -> Result<RunOk> {
     Ok(RunOk::Json(read_annotations(&root, &code)?.to_json()))
 }
 
-fn cmd_lookup(cli: &Cli, args: &[String]) -> Result<RunOk> {
+fn cmd_lookup(cli: &Cli, raw: &str) -> Result<RunOk> {
     let root = resolve_root(cli.root.as_deref())?;
-    let raw = args
-        .first()
-        .ok_or_else(|| Error::usage("expected a code"))?;
     let code = Code::parse(raw)?;
     let path = resolve_code(&root, &code)?;
     let ann = read_annotations(&root, &code).unwrap_or_else(|_| Annotations::default());

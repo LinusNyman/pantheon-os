@@ -51,64 +51,71 @@ Four layers, all over the spine:
 - **System tools:** `pan` (structural: tree/validate/annotate), `auspex` (the one reactive writer, I2).
 - **Lenses (TUIs, read + relay writes):** `speculum`, `atrium`, `studium`.
 
-Every tool has a three-char short and is both a CLI emitting JSON and a Porticus TUI. Cores land
-**CLI-first** until their TUI exists (§7.3) — and "prints `help`", the phrasing §16 uses, is loose
-about what the code does: *piped* emits `help_json()`, but a **TTY** gets the one-line `BARE`
-banner pointing at `--help`. It is the TTY arm step 6 replaces with the TUI.
+Every tool has a three-char short and is both a CLI emitting JSON and a Porticus TUI. **A bare
+short opens the screen at a TTY and emits `help` as JSON down a pipe** (§7.3) — a screen has
+nothing to draw down a pipe. A crate built `--no-default-features` has no screen to open, so its
+bare short prints a banner pointing at `--help` instead; that is the only path the old
+CLI-first behaviour survives on.
 
 ## Workspace layout
 
 Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `xtask`.
 
-- `crates/pantheon` — the spine lib (~5.4k lines; nearly all the logic). `crates/pan` — the bin over
-  it, its own crate.
-- `crates/porticus`, `crates/tessera` — the peer libs.
-- `crates/<core>` — one crate per core. **`lib.rs` is the thin file, `main.rs` the fat one** — the
-  reverse of what §14's "~30-line clap shell" suggests, and the shape all four built cores share.
-  `lib.rs` (66–148 lines) holds only the record struct(s) and `impl Core`; `main.rs` (771–941) holds
-  the clap `Cli`, the twelve verbs, `Ctx`, the editor form, and the tail helpers. Put verb logic in
-  `main.rs` — the spine already owns everything a core would otherwise share.
+- `crates/pantheon` — the spine lib (~5.7k lines; nearly all the logic). `crates/pan` — the bin over
+  it, its own crate, now with its own `screen.rs` too.
+- `crates/porticus` (~3.8k lines), `crates/tessera` — the peer libs. Porticus links `ratatui` whole;
+  Tessera takes `ratatui-core` and links no Porticus, now or ever.
+- `crates/<core>` — one crate per core, **three files**. **`lib.rs` is the thin file, `main.rs` the
+  fat one** — the reverse of what §14's "~30-line clap shell" suggests, and the shape all four
+  built cores share. `lib.rs` (66–148 lines) holds only the record struct(s) and `impl Core`;
+  `main.rs` (784–954) holds the clap `Cli`, the twelve verbs, `Ctx`, the editor form, and the tail
+  helpers; `screen.rs` (197–244, behind `tui`) holds `impl App` and the folds its views close over.
+  Put verb logic in `main.rs` — the spine already owns everything a core would otherwise share.
 - `xtask/` — workspace automation (run via `cargo xtask`).
 - `docs/` — the mdBook spec. `deny.toml`, `dist-workspace.toml`, `release-plz.toml` — supply chain & release.
 
-## Status — build order steps 1–5 are done (§16)
+## Status — build order steps 1–6 are done (§16); the slice is closed
 
 **Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4),
-`tabella` (5). **All three storage shapes now exist** — Partitioned, Series in *both* its
-hand-named and nameless forms, and Document — plus the `core:slug` resolver, the record-level
-rename cascade, and the record lock under real contention. `pan doctor` is wired (§5.5) and
-reports the file→core map total, which is what Tabella makes demonstrable: it declares no
-tokens, so its files reach it by extension alone (§7.1).
+`tabella` (5), `porticus` + `tessera` + `atrium` (6). **All three storage shapes exist** —
+Partitioned, Series in *both* its hand-named and nameless forms, and Document — plus the
+`core:slug` resolver, the record-level rename cascade, and the record lock under contention.
 
-**Still scaffold** — a stub printing a not-implemented line: `porticus` and `tessera` and
-`atrium` (6), `mappa`/`rationes`/`fasti` (7), `auspex` (8), `speculum` and `studium` (9).
-Next real work is **step 6, the first screen** — which is also the gate for the whole
-vertical slice, and where you circle back and fix whatever the screen exposed in steps 1–5.
+**The vertical slice closed at step 6**, which is what it was for: a real screen renders
+derived-out (I1) and relays a human write back through a core (I2, §12) — `d` on an Atrium row
+runs `pen edit … --done -y` and `pen list` reads it back from another process. Six instruments
+have TUIs (`pan`, `atr`, `alb`, `ann`, `pen`, `tab`); the table renderer fills §7.3's "TTY →
+table"; `cargo xtask seed` mints a tree to look at.
 
-Seven things a later step must not be surprised by (the durable rules that came out of
-step 5 live in Conventions below, not here — this list is about what is *unfinished*):
+**Still scaffold** — a stub printing a not-implemented line: `mappa`/`rationes`/`fasti` (7),
+`auspex` (8), `speculum` and `studium` (9). **Next real work is step 7** — the three cores the
+slice did not need, against a contract a screen has now exercised.
+
+### What step 6 deliberately left
+
+Not oversights — decisions, each with the reason:
+
+- **The figlet `roman` banner (P§8).** The Title overlay ships the tracked name-word instead.
+  The face needs a vendored third-party `.flf` that `cargo deny` cannot see, so it is a
+  licensing call rather than a coding one.
+- **`Pick` is a line prompt, not P§4's tree-as-modal.** A Full view's `a` resolves a home by
+  typed code; the tree-as-modal is the nicer form of the same question.
+- **§10.2's auto-apply and candidate fixes.** A `Finding` carries a code, a severity, a path
+  and a message — no candidates. The validate tab shows findings; offering or applying a fix
+  needs the spine to produce candidates first.
+- **`Calendar` and `Timeline`** wait for Fasti at step 7 — nothing would fill them before it.
+
+### Things a later step must not be surprised by
 
 - **`pan`'s node-level cascade (§10.1) is still stubbed.** Its six structural mutators
-  (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented.
-  The *record*-level cascade (§5.4) is done and is what the cores use.
-- **`pan constitution` (§5.5) is stubbed too, and its message says "step 6"** — unlike the six
-  above, which point at §10.1 rather than a step number. It is the one `pan` verb step 6 owes.
-- **`pan`'s bare short ignores the TTY rule.** It returns `RunOk::Raw` unconditionally, so a
-  *piped* `pan` emits prose where every core emits `help_json()`. §7.3 governs `pan` too.
-- **The `tui` feature is decorative.** Nine crates declare `default = ["tui"]` with
-  `porticus`/`tessera` as optional deps, and there is **not one `#[cfg(feature = "tui")]` in the
-  workspace** — today they link two empty crates and use nothing from them. Whoever writes the
-  first real TUI writes the `cfg` blocks, or the feature keeps meaning nothing. `atrium` has the
-  opposite bug: it takes both libs *unconditionally*, so `--no-default-features` cannot strip the
-  screen from a lens the way §14 and §12 say it must.
-- **`pan` carries a second copy of `emit`** (`crates/pan/src/render.rs`), byte-identical to
-  `pantheon::contract::emit`. The table renderer §7.3 owes has two plug points, not one; collapse
-  them before filling either.
+  (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented,
+  so `r`/`m`/`x` are **dark** in `pan`'s TUI — `on_action` returns `None` and Porticus greys
+  them (P§7). The *record*-level cascade (§5.4) is done and is what the cores use.
 - **`Store::write_line` mints any `Shape::Series { named: false }` series on first write**
   (§7.3: a determined series is minted by its determinant). For Pensum the determinant is the
   node, so that is right. **Rationes' `balance` is determined by a holding *entity*** — so `rat`
   must check that entity exists in its own bin before writing. The store links no core and
-  cannot know (I5).
+  cannot know (I5). **This bites at step 7.**
 - **`plan_cascade` cannot refuse an occupied slug for a Document core**, and this is by design
   rather than a bug: it gates that check on the caller's own tokens, and Tabella declares none —
   and it walks meta dirs, where no document lives. So **Tabella makes the check itself**
@@ -171,9 +178,43 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
 - **A fold never reads bodies** (§6.1, §7.1, §7.2, §8.7 — the spec says it four times). `list` uses
   `document::read_frontmatter`, which stops at the closing fence. Reading the whole file and discarding
   the prose satisfies the letter and not the thing.
-- **Format follows the hand:** TTY → pretty, piped → compact, same code path (`contract::emit`).
-  §7.3 says TTY → *table*, and **there is no table renderer yet** — a TTY currently gets
-  pretty-printed JSON. That is step 6's job, with the rest of the chrome.
+- **Format follows the hand:** TTY → table, piped → compact JSON, one code path
+  (`contract::emit` → `pantheon::table`). The renderer lives in the **spine**, not Porticus: a
+  bin built `--no-default-features` drops the chrome and is still a CLI that must table (§14).
+  It knows no core (I5) — columns are whatever keys the value carries, with `data`'s hoisted —
+  and it **declines what it cannot honestly flatten**: `pan tree` nests nodes, `schema` nests a
+  schema, so those fall back to pretty JSON. The flatness test is deliberately *not* recursive.
+  No contract snapshot covers any of this, because every contract test pipes.
+
+### Step 6's durable rules (the chrome)
+
+- **A view declares intent; Porticus runs the flow** (P-II). A view says which `Action`s it
+  offers and Porticus owns the key→action binding, the confirm policy, and every prompt. If you
+  find yourself giving a view a raw key handler or its own confirm, stop — that is the one thing
+  the layer exists to prevent.
+- **A chord is not its key.** Raw mode delivers `Ctrl-D` as `Char('d')` with a CONTROL modifier
+  (P§10 says the same of `Ctrl-C`). The router drops CONTROL/ALT/SUPER before the keymap sees
+  them; **SHIFT must survive**, because `A`/`D`/`X` arrive shifted. Without this every control
+  chord fired its bare letter's action — a bare `Ctrl-D` marked a record done.
+- **Name the root on every subprocess — read *and* write.** A write carries `-y` because a
+  relay's child writes down a pipe, where a mutation without it exits `5` (§7.3): the confirm is
+  the TUI's modal, never a CLI exemption. Both carry `-C <root>` because `$PANTHEON_ROOT` is the
+  caller's ambient state (§6.2) while the root a screen was *given* is the fact — without it a
+  tool opened with `-C` folds one tree and writes to another, silently. Porticus adds `-C` to
+  every relay centrally; **a lens's own reads are its own to root** (`tessera::read` takes one,
+  and Atrium holds the root for its tiles, its agenda fold, and its `count_at`). Both halves of
+  this were real bugs, found one after the other.
+- **`None` from `rows` is a draw-view; `Some(vec![])` is an empty row-view** (P§3). The first is
+  *about the selected node*, so the node is its target; the second honestly has an empty set.
+  Conflating them made `e` on a draw-view silently do nothing.
+- **`Terminal::clear()` does a cursor round-trip** and fails wherever nothing answers. `suspend`
+  rebuilds the terminal instead — empty buffers, no question asked. A clear here could commit a
+  write and then kill the screen reporting it.
+- **Drive the screen in tests with `porticus::drive`**, not a pty. A pty proves the lifecycle but
+  has no size, so it draws no cells and echoes scripted input in cooked mode before the app takes
+  raw mode. `drive` runs the same `handle` and the same relay, returns the final frame, and
+  really performs writes. Three defects reached `main` past a full green suite and were caught
+  only by driving a real binary; two more fell out within minutes of `drive` existing.
 
 ## Non-goals (§18) — do not build
 

@@ -103,7 +103,7 @@ impl App for PanApp {
 fn in_process(invocation: &Invocation) -> Relayed {
     let argv =
         std::iter::once(OsString::from("pan")).chain(invocation.args.iter().map(OsString::from));
-    let cli = match Cli::try_parse_from(argv) {
+    let cli = match Cli::try_parse_from(crate::with_lookup_verb(argv)) {
         Ok(cli) => cli,
         Err(e) => {
             return Relayed {

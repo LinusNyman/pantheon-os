@@ -30,3 +30,6 @@ serde_json.workspace = true
 # `Buffer` — so it takes the full crate, upstream's rule for an application (§13).
 porticus = { workspace = true, optional = true }
 ratatui = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
