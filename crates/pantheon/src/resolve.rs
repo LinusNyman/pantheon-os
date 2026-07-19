@@ -221,7 +221,21 @@ fn register_record(
     let (kind, ident) = match class {
         FileClass::Partitioned { kind, slug, .. } => (kind.clone(), slug.clone()),
         FileClass::EntityNode { kind, .. } => (kind.clone(), node.label.clone()),
-        FileClass::NamedSeries { kind, name, .. } => (kind.clone(), name.clone()),
+        // Structurally this is a hand-named series, and `classify` can say no more (§5.2):
+        // a determined series whose determinant is a *slug* rather than the node wears the
+        // same three segments. Only the registry's `named` bit separates them — the very
+        // thing `SeriesRef`'s doc comment in `store.rs` says the classifier cannot know. So
+        // ask it: a `named: false` token is reached through its determinant and is no more a
+        // ref target than the nameless form (§5.4, §7.1). Left unasked, Rationes'
+        // `crp__balance__checking.jsonl` registers `rationes:checking` a second time and
+        // every resolve of a holding comes back ambiguous against its own balance file.
+        FileClass::NamedSeries { kind, name, .. } => {
+            if reg.shape_of_kind(kind) == Some(Shape::Series { named: false }) {
+                register_series_lines(root, node, reg, kind, path, index);
+                return;
+            }
+            (kind.clone(), name.clone())
+        }
         FileClass::DeterminedSeries { kind, .. } => {
             register_series_lines(root, node, reg, kind, path, index);
             return;
@@ -247,9 +261,13 @@ fn register_record(
 /// A **name-keyed line** is a record reached by its key — a Pensum task,
 /// `pensum:reach_out_to_alex` (§5.4). It is the one resolution that opens a record
 /// file rather than resting on its filename (§5.0), so it is gated twice: on the
-/// registry reporting a nameless series for this token, and then on the key's own
+/// registry reporting a determined series for this token, and then on the key's own
 /// shape. A date-keyed line is a sample and registers nothing (I1) — which is why
 /// Rationes' `balance` costs nothing here despite sharing the gate.
+///
+/// Both determined *filename* forms arrive here — the nameless `[code]__[kind].jsonl`
+/// and the slug-determined `[code]__[kind]__[slug].jsonl` — because the difference
+/// between them is a determinant, not an identity, and neither is a ref target.
 fn register_series_lines(
     root: &Path,
     node: &Node,

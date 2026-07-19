@@ -225,6 +225,63 @@ fn resolve_finds_a_unique_entity() {
     }
 }
 
+/// A determined series **whose determinant is a slug** carries a name in its filename
+/// and is still not a ref target (§5.4, §7.1) — its name slot holds its determinant, not
+/// an identity. `classify` cannot see the difference: `crp__balance__checking.jsonl` has
+/// three segments, so it is structurally a `NamedSeries` and rightly says so — **only the
+/// registry's `named` bit tells the two apart**. So the reader must ask the registry, or
+/// `rationes:checking` resolves ambiguously between a holding and its own balance file,
+/// and `pan validate` calls the pair a duplicate slug. Pensum's determined series is
+/// nameless and Fasti's `event` is hand-named, so Rationes is the first shape that reaches
+/// this at all.
+#[test]
+fn a_determined_series_is_never_a_ref_target_even_when_it_carries_a_name() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("r", "res"));
+    mint(&root, "cr", triple("p", "pecunia"));
+    write_record(
+        &root,
+        "crp",
+        "crp__account__checking.json",
+        r#"{"refs":[],"data":{"currency":"usd"}}"#,
+    );
+    write_record(
+        &root,
+        "crp",
+        "crp__balance__checking.jsonl",
+        "{\"key\":\"260718\",\"refs\":[],\"data\":{\"amount\":4200.0}}\n",
+    );
+
+    let reg = CoreRegistry::from_cores(vec![DiscoveredCore {
+        name: "rationes".to_string(),
+        short: "rat".to_string(),
+        kinds: vec![
+            ("account".to_string(), Shape::Partitioned),
+            ("balance".to_string(), Shape::Series { named: false }),
+        ],
+        format_version: 1,
+    }]);
+
+    let outcomes = resolve_all(&root, &reg, &[Ref::parse("rationes:checking").unwrap()]).unwrap();
+    match &outcomes[0] {
+        RefOutcome::Resolved(r) => assert_eq!(
+            r.kind, "account",
+            "the holding is the record; its balance file is reached through it"
+        ),
+        other => panic!("expected the holding alone, got {other:?}"),
+    }
+
+    // The same index feeds `validate`, so the spurious duplicate dies with it.
+    let findings = validate(&root, &reg).unwrap();
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.code == FindingCode::DuplicateSlug),
+        "a holding and its own balance series are one record, not two names: {findings:?}"
+    );
+}
+
 #[test]
 fn validate_flags_a_dangling_ref() {
     let root = fresh_root();
