@@ -44,6 +44,11 @@ jobs:
       # a crate that is not the one under test. Build them all first, or those gates
       # fail on a missing binary rather than on what they are meant to prove.
       - run: cargo build --workspace --bins
+      # The headless half (§14): every crate must still build with the screen dropped.
+      # Nothing else catches this class — a `#[cfg(feature = "tui")]` left orphaned onto
+      # the item below a deleted `mod` compiles cleanly under --all-features and takes a
+      # `use` out of the non-tui build, which is exactly how it happened once.
+      - run: cargo build --workspace --no-default-features
       # --no-tests=pass: a stub workspace has no tests yet; that is success, not failure.
       - run: cargo nextest run --workspace --all-features --no-tests=pass
       # insta snapshots are asserted inside the tests above; fail if any are pending.
