@@ -4,7 +4,8 @@
 //!
 //! Module map: [`name`] normalization (§5.1) · [`code`] addressing (§5.1) ·
 //! [`shape`] the three storage shapes (§7.1) · [`envelope`] records & refs (§5.4) ·
-//! [`classify`] the file→core map (§5.2) · [`core`] the `Core` trait & PATH
+//! [`classify`] the file→core map (§5.2) · [`document`] the `+++` fence over opaque
+//! prose (§6.6) · [`core`] the `Core` trait & PATH
 //! discovery (§7.1) · [`schema`] the discovery surface (§7.2) · [`root`] root
 //! resolution (§6.2) · [`tree`] the walk (§5.0) · [`resolve`] `core:slug` →
 //! record (§5.0) · [`validate`] the cross-cutting lint (§5.5) · [`lock`] the record
@@ -29,6 +30,7 @@ pub mod classify;
 pub mod code;
 pub mod contract;
 pub mod core;
+pub mod document;
 pub mod envelope;
 pub mod error;
 pub mod lock;
@@ -44,14 +46,15 @@ pub mod store;
 pub mod tree;
 pub mod validate;
 
-pub use cascade::{Cascade, RefRewrite, plan_cascade};
+pub use cascade::{Cascade, RefRewrite, occupied_slug, plan_cascade};
 pub use classify::{DocExt, FileClass, classify};
 pub use code::{CharToken, Code, CodeForm, NodeName};
 pub use contract::{
-    Checkpoint, Edited, EntityQuery, EntityTarget, RecordChange, RegisterQuery, RegisterTarget,
-    Response, SeriesTarget, peel_home,
+    Checkpoint, DocumentQuery, DocumentTarget, Edited, EntityQuery, EntityTarget, RecordChange,
+    RegisterQuery, RegisterTarget, Response, SeriesTarget, peel_home,
 };
 pub use core::{Core, CoreRegistry, DiscoveredCore};
+pub use document::{Document, read_frontmatter};
 pub use envelope::{Entity, Frontmatter, Key, KeyShape, Line, RawEntity, RawLine, Ref};
 pub use error::{Error, ExitCode, Result};
 pub use lock::with_record_lock;
@@ -63,6 +66,8 @@ pub use resolve::{RefOutcome, Resolution, resolve_all};
 pub use root::resolve_root;
 pub use schema::{CoreSchema, TokenSchema, schema};
 pub use shape::Shape;
-pub use store::{EntityAddr, EntityForm, EntityRef, PresentLine, SeriesRef, Store};
+pub use store::{
+    DocumentAddr, DocumentRef, EntityAddr, EntityForm, EntityRef, PresentLine, SeriesRef, Store,
+};
 pub use tree::{Node, TreeRoot, build_tree, resolve_code, resolve_node};
 pub use validate::{Finding, FindingCode, Severity, validate};

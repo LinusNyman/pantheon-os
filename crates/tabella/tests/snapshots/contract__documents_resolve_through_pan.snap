@@ -1,0 +1,21 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&resolved)
+---
+{
+  "ambiguous": [],
+  "resolved": [
+    {
+      "core": "tabella",
+      "home": "ecv",
+      "kind": "",
+      "path": "e_ego/e_c_corpus/ec_v_valetudo/ecv_trip_idea.md",
+      "ref": "tabella:trip_idea",
+      "shape": {
+        "shape": "document"
+      },
+      "slug": "trip_idea"
+    }
+  ],
+  "unresolved": []
+}

@@ -1,0 +1,12 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: "read_doc(&root, \"ecv_handmade.md\")"
+---
++++
+type = "nota"
+tags = []
++++
+
+just prose, no fence
+
+and a second paragraph

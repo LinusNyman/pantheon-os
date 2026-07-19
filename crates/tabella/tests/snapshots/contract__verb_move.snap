@@ -1,0 +1,19 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&moved)
+---
+{
+  "moved": {
+    "from": "ecv",
+    "to": "eam"
+  },
+  "record": {
+    "body": "Rome.\n",
+    "core": "tabella",
+    "ext": "md",
+    "home": "eam",
+    "slug": "trip_idea",
+    "tags": [],
+    "type": null
+  }
+}

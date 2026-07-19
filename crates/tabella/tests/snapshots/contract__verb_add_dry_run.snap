@@ -1,0 +1,25 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&redact(plan))
+---
+{
+  "change": {
+    "after": {
+      "body": "Rome.\n",
+      "core": "tabella",
+      "ext": "md",
+      "home": "ecv",
+      "slug": "trip_idea",
+      "tags": [],
+      "type": null
+    },
+    "before": null,
+    "core": "tabella",
+    "home": "ecv",
+    "key": "trip_idea",
+    "kind": "",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

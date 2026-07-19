@@ -1,0 +1,12 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: text
+---
++++
+# why this note exists
+tags = ["vocatio"]
+author = "a hand"
+type = "principium"
++++
+
+Prose.

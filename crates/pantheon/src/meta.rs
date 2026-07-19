@@ -90,11 +90,13 @@ pub fn set_annotations(root: &Path, code: &Code, sets: &[(String, String)]) -> R
     })
 }
 
-fn get_str(doc: &DocumentMut, key: &str) -> Option<String> {
+/// Shared with [`crate::document`]: annotations and document frontmatter are the two
+/// hand-written TOML surfaces (§6.6), and both read their scalars the same way.
+pub(crate) fn get_str(doc: &DocumentMut, key: &str) -> Option<String> {
     doc.get(key).and_then(Item::as_str).map(ToOwned::to_owned)
 }
 
-fn get_str_array(doc: &DocumentMut, key: &str) -> Vec<String> {
+pub(crate) fn get_str_array(doc: &DocumentMut, key: &str) -> Vec<String> {
     doc.get(key)
         .and_then(Item::as_array)
         .map(|a| {

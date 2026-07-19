@@ -1,0 +1,15 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&fresh)
+---
+{
+  "body": "Two weeks in Rome.\n",
+  "core": "tabella",
+  "ext": "md",
+  "home": "ecv",
+  "slug": "trip_idea",
+  "tags": [
+    "travel"
+  ],
+  "type": "nota"
+}

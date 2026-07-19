@@ -18,13 +18,34 @@ pub enum DocExt {
 }
 
 impl DocExt {
-    fn from_ext(ext: &str) -> Option<DocExt> {
+    /// The whole set, in the order an error message should list them.
+    pub const ALL: &'static [DocExt] = &[DocExt::Md, DocExt::Txt, DocExt::Mdx];
+
+    /// The payload is prose, not a machine format, so the set is open across these
+    /// three — but classification still rests on extension alone (§6.1).
+    #[must_use]
+    pub fn from_ext(ext: &str) -> Option<DocExt> {
         match ext {
             "md" => Some(DocExt::Md),
             "txt" => Some(DocExt::Txt),
             "mdx" => Some(DocExt::Mdx),
             _ => None,
         }
+    }
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DocExt::Md => "md",
+            DocExt::Txt => "txt",
+            DocExt::Mdx => "mdx",
+        }
+    }
+}
+
+impl std::fmt::Display for DocExt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

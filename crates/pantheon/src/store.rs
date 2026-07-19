@@ -21,10 +21,11 @@
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
-use crate::classify::{FileClass, classify};
+use crate::classify::{DocExt, FileClass, classify};
 use crate::code::{Code, CodeForm, NodeName};
 use crate::core::Core;
-use crate::envelope::{Entity, Key, KeyShape, Line, RawLine, Ref};
+use crate::document::Document;
+use crate::envelope::{Entity, Frontmatter, Key, KeyShape, Line, RawLine, Ref};
 use crate::shape::Shape;
 use crate::tree::{Node, TreeRoot, build_tree, resolve_code, resolve_node};
 use crate::{Error, Result};
@@ -85,6 +86,28 @@ pub struct EntityAddr {
     pub home: Code,
     pub kind: String,
     pub slug: String,
+}
+
+/// One of this core's documents, located in the tree (§6.1). Home and slug are the
+/// file's location and name, never read from inside it (I3).
+///
+/// There is no `kind`: a Document core declares no tokens, which is what *names* it
+/// Document (§7.1), and why these filenames carry a single `_` and no `__` segment.
+#[derive(Clone, Debug)]
+pub struct DocumentRef {
+    pub home: Code,
+    pub slug: String,
+    pub ext: DocExt,
+    pub path: PathBuf,
+}
+
+/// Where a document is to be written — the address an `add`, a `move`, or a
+/// `rename` aims at, without a path because the path is derived from it (I3).
+#[derive(Clone, Debug)]
+pub struct DocumentAddr {
+    pub home: Code,
+    pub slug: String,
+    pub ext: DocExt,
 }
 
 /// A series folded to its present (I1): the line at the latest key, carrying the
@@ -1029,6 +1052,251 @@ impl<C: Core> Store<C> {
             slug: to.slug.clone(),
             path,
             form,
+        })
+    }
+
+    // ── the document (§6.1) ─────────────────────────────────────────────────────
+    //
+    // Documents break the pattern the two shapes above share, and they break it
+    // structurally rather than by degree: they live **loose in the open node dir**,
+    // not the meta dir. Every `collect_*` above walks `<node>/<code>__/` and so can
+    // never see one; `collect_documents` walks `<node>/` and is the only walk here
+    // that does. Ownership is not by token either — a Document core has none (§7.1) —
+    // it is the extension plus the node's own `[code]_` prefix, which `classify`
+    // already checks, after rejecting an Auspex `function` rule (§5.2).
+
+    /// Whether this core is the Document core — i.e. declares no tokens (§7.1). The
+    /// emptiness *is* the declaration; there is nothing else to ask.
+    pub fn is_document_core() -> bool {
+        C::kinds().is_empty()
+    }
+
+    /// The one rule that spells a document filename (§6.1): `[code]_[slug].[ext]`,
+    /// a **single** underscore. Every writer goes through here, so `add`, `move`, and
+    /// `rename` cannot disagree about where a document lands.
+    fn document_file_name(home: &Code, slug: &str, ext: DocExt) -> String {
+        format!("{}_{slug}.{}", home.as_str(), ext.as_str())
+    }
+
+    /// Where a document lives, whether or not it exists yet (§6.1). Unlike an entity
+    /// there is one filename form, so the node's *label* is never consulted — only
+    /// its path.
+    pub fn document_path(&self, addr: &DocumentAddr) -> Result<PathBuf> {
+        let node_path = resolve_code(&self.root, &addr.home)?;
+        Ok(node_path.join(Self::document_file_name(&addr.home, &addr.slug, addr.ext)))
+    }
+
+    /// Every document in the tree (or under `at`), optionally filtered by slug. Reads
+    /// filenames only (§5.0) — finding a document never opens it.
+    pub fn find_documents(
+        &self,
+        at: Option<&Code>,
+        slug: Option<&str>,
+    ) -> Result<Vec<DocumentRef>> {
+        let nodes = match build_tree(&self.root, at)? {
+            TreeRoot::Forest(nodes) => nodes,
+            TreeRoot::Subtree(node) => vec![node],
+        };
+        let mut out = Vec::new();
+        for node in &nodes {
+            Self::collect_documents(node, slug, &mut out)?;
+        }
+        out.sort_by(|a, b| {
+            a.home
+                .as_str()
+                .cmp(b.home.as_str())
+                .then_with(|| a.slug.cmp(&b.slug))
+        });
+        Ok(out)
+    }
+
+    fn collect_documents(
+        node: &Node,
+        slug: Option<&str>,
+        out: &mut Vec<DocumentRef>,
+    ) -> Result<()> {
+        for entry in std::fs::read_dir(&node.path)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            let FileClass::Document {
+                slug: found, ext, ..
+            } = classify(&file_name, false, &node.code)
+            else {
+                continue;
+            };
+            if slug.is_some_and(|want| want != found) {
+                continue;
+            }
+            out.push(DocumentRef {
+                home: node.code.clone(),
+                slug: found,
+                ext,
+                path: entry.path(),
+            });
+        }
+        for child in &node.children {
+            Self::collect_documents(child, slug, out)?;
+        }
+        Ok(())
+    }
+
+    /// Resolve a slug to exactly one document (§7.3). Zero is not found (exit `4`);
+    /// more than one is listed rather than guessed (exit `2`), since a cross-node
+    /// duplicate stays soft (§5.4, §18).
+    pub fn locate_document(&self, slug: &str, at: Option<&Code>) -> Result<DocumentRef> {
+        let mut found = self.find_documents(at, Some(slug))?;
+        match found.len() {
+            0 => Err(Error::not_found(format!(
+                "no {} document named {slug:?} (§7.3)",
+                C::NAME
+            ))),
+            1 => Ok(found.pop().expect("one candidate")),
+            _ => Err(Error::usage(format!(
+                "{slug:?} is at more than one node: {} — name one with -H (§7.3)",
+                found
+                    .iter()
+                    .map(|d| d.home.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))),
+        }
+    }
+
+    /// Whether this node already holds `slug` under **any** document extension.
+    ///
+    /// The filesystem refuses a duplicate *filename*, which is not the same guarantee:
+    /// `csa_trip_idea.md` and `csa_trip_idea.txt` are two files and one ref — §5.4's
+    /// kind trap in the extension dimension. One `read_dir`, like [`Self::slug_taken_at`].
+    pub fn document_slug_taken_at(&self, home: &Code, slug: &str) -> Result<Option<DocumentRef>> {
+        let node_path = resolve_code(&self.root, home)?;
+        for entry in std::fs::read_dir(&node_path)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                continue;
+            }
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            if let FileClass::Document {
+                slug: found, ext, ..
+            } = classify(&file_name, false, home)
+                && found == slug
+            {
+                return Ok(Some(DocumentRef {
+                    home: home.clone(),
+                    slug: found,
+                    ext,
+                    path: entry.path(),
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Documents holding `slug` at some *other* node — the soft half of §5.4's
+    /// uniqueness, which `add` warns on and `pan validate` reports (§18).
+    pub fn duplicate_document_slugs_elsewhere(
+        &self,
+        home: &Code,
+        slug: &str,
+    ) -> Result<Vec<DocumentRef>> {
+        Ok(self
+            .find_documents(None, Some(slug))?
+            .into_iter()
+            .filter(|d| d.home.as_str() != home.as_str())
+            .collect())
+    }
+
+    /// Read one document whole — frontmatter *and* body (§6.1). This is `get`'s path;
+    /// a fold must use [`Self::fold_documents`], which never reads a body.
+    pub fn read_document(&self, dref: &DocumentRef) -> Result<Document> {
+        let text = match std::fs::read_to_string(&dref.path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Error::not_found(format!(
+                    "no document {:?} at {} (§7.3)",
+                    dref.slug,
+                    dref.home.as_str()
+                )));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        crate::document::parse(&text)
+            .map_err(|e| Error::validation(format!("{}: {e}", dref.path.display())))
+    }
+
+    /// A subtree walk over this core's documents (§6.3), reading **frontmatter only**
+    /// — "a fold never reads bodies" (§7.1, §7.2, §8.7). The prose never enters memory.
+    pub fn fold_documents(&self, at: Option<&Code>) -> Result<Vec<(DocumentRef, Frontmatter)>> {
+        let mut out = Vec::new();
+        for dref in self.find_documents(at, None)? {
+            let frontmatter = crate::document::read_frontmatter(&dref.path)
+                .map_err(|e| Error::validation(format!("{}: {e}", dref.path.display())))?;
+            out.push((dref, frontmatter));
+        }
+        Ok(out)
+    }
+
+    /// Write a document, creating or overwriting it (§6.1, §6.4).
+    ///
+    /// Takes the whole [`Document`] rather than its parts because `front_raw` must
+    /// ride along: that is what carries a hand's comments, key ordering, and unread
+    /// keys through the rewrite (§6.6, I6, I8).
+    pub fn write_document(&self, addr: &DocumentAddr, document: &Document) -> Result<DocumentRef> {
+        let path = self.document_path(addr)?;
+        let encoded = document.to_text()?.into_bytes();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        crate::lock::with_record_lock(&path, move |_| Ok(encoded))?;
+        Ok(DocumentRef {
+            home: addr.home.clone(),
+            slug: addr.slug.clone(),
+            ext: addr.ext,
+            path,
+        })
+    }
+
+    /// Delete a document (§7.2). Irreversible — §18 keeps no history.
+    pub fn remove_document(&self, dref: &DocumentRef) -> Result<()> {
+        match std::fs::remove_file(&dref.path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::not_found(format!(
+                "no document {:?} at {} (§7.3)",
+                dref.slug,
+                dref.home.as_str()
+            ))),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Move a document file to a new address — the primitive behind `move` (a new
+    /// home) and `rename`'s file half (a new slug). A `mv` between **node dirs**, not
+    /// meta dirs (§7.2); the text is not touched.
+    ///
+    /// Refuses to land on an occupied path rather than clobber it (exit `3`).
+    pub fn relocate_document(&self, dref: &DocumentRef, to: &DocumentAddr) -> Result<DocumentRef> {
+        let path = self.document_path(to)?;
+        if path == dref.path {
+            return Ok(dref.clone());
+        }
+        if path.exists() {
+            return Err(Error::validation(format!(
+                "{} already holds a document named {:?} (§7.2)",
+                to.home.as_str(),
+                to.slug
+            )));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::rename(&dref.path, &path)?;
+        Ok(DocumentRef {
+            home: to.home.clone(),
+            slug: to.slug.clone(),
+            ext: to.ext,
+            path,
         })
     }
 }

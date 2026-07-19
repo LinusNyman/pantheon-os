@@ -24,9 +24,10 @@ use sha2::{Digest, Sha256};
 
 use crate::code::{Code, parse_node_dirname};
 use crate::core::Core;
-use crate::envelope::{Entity, Key, Line, Ref};
+use crate::document::Document;
+use crate::envelope::{Entity, Frontmatter, Key, Line, Ref};
 use crate::name::normalize_token;
-use crate::store::{EntityRef, PresentLine, SeriesRef, Store};
+use crate::store::{DocumentRef, EntityRef, PresentLine, SeriesRef, Store};
 use crate::tree::resolve_code;
 use crate::{Error, Result};
 
@@ -251,6 +252,12 @@ pub fn stdout_is_terminal() -> bool {
     io::stdout().is_terminal()
 }
 
+/// Whether stdin is a terminal. The counterpart test for a verb that can take its
+/// payload off a pipe — `tab add ecv note < draft.md` (§7.3, I8).
+pub fn stdin_is_terminal() -> bool {
+    io::stdin().is_terminal()
+}
+
 /// What came back from an editor session (§7.3).
 #[derive(Clone, Debug)]
 pub enum Edited {
@@ -277,31 +284,11 @@ pub fn edit_text(initial: &str) -> Result<Edited> {
 /// [`edit_text`] against a stated editor command rather than the environment's —
 /// the seam a test drives, since the environment is the hand's to set (§7.3).
 pub fn edit_text_in(command: &str, initial: &str) -> Result<Edited> {
-    let words = shell_words::split(command)
-        .map_err(|e| Error::usage(format!("$VISUAL/$EDITOR is not a valid command: {e}")))?;
-    let (program, args) = words
-        .split_first()
-        .ok_or_else(|| Error::usage("$VISUAL/$EDITOR is empty (§7.3)"))?;
-
     let scratch = scratch_path();
     std::fs::write(&scratch, initial)?;
-    let status = std::process::Command::new(program)
-        .args(args)
-        .arg(&scratch)
-        .status()
-        .map_err(|e| Error::runtime(format!("could not run {program:?}: {e}")));
-    let status = match status {
-        Ok(status) => status,
-        Err(e) => {
-            let _ = std::fs::remove_file(&scratch);
-            return Err(e);
-        }
-    };
-    if !status.success() {
+    if let Err(e) = spawn_editor(command, &scratch) {
         let _ = std::fs::remove_file(&scratch);
-        return Err(Error::runtime(format!(
-            "{program} exited without saving; nothing was written (§7.3)"
-        )));
+        return Err(e);
     }
     let text = std::fs::read_to_string(&scratch)?;
     let _ = std::fs::remove_file(&scratch);
@@ -310,6 +297,62 @@ pub fn edit_text_in(command: &str, initial: &str) -> Result<Edited> {
     } else {
         Ok(Edited::Changed(text))
     }
+}
+
+/// Open a file **itself** in the hand's own editor (§7.3).
+///
+/// What opens follows the shape (§6.1). An entity field or a series line opens a
+/// scratch buffer holding only that value, because the JSON record is machine-owned
+/// and is never handed to a hand raw (I6, §6.6) — but a **document is opened in
+/// place**, since it already *is* the text (§7.3, §8.7). So there is no scratch file
+/// here and nothing to fold back.
+///
+/// That has one consequence worth stating plainly: **the editor commits the file
+/// itself**, so §7.3's three outcomes land as — editor exits non-zero: it saved
+/// nothing, exit `1`; bytes unchanged: nothing was written, exit `0`; text invalid:
+/// the hand's own save stands on disk and the caller reports exit `3`. Invalid is
+/// *not* reverted — the editor already wrote it, §18 keeps no prior copy, and
+/// restoring one would be the undo layer §18 forbids.
+///
+/// Nothing is locked across the session (§6.4).
+pub fn edit_file(path: &Path) -> Result<Edited> {
+    edit_file_in(&editor_command(), path)
+}
+
+/// [`edit_file`] against a stated editor command rather than the environment's —
+/// the seam a test drives (§7.3).
+pub fn edit_file_in(command: &str, path: &Path) -> Result<Edited> {
+    let before = std::fs::read_to_string(path)?;
+    spawn_editor(command, path)?;
+    let after = std::fs::read_to_string(path)?;
+    if after == before {
+        Ok(Edited::Unchanged)
+    } else {
+        Ok(Edited::Changed(after))
+    }
+}
+
+/// Resolve the editor command to an argv and run it against `path`. Shared by both
+/// editor forms so they cannot drift on which variable wins or how it is split —
+/// `shell-words`, so `code -w` works, and the child is spawned directly, never
+/// through `sh -c` (§13).
+fn spawn_editor(command: &str, path: &Path) -> Result<()> {
+    let words = shell_words::split(command)
+        .map_err(|e| Error::usage(format!("$VISUAL/$EDITOR is not a valid command: {e}")))?;
+    let (program, args) = words
+        .split_first()
+        .ok_or_else(|| Error::usage("$VISUAL/$EDITOR is empty (§7.3)"))?;
+    let status = std::process::Command::new(program)
+        .args(args)
+        .arg(path)
+        .status()
+        .map_err(|e| Error::runtime(format!("could not run {program:?}: {e}")))?;
+    if !status.success() {
+        return Err(Error::runtime(format!(
+            "{program} exited without saving; nothing was written (§7.3)"
+        )));
+    }
+    Ok(())
 }
 
 fn editor_command() -> String {
@@ -735,6 +778,70 @@ pub fn resolve_register_target<C: Core>(
     })
 }
 
+// ── the document target: a home, a slug, and the prose after it ──────────────
+
+/// A resolved document target: which document, at which node, and the positionals
+/// left over once the home and the name were consumed.
+pub struct DocumentTarget {
+    pub home: Code,
+    /// The document's identity — the name a hand gave, normalized to its slug (§5.4).
+    pub slug: String,
+    /// The positionals after the name — the prose, for a verb that takes it. Empty
+    /// for a read verb, which has none to give.
+    pub body: Vec<String>,
+    /// The document already at this node under **any** extension, if there is one.
+    /// Any, not just the one asked for: `csa_note.md` and `csa_note.txt` are two
+    /// files and one `tabella:note`, so the extension is not part of the identity
+    /// this checks (§5.4).
+    pub existing: Option<DocumentRef>,
+}
+
+/// What a document verb knows before the tree is walked (§7.3).
+///
+/// Deliberately none of the three queries above. There is no `kind` to carry — a
+/// Document core declares none, which is what names it Document (§7.1) — and no
+/// series to infer, so §7.3's four inference forms have nothing to range over.
+pub struct DocumentQuery<'a> {
+    /// `-H`, if given.
+    pub home: Option<&'a str>,
+    /// The leading positionals, still unclassified.
+    pub positionals: &'a [String],
+    /// The locus; `None` reads the process's working directory (§7.3).
+    pub pwd: Option<&'a Path>,
+}
+
+/// Read `[home] <name> [prose…]` into a document address (§7.3).
+///
+/// The same grammar [`resolve_register_target`] reads, and not total on arity for the
+/// same reason: at two tokens `tab ecv trip_idea` and `tab trip_idea "some prose"`
+/// are the same shape, so §7.3's rule decides — [`peel_home`] takes a leading token
+/// as the home only when something follows it to be the name, and `-H` forces either
+/// reading.
+pub fn resolve_document_target<C: Core>(
+    store: &Store<C>,
+    query: &DocumentQuery<'_>,
+) -> Result<DocumentTarget> {
+    let (home, rest) = peel_home(store, query.home, query.positionals)?;
+    let Some((first, body)) = rest.split_first() else {
+        return Err(Error::usage(format!(
+            "name the {} document (§7.3)",
+            C::NAME
+        )));
+    };
+    let slug = crate::name::normalize_token(first, "slug")?;
+    let home = match home {
+        Some(home) => home,
+        None => code_at_path(store.root(), query.pwd)?,
+    };
+    let existing = store.document_slug_taken_at(&home, &slug)?;
+    Ok(DocumentTarget {
+        home,
+        slug,
+        body: body.to_vec(),
+        existing,
+    })
+}
+
 /// Whether a token names a node in the tree — the classification that tells a home
 /// token from a series name (§7.3).
 fn as_node_code(root: &Path, token: &str) -> Option<Code> {
@@ -863,4 +970,49 @@ pub fn entity_fold_json<T: Serialize>(
         .map(|(eref, entity)| entity_json(core, eref, entity))
         .collect::<Result<Vec<_>>>()?;
     Ok(Value::Array(rows))
+}
+
+/// One document as the contract emits it (§7.2): the frontmatter's two fields plus
+/// the prose, with the home, core, slug, and extension added from the file's location
+/// and name (I3) — the same courtesy [`entity_json`] does, so a reader of the JSON
+/// alone knows what it is looking at.
+///
+/// `type` is present as **null** where the frontmatter carries none: a withheld key
+/// reads as a different answer than an absent value. There is no `kind` — a Document
+/// core declares none (§7.1) — and no `refs`, which is exactly why `-r` is a usage
+/// error on this core (§6.1, §7.3).
+pub fn document_json(core: &str, dref: &DocumentRef, document: &Document) -> Value {
+    json!({
+        "core": core,
+        "home": dref.home.as_str(),
+        "slug": dref.slug,
+        "ext": dref.ext.as_str(),
+        "type": document.frontmatter.r#type,
+        "tags": document.frontmatter.tags,
+        "body": document.body,
+    })
+}
+
+/// A fold across a subtree, one row per document (§7.2) — **frontmatter only**.
+///
+/// There is no `body` key at all rather than a null one: a fold never reads bodies
+/// (§7.1, §8.7), and emitting the key empty would claim it had looked and found
+/// nothing. Selecting on `type` or `tags` is the caller's job over this JSON, since
+/// Tabella declares no read flags of its own (§8.7, I4).
+pub fn document_fold_json(core: &str, folded: &[(DocumentRef, Frontmatter)]) -> Value {
+    Value::Array(
+        folded
+            .iter()
+            .map(|(dref, front)| {
+                json!({
+                    "core": core,
+                    "home": dref.home.as_str(),
+                    "slug": dref.slug,
+                    "ext": dref.ext.as_str(),
+                    "type": front.r#type,
+                    "tags": front.tags,
+                })
+            })
+            .collect::<Vec<_>>(),
+    )
 }

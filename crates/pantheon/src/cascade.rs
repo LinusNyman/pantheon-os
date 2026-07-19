@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::classify::{FileClass, classify};
+use crate::code::Code;
 use crate::envelope::{RawEntity, RawLine, Ref};
 use crate::tree::{Node, TreeRoot, build_tree};
 use crate::{Error, Result};
@@ -83,6 +84,23 @@ pub fn plan_cascade(root: &Path, own_kinds: &[&str], from: &Ref, to: &Ref) -> Re
     })
 }
 
+/// The refusal §7.2 gives when a rename would land on a name already taken (exit `3`).
+///
+/// Public and shared so a **Document** core refuses in the same words. It has to
+/// refuse for itself: [`plan_cascade`] gates this check on `own_kinds`, and a Document
+/// core declares none (§7.1) — and its files are loose in the open node dir, which
+/// this walk does not read anyway (§5.2). Neither gate can see a document, so Tabella
+/// makes the check itself and reports it identically.
+pub fn occupied_slug(to: &Ref, at: &Code) -> Error {
+    Error::validation(format!(
+        "{} already names a record at {} — renaming onto it would make the \
+         two indistinguishable, and there is no history to tell them apart \
+         again (§7.2, §18)",
+        to.to_token(),
+        at.as_str()
+    ))
+}
+
 fn walk(
     root: &Path,
     node: &Node,
@@ -134,13 +152,7 @@ fn walk(
                 _ => false,
             };
             if occupied {
-                return Err(Error::validation(format!(
-                    "{} already names a record at {} — renaming onto it would make the \
-                     two indistinguishable, and there is no history to tell them apart \
-                     again (§7.2, §18)",
-                    to.to_token(),
-                    node.code.as_str()
-                )));
+                return Err(occupied_slug(to, &node.code));
             }
             let refs = crate::validate::record_refs(&path, is_series)
                 .map_err(|e| Error::validation(format!("{}: {e}", path.display())))?;

@@ -64,7 +64,8 @@ Grouped into the three phases the method implies. Each step's own detail is in �
    resolver's filename path, the rename cascade (§5.4).
 4. **Pensum** — the nameless `task` series (determined-name path) + the record lock under contention (§6.4).
 5. **Tabella** — the Document shape (no tokens, extension-only mapping); makes `pan doctor`'s totality
-   claim demonstrable.
+   claim demonstrable. *Contract-done:* the third shape, the `+++` codec, the editor form in place,
+   `-f raw`, and `pan doctor` reporting the map total with one core declaring nothing.
 6. **Porticus + Tessera + Atrium** — the first screen. *Gate for the whole slice:* a real Atrium screen
    renders derived-out (I1) and relays a human write back through a core (I2). **Now circle back** and
    fix whatever the screen exposed in steps 1–5. The slice closes: three shapes, one contract, one screen.

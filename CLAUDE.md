@@ -64,20 +64,21 @@ Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `
 - `xtask/` — workspace automation (run via `cargo xtask`).
 - `docs/` — the mdBook spec. `deny.toml`, `dist-workspace.toml`, `release-plz.toml` — supply chain & release.
 
-## Status — build order steps 1–4 are done (§16)
+## Status — build order steps 1–5 are done (§16)
 
-**Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4).
-That is two of the three storage shapes — Partitioned, and Series in *both* its hand-named
-and nameless forms — plus the `core:slug` resolver, the record-level rename cascade, and the
-record lock under real contention. **Document is the shape still unbuilt** (§6.1), which is
-what step 5 is for, and why `Store` has no document path at all.
+**Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4),
+`tabella` (5). **All three storage shapes now exist** — Partitioned, Series in *both* its
+hand-named and nameless forms, and Document — plus the `core:slug` resolver, the record-level
+rename cascade, and the record lock under real contention. `pan doctor` is wired (§5.5) and
+reports the file→core map total, which is what Tabella makes demonstrable: it declares no
+tokens, so its files reach it by extension alone (§7.1).
 
-**Still scaffold** — a stub printing a not-implemented line: `tabella` (step 5), `porticus`
-and `tessera` and `atrium` (6), `mappa`/`rationes`/`fasti` (7), `auspex` (8), `speculum` and
-`studium` (9). Next real work is **step 5, Tabella** — the Document shape, the one file→core
-mapping resting on extension alone.
+**Still scaffold** — a stub printing a not-implemented line: `porticus` and `tessera` and
+`atrium` (6), `mappa`/`rationes`/`fasti` (7), `auspex` (8), `speculum` and `studium` (9).
+Next real work is **step 6, the first screen** — which is also the gate for the whole
+vertical slice, and where you circle back and fix whatever the screen exposed in steps 1–5.
 
-Two things a later step must not be surprised by:
+Four things a later step must not be surprised by:
 
 - **`pan`'s node-level cascade (§10.1) is still stubbed.** Its six structural mutators
   (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented.
@@ -87,6 +88,16 @@ Two things a later step must not be surprised by:
   node, so that is right. **Rationes' `balance` is determined by a holding *entity*** — so `rat`
   must check that entity exists in its own bin before writing. The store links no core and
   cannot know (I5).
+- **`plan_cascade` cannot refuse an occupied slug for a Document core**, and this is by design
+  rather than a bug: it gates that check on the caller's own tokens, and Tabella declares none —
+  and it walks meta dirs, where no document lives. So **Tabella makes the check itself**
+  (`find_documents` tree-wide, then `pantheon::occupied_slug` for the shared wording). Any
+  future Document core must do the same, or a rename will silently produce two records with
+  one name. `tabella/tests/contract.rs::refusal_rename_onto_an_occupied_slug` guards it.
+- **The `+++` codec lives in `pantheon::document`, and `Document` carries `front_raw`.** That
+  field is what preserves a hand's comments, key ordering, and any frontmatter key Tabella does
+  not read across a rewrite (§6.6, I6). Rebuilding the fence from `Frontmatter`'s two fields
+  instead would silently destroy them — never do that; edit the `DocumentMut` and re-emit.
 
 ## Commands (match CI exactly — see `.github/workflows/ci.yml`)
 

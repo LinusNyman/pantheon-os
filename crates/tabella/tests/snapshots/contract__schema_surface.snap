@@ -1,0 +1,30 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&schema)
+---
+{
+  "format_version": 1,
+  "name": "tabella",
+  "record": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "A document's TOML frontmatter envelope (§6.1, §6.6). The body rides alongside as\nopaque text and is never deserialized. No `home` key (I3).\n\nThis is Tabella's whole `Core::Record` (§7.1) — hence `JsonSchema`, which the\n`schema` verb needs. There is no `refs` field, deliberately: a document's\nfrontmatter carries `type` and `tags` and nothing else, which is why `-r` is a\nusage error on a Document core (§7.3) and why the rename cascade skips documents\noutright (§5.4).",
+    "properties": {
+      "tags": {
+        "default": [],
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "type": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "Frontmatter",
+    "type": "object"
+  },
+  "tokens": []
+}

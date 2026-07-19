@@ -1,0 +1,25 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&renamed)
+---
+{
+  "cascade": [
+    {
+      "path": "e_ego/e_c_corpus/ec_v_valetudo/ecv__/ecv__person__mara.json",
+      "refs": 1
+    }
+  ],
+  "record": {
+    "body": "Rome.\n",
+    "core": "tabella",
+    "ext": "md",
+    "home": "ecv",
+    "slug": "journey",
+    "tags": [],
+    "type": null
+  },
+  "renamed": {
+    "from": "trip_idea",
+    "to": "journey"
+  }
+}
