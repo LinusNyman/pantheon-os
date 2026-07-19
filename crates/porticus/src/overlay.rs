@@ -40,17 +40,36 @@ pub enum Overlay {
         buffer: String,
     },
     /// The computed change and its plan token, before a write commits (P§7, §7.3).
+    ///
+    /// A **scoped** action (`D`, `X`) is *n* single relays under one acknowledgement,
+    /// so this holds a set rather than a single write: the overlay names the full set
+    /// and its count, taken as a snapshot when it opens, and each item carries its own
+    /// plan token. A focused-row confirm is simply a set of one, which is what keeps
+    /// commit one code path rather than two.
     Confirm {
         action: Action,
-        invocation: Invocation,
-        /// The plan token from the `--dry-run` relay, where it produced one.
-        token: Option<String>,
-        /// The change as the core computed it — shown, never interpreted.
-        change: String,
+        pending: Vec<Pending>,
+        /// The membership this overlay was opened over. A per-item token catches an
+        /// item that *shifted*, but not one that was *added*, so the set is re-scanned
+        /// at commit and compared against this (P§7).
+        snapshot: Vec<String>,
         /// Set for `X` (remove-all), the one that demands a distinct, heavier
         /// keystroke: the count named and an explicit key, never a stray `y` (P§5).
         heavy: Option<usize>,
     },
+}
+
+/// One write awaiting acknowledgement.
+pub struct Pending {
+    /// The record this write names — what the membership re-scan compares.
+    pub key: String,
+    pub invocation: Invocation,
+    /// The plan token from this item's own `--dry-run`, where it produced one. Per
+    /// item, so an item that moved underneath is refused rather than acted on stale
+    /// (§7.3).
+    pub token: Option<String>,
+    /// The change as the core computed it — shown, never interpreted.
+    pub change: String,
 }
 
 impl Overlay {
