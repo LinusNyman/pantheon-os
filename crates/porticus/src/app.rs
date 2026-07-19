@@ -29,8 +29,16 @@ pub trait App {
     /// Derived on the frame it is shown and never stored (I1).
     fn count_at(&mut self, node: &Code) -> usize;
 
-    /// The dim only (P§6). Override where a count is costly: the badge is then exact
-    /// where it shows and the dim cheap everywhere.
+    /// The dim only (P§6) — the cheap question, asked of every visible node.
+    ///
+    /// The badge asks [`count_at`](App::count_at); this asks only *any?*. **Override it
+    /// where a count is costly**: the badge is then exact where it shows and the dim
+    /// cheap everywhere, which is the whole reason the two are separate.
+    ///
+    /// The default answers by counting, so a node that *holds* records is folded twice
+    /// per frame — once for the dim, once for the badge. That is not a leak to fix here
+    /// but the exact cost P§6 tells a costly instrument to override this away. An
+    /// instrument folding in-process over a personal corpus can leave it alone.
     fn any_at(&mut self, node: &Code) -> bool {
         self.count_at(node) > 0
     }

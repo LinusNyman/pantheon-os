@@ -21,6 +21,21 @@ use ratatui::widgets::{Paragraph, Widget};
 
 use crate::theme::{self, Theme};
 
+/// The two questions the rail asks about a node (P§6).
+///
+/// A trait rather than two closures because both answers come from the *same*
+/// instrument, and two closures would each want a mutable borrow of it.
+///
+/// They are separate on purpose. **`any` asks only *any?*** and drives the dim and the
+/// `.` collapse; **`count` asks how many** and drives the badge. An instrument whose
+/// count is costly overrides `any_at` to answer the dim without a full fold — collapse
+/// the two and that override becomes unreachable, and every instrument pays a full
+/// count for a yes/no.
+pub trait Presence {
+    fn any(&mut self, node: &Code) -> bool;
+    fn count(&mut self, node: &Code) -> usize;
+}
+
 /// One visible line of the outline.
 pub struct Visible<'a> {
     pub node: &'a Node,
@@ -233,16 +248,15 @@ impl Rail {
 
     /// Draw the rail.
     ///
-    /// `count` is the app's own count at a node, called **only for the lines actually
-    /// on screen** (P§6): the badge is exact where it shows, and an instrument whose
-    /// count is costly is never asked for one it would not display.
+    /// [`Presence`] is asked only for the lines actually on screen, and `count` only
+    /// where a badge will show it (P§6).
     pub fn draw(
         &self,
         area: Rect,
         buf: &mut Buffer,
         theme: Theme,
         focused: bool,
-        mut count: impl FnMut(&Code) -> usize,
+        presence: &mut impl Presence,
     ) {
         let visible = self.visible();
         let height = area.height as usize;
@@ -250,8 +264,9 @@ impl Rail {
         let mut lines = Vec::new();
 
         for (index, entry) in visible.iter().enumerate().skip(first).take(height) {
-            let at = count(&entry.node.code);
-            if self.records_only && at == 0 && entry.node.children.is_empty() {
+            // The cheap question first: it is all the dim and the `.` collapse need.
+            let holds = presence.any(&entry.node.code);
+            if self.records_only && !holds && entry.node.children.is_empty() {
                 continue;
             }
             let marker = match (entry.expandable, entry.expanded) {
@@ -261,9 +276,8 @@ impl Rail {
             };
             let selected = index == self.cursor;
             let body = Style::default().fg(theme.sphere(entry.sphere));
-            // Empty nodes dim (P§6) — the dim asks only *any?*, so a zero count is the
-            // whole of the question.
-            let body = if at == 0 { theme.dim() } else { body };
+            // Empty nodes dim (P§6) — and *any?* is the whole of that question.
+            let body = if holds { body } else { theme.dim() };
             let style = if selected && focused {
                 theme.focus()
             } else if selected {
@@ -271,8 +285,9 @@ impl Rail {
             } else {
                 body
             };
-            let badge = if at > 0 {
-                format!("  {at}")
+            // The exact count only where a badge will actually show it.
+            let badge = if holds {
+                format!("  {}", presence.count(&entry.node.code))
             } else {
                 String::new()
             };

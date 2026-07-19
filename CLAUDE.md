@@ -24,9 +24,22 @@ building or changing any component, read its chapter. Key anchors:
 - `08-cores.md` — each core's primitive, tokens, and record shape.
 - `14-workspace-layout.md`, `15-publishing.md` — crate layout and release mechanics.
 - `16-build-order.md` — the dependency-ordered build sequence (see BUILD-PLAN.md for how to execute it).
+- `10-pan-tui.md`, `11-ui-layer.md`, `12-lenses.md` — the screen layer: `pan`'s two tabs, the
+  Porticus/Tessera split, and what makes a lens a lens.
 - `18-non-goals.md` — **what must NOT be built.** Read early; it fences the design.
 
 `docs/src/APPENDIX-A-NAMES.md` explains the Latin naming.
+
+**`docs/src/PORTICUS-SPEC.md` is the chrome's own spec, cited `P§n`** — the app/view model, the
+view catalog, the keymap tiers, the theme, the instrument registry. §11.1 defers to it and every
+Porticus decision traces to it, so read it before touching `porticus`.
+
+**It is deliberately untracked** (`.gitignore`: `/docs/src/*-SPEC.md`, "private design docs"), so
+it is **not in a fresh clone** — it lives only on the author's machine. Two consequences worth
+knowing rather than rediscovering: `docs/src/SUMMARY.md` links it, so `mdbook build` on a clean
+checkout meets a missing chapter (nothing in CI builds the book today); and a session working
+from a clone cannot read it, so cite `P§n` from what the tracked chapters say and ask rather than
+guess at the rest.
 
 ## The invariants that bite most often
 
@@ -204,6 +217,10 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   every relay centrally; **a lens's own reads are its own to root** (`tessera::read` takes one,
   and Atrium holds the root for its tiles, its agenda fold, and its `count_at`). Both halves of
   this were real bugs, found one after the other.
+- **The dim asks `any_at`, the badge asks `count_at`** (P§6). Two questions on purpose: an
+  instrument whose count is costly overrides `any_at` and the dim stays cheap. Collapse them and
+  that override becomes unreachable. The default `any_at` counts, so a node holding records is
+  folded twice a frame — the cost P§6 tells a costly instrument to override away.
 - **`None` from `rows` is a draw-view; `Some(vec![])` is an empty row-view** (P§3). The first is
   *about the selected node*, so the node is its target; the second honestly has an empty set.
   Conflating them made `e` on a draw-view silently do nothing.

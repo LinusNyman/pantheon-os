@@ -158,6 +158,22 @@ fn check_lineup(views: &[Box<dyn View>]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The rail's two questions, answered by the instrument (P§6).
+///
+/// An adapter rather than two closures, because both answers come from the same `App`
+/// and two closures would each want a mutable borrow of it.
+struct Asking<'a, A>(&'a mut A);
+
+impl<A: App> crate::rail::Presence for Asking<'_, A> {
+    fn any(&mut self, node: &Code) -> bool {
+        self.0.any_at(node)
+    }
+
+    fn count(&mut self, node: &Code) -> usize {
+        self.0.count_at(node)
+    }
+}
+
 // ── the frame: header · body · status (P§4) ──────────────────────────────────
 
 fn draw(
@@ -245,11 +261,14 @@ fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Th
 
     if let Some(rail_area) = rail_area {
         let focused = state.focus == Focus::Rail;
-        state
-            .rail
-            .draw(rail_area, frame.buffer_mut(), theme, focused, |code| {
-                app.count_at(code)
-            });
+        // One borrow of the instrument, two questions (P§6).
+        state.rail.draw(
+            rail_area,
+            frame.buffer_mut(),
+            theme,
+            focused,
+            &mut Asking(app),
+        );
     }
 
     // The view re-folds here, every frame it is drawn — derived-out, nothing cached
