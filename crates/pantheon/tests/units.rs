@@ -1385,3 +1385,114 @@ fn the_keyed_target_probes_its_leading_token_for_a_node_code() {
     assert!(t.existing.is_none());
     drop(elsewhere);
 }
+
+// ── the document fence (§6.6) ──────────────────────────────────────────────────
+
+/// A hand-written note carries no fence, and Tabella handles every loose document in
+/// place (§8.7) — so no fence is an empty envelope over a whole-file body, not an error.
+#[test]
+fn a_document_without_a_fence_is_all_body() {
+    let doc = pantheon::document::parse("just prose\nand more\n").unwrap();
+    assert_eq!(doc.frontmatter, pantheon::Frontmatter::default());
+    assert_eq!(doc.body, "just prose\nand more\n");
+
+    // A `+++` that is not the first line is body, not a fence.
+    let doc = pantheon::document::parse("prose\n+++\ntype = \"x\"\n+++\n").unwrap();
+    assert_eq!(doc.frontmatter.r#type, None);
+    assert!(doc.body.starts_with("prose\n+++"));
+}
+
+#[test]
+fn the_fence_carries_type_and_tags_over_an_opaque_body() {
+    let text =
+        "+++\ntype = \"principium\"\ntags = [\"mores\", \"vocatio\"]\n+++\n\nProse starts here.\n";
+    let doc = pantheon::document::parse(text).unwrap();
+    assert_eq!(doc.frontmatter.r#type.as_deref(), Some("principium"));
+    assert_eq!(doc.frontmatter.tags, ["mores", "vocatio"]);
+    // The blank line after the closing fence is the fence's, not the body's.
+    assert_eq!(doc.body, "Prose starts here.\n");
+}
+
+/// An opening fence with no closing one is malformed: exit `3`, not a silent
+/// reinterpretation of the whole file as body.
+#[test]
+fn an_unterminated_fence_is_a_validation_failure() {
+    for text in ["+++\ntype = \"x\"\n", "+++\n", "+++"] {
+        let err = pantheon::document::parse(text).unwrap_err();
+        assert_eq!(err.exit_code(), pantheon::ExitCode::Validation, "{text:?}");
+    }
+}
+
+#[test]
+fn the_fence_scanner_accepts_crlf() {
+    let text = "+++\r\ntype = \"nota\"\r\n+++\r\n\r\nProse.\r\n";
+    let doc = pantheon::document::parse(text).unwrap();
+    assert_eq!(doc.frontmatter.r#type.as_deref(), Some("nota"));
+    assert_eq!(doc.body, "Prose.\r\n");
+}
+
+/// The fold reads frontmatter only (§7.2) — so TOML *below* the closing fence is
+/// prose and must not leak into the envelope.
+#[test]
+fn read_frontmatter_stops_at_the_closing_fence() {
+    let dir = fresh_root();
+    let path = dir.join("note.md");
+    std::fs::write(
+        &path,
+        "+++\ntype = \"right\"\n+++\n\ntype = \"wrong\"\ntags = [\"leaked\"]\n",
+    )
+    .unwrap();
+
+    let fm = pantheon::read_frontmatter(&path).unwrap();
+    assert_eq!(fm.r#type.as_deref(), Some("right"));
+    assert!(fm.tags.is_empty(), "body TOML must not reach the envelope");
+
+    // A fence-less file yields the empty envelope rather than an error.
+    let bare = dir.join("bare.md");
+    std::fs::write(&bare, "no fence here\n").unwrap();
+    assert_eq!(
+        pantheon::read_frontmatter(&bare).unwrap(),
+        pantheon::Frontmatter::default()
+    );
+}
+
+/// §6.6: all TOML is `toml_edit`'s, so comments and key ordering survive a rewrite by
+/// code or LLM (I6, I8). This is the claim that forbids a serde round-trip here — and
+/// the reason [`pantheon::Document`] carries `front_raw` rather than reconstructing
+/// the fence from its two known fields.
+#[test]
+fn a_frontmatter_rewrite_preserves_comments_order_and_unread_keys() {
+    let text = "+++\n# why this note exists\ntags = [\"mores\"]\nauthor = \"a hand\"\ntype = \"principium\"\n+++\n\nProse.\n";
+    let mut doc = pantheon::document::parse(text).unwrap();
+    doc.frontmatter.tags.push("vocatio".into());
+
+    let out = doc.to_text().unwrap();
+    assert!(
+        out.contains("# why this note exists"),
+        "comment lost:\n{out}"
+    );
+    assert!(
+        out.contains("author = \"a hand\""),
+        "a key Tabella does not read was dropped:\n{out}"
+    );
+    assert!(
+        out.find("tags").unwrap() < out.find("type").unwrap(),
+        "key order lost:\n{out}"
+    );
+    assert!(out.contains("vocatio"), "edit not applied:\n{out}");
+    // Reparsing is stable, and the body came through untouched.
+    assert_eq!(pantheon::document::parse(&out).unwrap().body, "Prose.\n");
+}
+
+/// A rewrite must not convert a CRLF file's line endings (§6.6, I6).
+#[test]
+fn a_rewrite_keeps_the_files_own_line_endings() {
+    let doc = pantheon::document::parse("+++\r\ntype = \"nota\"\r\n+++\r\n\r\nProse.\r\n").unwrap();
+    assert!(doc.crlf);
+    let out = doc.to_text().unwrap();
+    assert!(
+        out.starts_with("+++\r\n"),
+        "fence converted to LF:\n{out:?}"
+    );
+    assert!(out.ends_with("Prose.\r\n"), "body altered:\n{out:?}");
+}

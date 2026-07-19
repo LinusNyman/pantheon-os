@@ -79,11 +79,19 @@ pub struct Line<T> {
 
 /// A document's TOML frontmatter envelope (§6.1, §6.6). The body rides alongside as
 /// opaque text and is never deserialized. No `home` key (I3).
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+///
+/// This is Tabella's whole `Core::Record` (§7.1) — hence `JsonSchema`, which the
+/// `schema` verb needs. There is no `refs` field, deliberately: a document's
+/// frontmatter carries `type` and `tags` and nothing else, which is why `-r` is a
+/// usage error on a Document core (§7.3) and why the rename cascade skips documents
+/// outright (§5.4).
+#[derive(Serialize, Deserialize, schemars::JsonSchema, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Frontmatter {
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
-    #[serde(default = "Vec::new")]
+    // `default`, not `default = "Vec::new"`: the two are identical for a `Vec`, but
+    // schemars' derive cannot infer `T` through the path form.
+    #[serde(default)]
     pub tags: Vec<String>,
 }
 
