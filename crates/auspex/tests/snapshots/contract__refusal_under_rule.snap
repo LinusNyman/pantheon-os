@@ -1,0 +1,10 @@
+---
+source: crates/auspex/tests/contract.rs
+expression: "pretty(&aus_env(&root, &[\"plan\"], &rule).1)"
+---
+{
+  "error": {
+    "code": 6,
+    "msg": "`plan` re-enters the engine and PANTHEON_RULE=1 refuses it: a rule reads the tree through the core CLIs, never by calling `aus` — an `aus plan` inside a rule would re-evaluate that rule without bound (§9.3)"
+  }
+}

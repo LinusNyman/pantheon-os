@@ -122,14 +122,45 @@ variants — a *dispatch type, not a disk format*, since the filename already na
 `location`/`region` are one storage shape, so it keeps one flat struct, and an enum there would
 have turned `edit -k` into a record transformation when §7.2 says it is a file rename.
 
-**Still scaffold** — a stub printing a not-implemented line: `auspex` (8), `speculum` and
-`studium` (10). **Next real work is step 8** — Auspex, the one reactive writer (I2, §9).
-Step 9 is now a **cleanups** pass — the deferrals steps 1–8 left (pan's node cascade §10.1,
-`pan migrate`, validate's candidate fixes §10.2, the figlet banner, `Pick` as tree-as-modal,
-nested `data` render) plus the chrome debts hands-on use surfaced (**no add form** — `a`
-relays a nameless `add` with no field prompt; responsive top/bottom split and a narrower
-rail; passive overlays yielding to a nav key; header showing the node not the whole trail).
-Lenses and releases shift to 10 and 11.
+**Still scaffold** — a stub printing a not-implemented line: `speculum` and `studium` (9).
+**Step 8 is in progress**, in three parts against §16's own "`plan` before `run`" sequencing:
+the hook (landed, below), then Auspex's **read half** (landed: discovery, the header, `ls`,
+`version`, `help`, and the browser screen), then `plan`/`test`, then `run`.
+
+**`aus` is real enough for `pan doctor` to see it** — it emits `version -f json` with
+`format_version: 1`, so it has moved from `absent` to `installed`. `run`, `plan`, and `test` are
+declared and return not-implemented, so `--help` tells the truth and the §9.3 refusal has
+something to refuse. Three things about its shape that a later part must not undo:
+
+- **`aus` is `pan`-shaped, not a core's shape**: its own structural verbs, **no `schema`** (it
+  owns no records, and `pantheon::schema::<C>` is bounded on `Core` so it is not even callable),
+  and **no `Ctx`** — a core's `Ctx` exists to hold a `Store`, and Auspex holds none. It must also
+  stay out of `KNOWN_CORE_SHORTS`, which is the file→core token map.
+- **No argv pre-pass.** §13: "`pan`, `aus`, and the lenses have no implicit verb and need no
+  pre-pass". A bare short is `cmd: None`, and Atrium — not `pan`, which has a hidden `lookup`
+  default — is the model.
+- **The §9.3 refusal is Auspex's own, not `contract::refused_under_rule`.** A core refuses a
+  write because a rule may not borrow a hand's authority; `aus` refuses `run`/`plan`/`test`
+  because they would **re-enter the engine and recurse without bound**. Same exit `6`, different
+  danger — and the spine's wording points at `get` and `where`, which `aus` does not have.
+
+**The header grammar has one rule the spec does not state: `desc=` takes the rest of the line and
+must come last.** §9.2 calls it "one-line", which a whitespace-separated field cannot hold; the
+alternative was quoting, and a header a hand must escape to write is worse than one with an
+ordering rule. `watch` and `writes` are single tokens by construction (comma- and
+semicolon-separated), so nothing else wants the space.
+
+**A rule whose header will not parse stays default-deny and is reported** — never dropped from
+the listing. `writes` is the whole guard (§9.2, §9.5), so the unreadable case must fail closed.
+The same holds for a filename whose code disagrees with the meta dir holding it: **the meta dir
+wins** (§9.1 — where the file sits is the whole of its scope) and the disagreement is reported as
+`misfiled_as`, never honoured as a scope.
+
+**Rule discovery is the only walk in the workspace that looks for `FileClass::Rule`** — note the
+variant is `Rule`, not `Function`; `"function"` is the reserved *token*. No `Store` walk could
+ever yield one, since a rule belongs to no core's token set, so it is built from `build_tree` +
+a per-node meta-dir `read_dir` + `classify`. **`pan new` does not mint meta dirs** — they appear
+on first write — so a fixture placing a rule must `create_dir_all` it.
 
 **Step 8's hook half landed first, and it is the spine's, not each core's.** §16 step 8 says the
 `aus`-not-on-`PATH` no-op "is exercised" through steps 1–7 — it was not: no core spawned anything,

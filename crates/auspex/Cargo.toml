@@ -22,7 +22,10 @@ clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
+# tracing: Auspex's own diagnostics, **stderr only** — inherited when a hand runs
+# `aus`, discarded when a core spawns the hook detached (§13). Never a file: a log the
+# engine kept would be the rule state and the audit sink §18 forbids. Nothing emits yet
+# — the subscriber lands with rule execution, which is the first thing worth tracing.
 tracing.workspace = true
 porticus = { workspace = true, optional = true }
 

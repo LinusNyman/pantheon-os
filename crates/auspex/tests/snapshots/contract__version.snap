@@ -1,0 +1,10 @@
+---
+source: crates/auspex/tests/contract.rs
+expression: pretty(&version)
+---
+{
+  "format_version": 1,
+  "name": "auspex",
+  "short": "aus",
+  "version": "0.1.0"
+}

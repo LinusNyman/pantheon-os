@@ -1,0 +1,25 @@
+---
+source: crates/auspex/tests/contract.rs
+expression: out
+---
+aus ls
+  # every rule in the tree
+  => exit 0: 4 rule(s)
+aus ls csa
+  # a scope that is a real node
+  => exit 0: 3 rule(s)
+aus ls nosuch
+  # a scope naming no node
+  => exit 4: no node with code "nosuch"
+aus run
+  # rule execution is not built yet
+  => exit 1: `aus run` is not implemented yet — rule execution is the propose protocol's (§9.3), and `ls` is what reads the tree today
+aus plan
+  # nor is planning
+  => exit 1: `aus plan` is not implemented yet — rule execution is the propose protocol's (§9.3), and `ls` is what reads the tree today
+aus run (PANTHEON_RULE=1)
+  # a rule may not re-enter the engine
+  => exit 6: `run` re-enters the engine and PANTHEON_RULE=1 refuses it: a rule reads the tree through the core CLIs, never by calling `aus` — an `aus plan` inside a rule would re-evaluate that rule without bound (§9.3)
+aus ls (PANTHEON_RULE=1)
+  # but it may read
+  => exit 0: 4 rule(s)
