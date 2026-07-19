@@ -79,30 +79,45 @@ Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `
 - `crates/porticus` (~3.8k lines), `crates/tessera` — the peer libs. Porticus links `ratatui` whole;
   Tessera takes `ratatui-core` and links no Porticus, now or ever.
 - `crates/<core>` — one crate per core, **three files**. **`lib.rs` is the thin file, `main.rs` the
-  fat one** — the reverse of what §14's "~30-line clap shell" suggests, and the shape all four
-  built cores share. `lib.rs` (66–148 lines) holds only the record struct(s) and `impl Core`;
-  `main.rs` (784–954) holds the clap `Cli`, the twelve verbs, `Ctx`, the editor form, and the tail
-  helpers; `screen.rs` (197–244, behind `tui`) holds `impl App` and the folds its views close over.
+  fat one** — the reverse of what §14's "~30-line clap shell" suggests, and the shape all seven
+  cores share. `lib.rs` (66–270 lines) holds only the record struct(s) and `impl Core`;
+  `main.rs` (784–1741) holds the clap `Cli`, the twelve verbs, `Ctx`, the editor form, and the tail
+  helpers; `screen.rs` (197–384, behind `tui`) holds `impl App` and the folds its views close over.
   Put verb logic in `main.rs` — the spine already owns everything a core would otherwise share.
+  **A two-shape core sits at the top of every range** (Fasti, then Rationes): a `Record` enum, a
+  shape question in front of each verb, and two token vocabularies to refuse across.
 - `xtask/` — workspace automation (run via `cargo xtask`).
 - `docs/` — the mdBook spec. `deny.toml`, `dist-workspace.toml`, `release-plz.toml` — supply chain & release.
 
-## Status — build order steps 1–6 are done (§16); the slice is closed
+## Status — build order steps 1–7 are done (§16); all seven cores exist
 
 **Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4),
-`tabella` (5), `porticus` + `tessera` + `atrium` (6). **All three storage shapes exist** —
-Partitioned, Series in *both* its hand-named and nameless forms, and Document — plus the
-`core:slug` resolver, the record-level rename cascade, and the record lock under contention.
+`tabella` (5), `porticus` + `tessera` + `atrium` (6), `mappa` + `rationes` + `fasti` (7).
+**All three storage shapes exist** — Partitioned, Series in *both* its hand-named and nameless
+forms, and Document — plus the `core:slug` resolver, the record-level rename cascade, and the
+record lock under contention.
 
 **The vertical slice closed at step 6**, which is what it was for: a real screen renders
 derived-out (I1) and relays a human write back through a core (I2, §12) — `d` on an Atrium row
-runs `pen edit … --done -y` and `pen list` reads it back from another process. Six instruments
-have TUIs (`pan`, `atr`, `alb`, `ann`, `pen`, `tab`); the table renderer fills §7.3's "TTY →
-table"; `cargo xtask seed` mints a tree to look at.
+runs `pen edit … --done -y` and `pen list` reads it back from another process. Nine instruments
+have TUIs (`pan`, `atr`, `alb`, `ann`, `pen`, `tab`, `map`, `rat`, `fas`); the table renderer
+fills §7.3's "TTY → table"; `cargo xtask seed` mints a tree to look at.
 
-**Still scaffold** — a stub printing a not-implemented line: `mappa`/`rationes`/`fasti` (7),
-`auspex` (8), `speculum` and `studium` (9). **Next real work is step 7** — the three cores the
-slice did not need, against a contract a screen has now exercised.
+**Step 7 built the three cores the slice did not need**, against a contract a screen had already
+exercised — and they were built in parallel git worktrees off one `main`, each touching only its
+own crate plus one line of `Cargo.lock`. That worked *because* of I5: three cores that cannot
+import each other cannot conflict either. It is the cheapest confirmation of hub-and-spoke the
+repo has produced, and worth repeating for any future fan-out.
+
+Step 7 also added the **two-shape core** as a settled pattern (Rationes `holding`/`balance`,
+Fasti `span`/`event`): a `#[serde(untagged)]` `Record` enum with `deny_unknown_fields` on both
+variants — a *dispatch type, not a disk format*, since the filename already names the variant
+(§5.2, §7.1) and §18 forbids writing a tag. **Two tokens alone do not earn an enum**: Mappa's
+`location`/`region` are one storage shape, so it keeps one flat struct, and an enum there would
+have turned `edit -k` into a record transformation when §7.2 says it is a file rename.
+
+**Still scaffold** — a stub printing a not-implemented line: `auspex` (8), `speculum` and
+`studium` (9). **Next real work is step 8** — Auspex, the one reactive writer (I2, §9).
 
 ### What step 6 deliberately left
 
@@ -116,7 +131,19 @@ Not oversights — decisions, each with the reason:
 - **§10.2's auto-apply and candidate fixes.** A `Finding` carries a code, a severity, a path
   and a message — no candidates. The validate tab shows findings; offering or applying a fix
   needs the spine to produce candidates first.
-- **`Calendar` and `Timeline`** wait for Fasti at step 7 — nothing would fill them before it.
+- **`Calendar` and `Timeline`** waited for Fasti at step 7 — see below; Fasti now exists and they
+  are the one piece of step 7 that is still owed.
+
+### What step 7 deliberately left
+
+- **P§3's `Calendar` and `Timeline` views still do not exist in `crates/porticus/`.** Fasti was
+  built in a worktree parallel to two siblings, and Porticus is shared, so the chrome work was
+  held back rather than landed into a contended crate. `fas`'s screen uses the existing catalog —
+  `TreeFile`, `Agenda` (the derived calendar), `EntityCard`, `Insights` — and a span fills `Card`'s
+  strip natively, since `Timeline`'s bar and the strip are one type. **This is now unblocked and
+  is the obvious next chrome commit.**
+- **The `resolve.rs` gap Rationes found is reported, not patched** — see below. Same reason: a
+  spine change with two sibling branches in flight.
 
 ### Things a later step must not be surprised by
 
@@ -124,17 +151,49 @@ Not oversights — decisions, each with the reason:
   (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented,
   so `r`/`m`/`x` are **dark** in `pan`'s TUI — `on_action` returns `None` and Porticus greys
   them (P§7). The *record*-level cascade (§5.4) is done and is what the cores use.
+- **`pan resolve` mis-registers a *named* determined series — an open spine bug.**
+  `pan resolve rationes:checking` returns **ambiguous** between the holding and its balance
+  series, and `pan validate` raises a spurious `duplicate_slug` for the same pair, though §5.4
+  and §7.1 say a determined series is never a ref target and its name is skipped for uniqueness.
+  One branch causes it: `resolve.rs::register_record` picks the ref-target identity off
+  `FileClass` alone, and `crp__balance__checking.jsonl` has three segments, so `classify` calls
+  it `NamedSeries` — correctly, since classification is *structural* and **only the registry's
+  `named` bit tells the two apart** (`SeriesRef`'s own doc comment in `store.rs` says so). The
+  `DeterminedSeries` arm, which routes to `register_series_lines`, is reached only by the
+  nameless form. The fix looks like gating the `NamedSeries` arm on
+  `reg.shape_of_kind(&kind) == Some(Shape::Series { named: false })`. **Rationes-only** —
+  Pensum's determined series is nameless and Fasti's `event` is hand-named, which is why nothing
+  before step 7 could reach it.
 - **`Store::write_line` mints any `Shape::Series { named: false }` series on first write**
   (§7.3: a determined series is minted by its determinant). For Pensum the determinant is the
-  node, so that is right. **Rationes' `balance` is determined by a holding *entity*** — so `rat`
-  must check that entity exists in its own bin before writing. The store links no core and
-  cannot know (I5). **This bites at step 7.**
+  node, so that is right. **Rationes' `balance` is determined by a holding *entity***, and the
+  store links no core and cannot know (I5) — so `rat` checks in its own bin, via
+  `holding_for_balance`, which every balance write goes through: **no such holding → exit `4`**
+  (§7.3 already gives `4` to an `add` appending to a series that does not exist), **holding is a
+  `claim` → exit `3`** (the write is well-formed; Rationes' own vocabulary refuses it). Not `6`,
+  which §7.3 scopes to a write refused under `PANTHEON_RULE=1`. The lookup doubles as the home,
+  which is why `rat checking 4200` needs neither `-H` nor `$PWD`. **Any future determined-series
+  core must make this check itself** — `refusal_a_balance_without_its_determinant` guards it, and
+  its load-bearing assertion is the second one: *the file was not minted*.
 - **`plan_cascade` cannot refuse an occupied slug for a Document core**, and this is by design
   rather than a bug: it gates that check on the caller's own tokens, and Tabella declares none —
   and it walks meta dirs, where no document lives. So **Tabella makes the check itself**
   (`find_documents` tree-wide, then `pantheon::occupied_slug` for the shared wording). Any
   future Document core must do the same, or a rename will silently produce two records with
   one name. `tabella/tests/contract.rs::refusal_rename_onto_an_occupied_slug` guards it.
+- **No core can carry a `porticus::drive` test today.** `screen.rs` is a module of the *bin*, and
+  an integration test links the *lib*, so no core's `App` is nameable from `tests/`. `drive` is
+  exercised only by `porticus/tests/frame.rs` against a fake app — which is a thin guarantee given
+  that step 6 found three defects reaching `main` past a full green suite, caught only by driving
+  a real binary. Closing it means moving the screen into the lib, and that is a shape question for
+  **all seven cores at once** (§14), not one a single core settles. Flagged by two step-7 cores
+  independently; unchanged so far, deliberately.
+- **The table renderer now meets nested `data` for the first time.** Mappa is the first core whose
+  `data` carries an object, so `map list -f table` renders `{"lat":59.3293,"lon":18.0686}` inside
+  the cell. This is what §7.3 describes — `data`'s keys hoisted, and "the flatness test is
+  deliberately *not* recursive" — so it is designed behaviour rather than a defect. It is merely
+  *visible* now, and worth a deliberate call (a nested value could fall back to pretty JSON as
+  `pan tree` does). That is a spine commit.
 
 ## Commands (match CI exactly — see `.github/workflows/ci.yml`)
 
