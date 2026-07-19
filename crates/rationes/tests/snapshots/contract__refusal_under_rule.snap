@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 649
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 6,
+    "msg": "`add` is a write verb and PANTHEON_RULE=1 refuses it; a rule that wants a value uses `get` or `where` (§9.3)"
+  }
+}

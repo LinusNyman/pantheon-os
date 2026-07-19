@@ -1,0 +1,16 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 199
+expression: pretty(&next)
+---
+{
+  "core": "rationes",
+  "data": {
+    "amount": 4310.0
+  },
+  "home": "crp",
+  "key": "260719",
+  "kind": "balance",
+  "refs": [],
+  "series": "checking"
+}

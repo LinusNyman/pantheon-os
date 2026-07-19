@@ -1,0 +1,31 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 274
+expression: pretty(&renamed)
+---
+{
+  "cascade": [
+    {
+      "path": "c_contextus/c_r_res/cr_b_bona/crb__/crb__asset__toolbox.json",
+      "refs": 1
+    }
+  ],
+  "record": {
+    "core": "rationes",
+    "data": {
+      "currency": "usd"
+    },
+    "home": "crp",
+    "kind": "account",
+    "refs": [],
+    "slug": "current"
+  },
+  "renamed": {
+    "from": "checking",
+    "to": "current"
+  },
+  "series": {
+    "from": "checking",
+    "to": "current"
+  }
+}

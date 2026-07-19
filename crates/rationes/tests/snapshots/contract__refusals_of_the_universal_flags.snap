@@ -1,0 +1,76 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 572
+expression: out
+---
+$ rat -c on an add
+2 {
+  "error": {
+    "code": 2,
+    "msg": "rationes' balance series is determined by its holding and minted by the holding's own creation, so -c mints nothing — a name that is a slug has nothing to mistype (§7.1, §7.3, §8.3)"
+  }
+}
+
+$ rat -k balance on the entity form
+2 {
+  "error": {
+    "code": 2,
+    "msg": "`rat add -k balance` names a series token on the entity form: -k selects within a shape and never across it, and a balance is written by giving a holding its figure — `rat <home> <holding> <amount>` (§7.1, §7.2)"
+  }
+}
+
+$ rat -k balance on a read
+2 {
+  "error": {
+    "code": 2,
+    "msg": "`-k balance` filters no holding: a balance is reached through the holding that determines it, so its trend is `rat series <holding>` (§5.4, §7.2, §8.3)"
+  }
+}
+
+$ rat -a with no amount
+2 {
+  "error": {
+    "code": 2,
+    "msg": "-a dates a balance reading, and none was given: `rat <home> <holding> <amount> -a <date>` (§7.3, §8.3)"
+  }
+}
+
+$ rat -a on an edit
+2 {
+  "error": {
+    "code": 2,
+    "msg": "-a names a balance reading, and a reading is corrected by writing its key again: `rat <home> <holding> <amount> -a <date>` lands on the same key and confirms the overwrite (I1, §6.1, §7.3)"
+  }
+}
+
+$ rat a second token that is no figure
+2 {
+  "error": {
+    "code": 2,
+    "msg": "a balance is one figure, and \"four\" is not one — a holding takes its name in one token and its reading in the next (§7.3, §8.3)"
+  }
+}
+
+$ rat three tokens
+2 {
+  "error": {
+    "code": 2,
+    "msg": "a holding is one token and its balance one figure, and 3 were given (§5.1, §7.3)"
+  }
+}
+
+$ rat --currency on a reading
+2 {
+  "error": {
+    "code": 2,
+    "msg": "--currency and --expires describe the holding, not a reading of it — set them with `rat edit <holding>` (§8.3, I1)"
+  }
+}
+
+$ rat series with no holding
+2 {
+  "error": {
+    "code": 2,
+    "msg": "`rat series` takes the holding whose trend you want: `rat series checking` — a balance series is named for its holding and reached through it, so there is no collection to name on its own (§5.4, §7.1, §8.3)"
+  }
+}

@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 526
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "rationes:checking already names a record at crp — renaming onto it would make the two indistinguishable, and there is no history to tell them apart again (§7.2, §18)"
+  }
+}

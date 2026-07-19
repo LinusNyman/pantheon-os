@@ -1,0 +1,37 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 220
+expression: pretty(&redact(pending))
+---
+{
+  "change": {
+    "after": {
+      "core": "rationes",
+      "data": {
+        "currency": "usd",
+        "note": "joint"
+      },
+      "home": "crp",
+      "kind": "account",
+      "refs": [],
+      "slug": "checking"
+    },
+    "before": {
+      "core": "rationes",
+      "data": {
+        "currency": "usd"
+      },
+      "home": "crp",
+      "kind": "account",
+      "refs": [],
+      "slug": "checking"
+    },
+    "core": "rationes",
+    "home": "crp",
+    "key": "checking",
+    "kind": "account",
+    "verb": "edit"
+  },
+  "plan": "edit",
+  "token": "[redacted]"
+}

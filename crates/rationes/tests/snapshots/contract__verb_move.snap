@@ -1,0 +1,25 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 307
+expression: pretty(&moved)
+---
+{
+  "moved": {
+    "from": "crp",
+    "to": "crb"
+  },
+  "record": {
+    "core": "rationes",
+    "data": {
+      "currency": "usd"
+    },
+    "home": "crb",
+    "kind": "account",
+    "refs": [],
+    "slug": "checking"
+  },
+  "series": {
+    "from": "crp",
+    "to": "crb"
+  }
+}

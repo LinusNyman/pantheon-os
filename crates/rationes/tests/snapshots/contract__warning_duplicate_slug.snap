@@ -1,0 +1,15 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 673
+expression: pretty(&findings)
+---
+{
+  "findings": [
+    {
+      "code": "duplicate_slug",
+      "msg": "rationes:checking also names a record at crp — a ref meeting both lists them rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
+      "path": "c_contextus/c_r_res/cr_p_pecunia/crp__/crp__account__checking.json",
+      "severity": "warning"
+    }
+  ]
+}

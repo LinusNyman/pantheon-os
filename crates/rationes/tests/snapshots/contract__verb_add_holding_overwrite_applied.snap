@@ -1,0 +1,15 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 170
+expression: pretty(&applied)
+---
+{
+  "core": "rationes",
+  "data": {
+    "note": "day to day"
+  },
+  "home": "crp",
+  "kind": "account",
+  "refs": [],
+  "slug": "checking"
+}

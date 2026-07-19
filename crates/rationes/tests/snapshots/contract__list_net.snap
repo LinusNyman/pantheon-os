@@ -1,0 +1,17 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 439
+expression: pretty(&net)
+---
+[
+  {
+    "currency": "shares",
+    "holdings": 1,
+    "total": 12.0
+  },
+  {
+    "currency": "usd",
+    "holdings": 2,
+    "total": 5100.0
+  }
+]
