@@ -36,6 +36,10 @@ use pantheon::{
 };
 use pensum::{Pensum, Task};
 
+// The screen rides the `tui` feature; drop it and the core is headless (§14).
+#[cfg(feature = "tui")]
+mod screen;
+
 /// The twelve verbs (§7.3). A closed reserved set: a verb wins over a node code,
 /// which is what makes `add` safe to leave implicit (the ambiguity rule, §7.3).
 const VERBS: &[&str] = &[
@@ -43,8 +47,10 @@ const VERBS: &[&str] = &[
     "help", "version",
 ];
 
-const BARE: &str =
-    "pen — Pensum (actio · intention). The TUI lands at step 6; run `pen --help` for the verbs.\n";
+/// What a headless build prints for a bare short: there is no screen to open, so it
+/// says where the verbs are (§14, §7.3).
+#[cfg(not(feature = "tui"))]
+const BARE: &str = "pen — Pensum (actio · intention). Built without the `tui` feature; run `pen --help` for the verbs.\n";
 
 const ABOUT: &str =
     "Pensum — the intention tense: a future doing, as named tasks in a node's register (§8.5).";
@@ -204,12 +210,20 @@ fn with_default_verb(raw: impl Iterator<Item = OsString>) -> Vec<OsString> {
 
 fn run(cli: &Cli, as_json: bool) -> Result<Response> {
     let Some(cmd) = &cli.cmd else {
-        // A bare short opens the TUI at a terminal; piped, it emits help (§7.3).
-        return Ok(if as_json {
-            Response::Json(help_json())
-        } else {
-            Response::Raw(BARE.to_string())
-        });
+        // A bare short opens the TUI at a terminal; piped, it emits help (§7.3) — a
+        // screen has nothing to draw down a pipe.
+        if as_json {
+            return Ok(Response::Json(help_json()));
+        }
+        #[cfg(feature = "tui")]
+        {
+            let root = resolve_root(cli.root.as_deref())?;
+            screen::open(&root).map_err(|e| Error::runtime(e.to_string()))?;
+            return Ok(Response::Raw(String::new()));
+        }
+        // Headless: there is no screen to open, so help is the whole answer (§14).
+        #[cfg(not(feature = "tui"))]
+        return Ok(Response::Raw(BARE.to_string()));
     };
 
     // Taken by clap and refused here, so the refusal wears the contract's error

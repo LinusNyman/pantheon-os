@@ -16,6 +16,7 @@ pantheon.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+pulldown-cmark.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

@@ -40,6 +40,10 @@ thiserror     = "2"
 anyhow        = "1"
 tracing       = "0.1"
 insta         = "1"
+# The Reader's Markdown (P§3). §13 defers a crate to the spec that needs it, and this
+# one is the chrome's — PORTICUS-SPEC's to name, like figlet beside it. No default
+# features: the HTML renderer is exactly what a terminal has no use for.
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [profile.release]
 lto       = true
