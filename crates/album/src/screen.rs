@@ -57,8 +57,10 @@ impl App for AlbumApp {
             ),
             // The contact card — Album's detail view (P§3).
             Box::new(
-                EntityCard::of(move |node: &Code| card_at(&for_card, node))
-                    .offering(&[Action::Edit, Action::Rename]),
+                EntityCard::of(move |node: &Code, pinned: Option<&RecordRef>| {
+                    card_at(&for_card, node, pinned)
+                })
+                .offering(&[Action::Edit, Action::Rename]),
             ),
             Box::new(Insights::of(move || panels(&for_insights))),
         ]
@@ -163,17 +165,28 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
         .collect()
 }
 
-/// The node's one agent as a card.
+/// The pinned agent as a card, else the node's one agent.
 ///
-/// Where a node holds several, the card shows the **empty "pick a record"** state
-/// rather than guessing among them (P§3) — a detail view never picks for you.
-fn card_at(root: &std::path::Path, node: &Code) -> Option<Card> {
+/// An `Enter`-drill pins a row and this resolves **that** record (P§3). With nothing
+/// pinned it falls back to the node's single agent — the entity-as-node case (§5.1) —
+/// and where a node holds several it shows the empty "pick a record" state rather than
+/// guessing among them: a detail view never picks for you.
+///
+/// A pinned record gone underneath is simply not found, which lands on that same empty
+/// state rather than a stale card (I8, §6.4).
+fn card_at(root: &std::path::Path, node: &Code, pinned: Option<&RecordRef>) -> Option<Card> {
     let store = Store::<Album>::new(root.to_path_buf());
-    let mut found = store.fold_entities(Some(node), None).ok()?;
-    if found.len() != 1 {
-        return None;
-    }
-    let (eref, entity) = found.remove(0);
+    let (eref, entity) = if let Some(record) = pinned {
+        let mut at = store.fold_entities(Some(&record.home), None).ok()?;
+        let index = at.iter().position(|(eref, _)| eref.slug == record.key)?;
+        at.remove(index)
+    } else {
+        let mut found = store.fold_entities(Some(node), None).ok()?;
+        if found.len() != 1 {
+            return None;
+        }
+        found.remove(0)
+    };
     let mut fields = vec![("kind".into(), eref.kind.clone())];
     for (label, value) in [
         ("gender", entity.data.gender.as_ref()),

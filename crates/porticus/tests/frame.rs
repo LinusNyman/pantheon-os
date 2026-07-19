@@ -392,20 +392,22 @@ fn the_entity_card_draws_its_model() {
             Fake.ident()
         }
         fn lineup(&mut self) -> Vec<Box<dyn View>> {
-            vec![Box::new(EntityCard::of(|_: &Code| {
-                Some(Card {
-                    title: "mara".into(),
-                    fields: vec![
-                        ("kind".into(), "person".into()),
-                        ("closeness".into(), "friend".into()),
-                    ],
-                    chips: vec![Chip {
-                        label: "album:alex".into(),
-                        reference: "album:alex".into(),
-                    }],
-                    strip: Vec::new(),
-                })
-            }))]
+            vec![Box::new(EntityCard::of(
+                |_: &Code, _: Option<&RecordRef>| {
+                    Some(Card {
+                        title: "mara".into(),
+                        fields: vec![
+                            ("kind".into(), "person".into()),
+                            ("closeness".into(), "friend".into()),
+                        ],
+                        chips: vec![Chip {
+                            label: "album:alex".into(),
+                            reference: "album:alex".into(),
+                        }],
+                        strip: Vec::new(),
+                    })
+                },
+            ))]
         }
         fn count_at(&mut self, _node: &Code) -> usize {
             0
@@ -443,7 +445,9 @@ fn a_detail_view_with_no_single_record_says_pick_one() {
             Fake.ident()
         }
         fn lineup(&mut self) -> Vec<Box<dyn View>> {
-            vec![Box::new(EntityCard::of(|_: &Code| None))]
+            vec![Box::new(EntityCard::of(
+                |_: &Code, _: Option<&RecordRef>| None,
+            ))]
         }
         fn count_at(&mut self, _node: &Code) -> usize {
             0
@@ -475,7 +479,7 @@ fn the_reader_renders_a_document() {
             Fake.ident()
         }
         fn lineup(&mut self) -> Vec<Box<dyn View>> {
-            vec![Box::new(Reader::of(|_: &Code| {
+            vec![Box::new(Reader::of(|_: &Code, _: Option<&RecordRef>| {
                 Some(Document {
                     slug: "a_note".into(),
                     r#type: Some("principium".into()),
@@ -510,9 +514,9 @@ fn the_reader_with_no_document_says_so() {
             Fake.ident()
         }
         fn lineup(&mut self) -> Vec<Box<dyn View>> {
-            vec![Box::new(Reader::of(|_: &Code| -> Option<Document> {
-                None
-            }))]
+            vec![Box::new(Reader::of(
+                |_: &Code, _: Option<&RecordRef>| -> Option<Document> { None },
+            ))]
         }
         fn count_at(&mut self, _node: &Code) -> usize {
             0
@@ -527,4 +531,142 @@ fn the_reader_with_no_document_says_so() {
     let root = fresh_root();
     let text = porticus::as_text(&porticus::render_once(&mut Nothing, &root, 60, 12).unwrap());
     assert!(text.contains("no document here"), "{text}");
+}
+
+/// `Enter` on a content row **activates**: it pins that row's record and switches to
+/// the lineup's detail view, which folds *that* record (P§3, P§5).
+///
+/// This is what makes a detail view usable at all. Without it a card could only ever
+/// render a node holding exactly one record — at a node with two people there would be
+/// no way to say which, and "pick a record" would be a dead end rather than a prompt.
+#[test]
+fn enter_pins_a_row_into_the_detail_view() {
+    use porticus::views::{Card, EntityCard};
+
+    struct Two;
+    impl App for Two {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![
+                Box::new(TreeFile::of(|_: &Code| {
+                    vec![row("alex", "ac"), row("mara", "ac")]
+                })),
+                // The fold answers from the *pin*, not the node — which is the whole
+                // point: the node holds two, so only a pin can name one.
+                Box::new(EntityCard::of(
+                    |_: &Code, pinned: Option<&RecordRef>| -> Option<Card> {
+                        pinned.map(|record| Card {
+                            title: record.key.clone(),
+                            fields: vec![("home".into(), record.home.as_str().to_owned())],
+                            chips: Vec::new(),
+                            strip: Vec::new(),
+                        })
+                    },
+                )),
+            ]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            2
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+
+    // No tree needed: this drives the view directly, since what is under test is the
+    // pin rather than the frame around it.
+    let mut app = Two;
+    let mut lineup = app.lineup();
+    assert!(lineup[1].is_detail(), "the card is the detail view (P§3)");
+    let node = Code::parse("ac").unwrap();
+    assert!(
+        lineup[1].rows(&node).is_none(),
+        "a detail view is a draw-view (P§3)"
+    );
+
+    // Pinned, it folds that record.
+    lineup[1].pin(Some(RecordRef {
+        home: node.clone(),
+        key: "mara".into(),
+    }));
+    let buffer = {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8)).unwrap();
+        term.draw(|f| {
+            let area = f.area();
+            lineup[1].draw(
+                &node,
+                area,
+                f.buffer_mut(),
+                porticus::Theme::of(&app.ident()),
+            );
+        })
+        .unwrap();
+        term.backend().buffer().clone()
+    };
+    let text = porticus::as_text(&buffer);
+    assert!(
+        text.contains("mara"),
+        "the pinned record is what folds:\n{text}"
+    );
+    assert!(!text.contains("alex"), "and only that one:\n{text}");
+
+    // Un-pinned, it falls back to its empty state rather than a stale record (I8).
+    lineup[1].pin(None);
+    let buffer = {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8)).unwrap();
+        term.draw(|f| {
+            let area = f.area();
+            lineup[1].draw(
+                &node,
+                area,
+                f.buffer_mut(),
+                porticus::Theme::of(&app.ident()),
+            );
+        })
+        .unwrap();
+        term.backend().buffer().clone()
+    };
+    assert!(porticus::as_text(&buffer).contains("pick a record"));
+}
+
+/// A lineup holds **at most one** detail view (P§3) — that is what lets `Enter` route
+/// with no shape tag on the record.
+#[test]
+fn a_lineup_holds_at_most_one_detail_view() {
+    use porticus::views::{Card, EntityCard};
+
+    struct TwoDetails;
+    impl App for TwoDetails {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            let card = || {
+                Box::new(EntityCard::of(
+                    |_: &Code, _: Option<&RecordRef>| -> Option<Card> { None },
+                )) as Box<dyn View>
+            };
+            vec![card(), card()]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let err = porticus::render_once(&mut TwoDetails, &root, 40, 10).unwrap_err();
+    assert!(
+        err.to_string().contains("at most one detail view"),
+        "a second detail view must be refused: {err}"
+    );
 }
