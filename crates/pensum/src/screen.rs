@@ -9,29 +9,40 @@
 
 use std::ffi::OsString;
 
+use crate::Pensum;
 use clap::Parser;
 use pantheon::{Code, Response, Store};
-use pensum::Pensum;
 use porticus::action::{Invocation, Relayed};
 use porticus::view::Row;
 use porticus::views::{Agenda, Chart, Insights, Panel, TreeFile};
 use porticus::{Action, App, Ident, RecordRef, Target, View, Writer};
 
-use crate::{Cli, with_default_verb};
+use crate::cli::{Cli, with_default_verb};
 
 /// Open Pensum's screen.
 ///
 /// # Errors
 /// If the tree cannot be walked or the terminal cannot be taken.
 pub fn open(root: &std::path::Path) -> anyhow::Result<()> {
-    let mut app = PensumApp {
-        root: root.to_path_buf(),
-    };
-    porticus::run(&mut app, root)
+    porticus::run(&mut PensumApp::new(root), root)
 }
 
-struct PensumApp {
+/// Pensum's screen, as an `App` (P§2).
+///
+/// Public so a test can build the **real** one and drive it — the same object `open`
+/// runs, with the same lineup and the same in-process relay. It carries a root and
+/// nothing else: everything drawn is folded from readings each frame (I1).
+pub struct PensumApp {
     root: std::path::PathBuf,
+}
+
+impl PensumApp {
+    #[must_use]
+    pub fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+        }
+    }
 }
 
 impl App for PensumApp {
@@ -143,7 +154,7 @@ fn in_process(invocation: &Invocation) -> Relayed {
     };
     // `as_json` is forced true: the answer is parsed here, not read by an eye, and a
     // table would have to be un-rendered to get the plan token back out.
-    match crate::run(&cli, true) {
+    match crate::cli::run(&cli, true) {
         Ok(Response::Json(value)) => Relayed {
             code: 0,
             stdout: value.to_string(),
