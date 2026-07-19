@@ -223,3 +223,157 @@ fn catalog_views_name_themselves() {
     );
     assert_eq!(Agenda::of(Vec::new).id() as ViewId, "agenda");
 }
+
+/// Every chart in the vocabulary draws (P§3).
+///
+/// A chart that panicked on an edge — an empty series, a flat one, a zero total —
+/// would do it on someone's real tree, not here, so each shape is drawn once.
+#[test]
+fn every_chart_shape_draws() {
+    use porticus::views::{Chart, Insights, Panel};
+
+    struct Charts;
+    impl App for Charts {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(Insights::of(|| {
+                vec![
+                    Panel {
+                        title: "weight".into(),
+                        chart: Chart::Trend(vec![
+                            ("260701".into(), 78.4),
+                            ("260708".into(), 78.1),
+                            ("260715".into(), 77.9),
+                        ]),
+                    },
+                    Panel {
+                        title: "by kind".into(),
+                        chart: Chart::Bars(vec![("person".into(), 2.0), ("group".into(), 1.0)]),
+                    },
+                    Panel {
+                        title: "by type".into(),
+                        chart: Chart::Pie(vec![("quote".into(), 3.0), ("principle".into(), 1.0)]),
+                    },
+                    Panel {
+                        title: "streak".into(),
+                        chart: Chart::Stat("days".into(), "14".into()),
+                    },
+                    Panel {
+                        title: "logging".into(),
+                        chart: Chart::Heatmap(vec![("260701".into(), 1.0), ("260702".into(), 0.0)]),
+                    },
+                    Panel {
+                        title: "throughput".into(),
+                        chart: Chart::Spark(vec![("260701".into(), 3.0), ("260702".into(), 5.0)]),
+                    },
+                ]
+            }))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+
+    let root = fresh_root();
+    let buffer = porticus::render_once(&mut Charts, &root, 80, 24).unwrap();
+    let text = porticus::as_text(&buffer);
+    for title in [
+        "weight",
+        "by kind",
+        "by type",
+        "streak",
+        "logging",
+        "throughput",
+    ] {
+        assert!(text.contains(title), "panel `{title}` missing:\n{text}");
+    }
+    assert!(text.contains("14"), "the stat's value should show:\n{text}");
+}
+
+/// The degenerate inputs each chart can actually meet: nothing to draw, and a series
+/// with no spread. Absence is calm per panel (I7, P§4) — and a flat series must not
+/// collapse the axis it is scaled against.
+#[test]
+fn a_chart_survives_empty_and_flat_data() {
+    use porticus::views::{Chart, Insights, Panel};
+
+    struct Edge;
+    impl App for Edge {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(Insights::of(|| {
+                vec![
+                    Panel {
+                        title: "empty trend".into(),
+                        chart: Chart::Trend(Vec::new()),
+                    },
+                    Panel {
+                        title: "empty pie".into(),
+                        chart: Chart::Pie(Vec::new()),
+                    },
+                    Panel {
+                        title: "flat".into(),
+                        chart: Chart::Trend(vec![("260701".into(), 5.0), ("260702".into(), 5.0)]),
+                    },
+                    Panel {
+                        title: "zero pie".into(),
+                        chart: Chart::Pie(vec![("none".into(), 0.0)]),
+                    },
+                ]
+            }))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+
+    let root = fresh_root();
+    let text = porticus::as_text(&porticus::render_once(&mut Edge, &root, 80, 20).unwrap());
+    assert!(text.contains("no data yet"), "{text}");
+}
+
+/// An instrument with no panels yet still gets a calm screen, not a blank one.
+#[test]
+fn insights_with_nothing_to_show_says_so() {
+    struct Bare;
+    impl App for Bare {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(porticus::views::Insights::of(Vec::new))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let text = porticus::as_text(&porticus::render_once(&mut Bare, &root, 60, 12).unwrap());
+    assert!(text.contains("no data yet"), "{text}");
+    assert!(
+        text.contains("P E N S U M"),
+        "the chrome still stands:\n{text}"
+    );
+}

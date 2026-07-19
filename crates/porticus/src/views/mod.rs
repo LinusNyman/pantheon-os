@@ -19,7 +19,9 @@
 //! `ratatui` alone.
 
 mod agenda;
+mod insights;
 mod tree_file;
 
 pub use agenda::Agenda;
+pub use insights::{Chart, Insights, Label, Panel, Series};
 pub use tree_file::TreeFile;
