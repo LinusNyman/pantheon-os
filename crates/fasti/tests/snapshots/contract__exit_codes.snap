@@ -1,0 +1,61 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: out
+---
+fas aof x --from 260101 -a 260101
+  # a span's bound and an event's date at once
+  => exit 2: --from bound a span and -a date an event, and one write is one shape: a span is a period you are inside of, an event a dated occurrence within one (§7.2, §8.4)
+fas add -k event aof y
+  # -k never selects across a shape
+  => exit 2: the entity form has no `event` token: name the series with `--series`, date the occurrence with `-a`, or mint one with `-c` — `-k` selects within a shape, never across it (§7.2)
+fas aof z -k span -c
+  # -k span cannot ride the series form
+  => exit 2: the series form has no `span` token: a span is bounded by `--from`/`--to`, not dated into a collection — drop -c to write one (§7.2)
+fas aof unbounded
+  # a span needs a --from
+  => exit 3: a span is a period, so it needs a `--from` (§8.4)
+fas aof w --from 260301 --to 260101
+  # a span may not end before it starts
+  => exit 3: a span ends before it starts (260301 > 260101) (§8.4)
+fas aof v --from 26010
+  # a malformed day
+  => exit 3: --from is malformed ("26010"): a day is YYMMDD (§5.4, §8.4)
+fas aof standups q -a 260720 --until 5pm
+  # a malformed --until
+  => exit 3: --until is malformed ("5pm"): an end is hhmm or YYMMDDThhmm (§7.3, §8.4)
+fas series -k span standups
+  # a span is read with get
+  => exit 2: a span is one object, not a collection: read it with `get` (§7.1, §7.2)
+fas list --unspanned -k span
+  # --unspanned is about events
+  => exit 2: --unspanned asks which events reference no span, so it cannot also filter to `-k span` (§8.4)
+fas aof standps 1 -a 260721
+  # a typo cannot conjure a timeline
+  => exit 4: no fasti event series "standps" at aof — mint it with -c (§7.3)
+fas standups 1 -c
+  # -c is refused on an inference form
+  => exit 2: -c needs the home and the series both named; it is refused on an inference form (§7.3)
+fas aof 1 -a 260719
+  # two series at the node: ambiguous
+  => exit 2: aof holds more than one fasti series: reviews, standups — name one (§7.3)
+fas edit nothing_here --note x
+  # no such record
+  => exit 4: no fasti span named "nothing_here" and no event occurrence keyed nothing_here (§7.3)
+fas get nothing_here
+  # no such ref target
+  => exit 4: no fasti span or event series named "nothing_here" (§7.3)
+fas list -k task
+  # a token fasti does not own
+  => exit 2: fasti has no "task" token; it declares span, event (§7.1)
+fas get mvp phase
+  # a name is one token
+  => exit 2: a name is one token, and 2 were given (§5.1, §7.3)
+fas aof u --from 260101 --note    
+  # a blank remark
+  => exit 3: --note is blank (§8.4)
+fas aof t --from 260101 -r not-a-ref
+  # a malformed reference
+  => exit 2: reference "not-a-ref" is not `core:slug`
+fas aof standups again -a 260719
+  # an overwrite, piped, without -y
+  => exit 5: a pending add awaiting review

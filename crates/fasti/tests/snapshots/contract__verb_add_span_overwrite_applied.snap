@@ -1,0 +1,15 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&applied)
+---
+{
+  "core": "fasti",
+  "data": {
+    "from": "260101",
+    "to": "260901"
+  },
+  "home": "aof",
+  "kind": "span",
+  "refs": [],
+  "slug": "mvp_phase"
+}

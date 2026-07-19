@@ -1,0 +1,26 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&renamed)
+---
+{
+  "cascade": [
+    {
+      "path": "a_actio/a_o_opus/ao_f_fabrica/aof__/aof__event__standups.jsonl",
+      "refs": 1
+    }
+  ],
+  "record": {
+    "core": "fasti",
+    "data": {
+      "from": "260101"
+    },
+    "home": "aof",
+    "kind": "span",
+    "refs": [],
+    "slug": "mvp_phase"
+  },
+  "renamed": {
+    "from": "mvp_phse",
+    "to": "mvp_phase"
+  }
+}

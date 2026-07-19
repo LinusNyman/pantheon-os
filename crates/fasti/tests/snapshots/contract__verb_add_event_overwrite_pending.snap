@@ -1,0 +1,43 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&redact(pending))
+---
+{
+  "change": {
+    "after": {
+      "core": "fasti",
+      "data": {
+        "values": [
+          "sprint retro"
+        ]
+      },
+      "home": "aof",
+      "key": "260719T1600",
+      "kind": "event",
+      "refs": [],
+      "series": "standups"
+    },
+    "before": {
+      "core": "fasti",
+      "data": {
+        "until": "1700",
+        "values": [
+          "sprint review"
+        ]
+      },
+      "home": "aof",
+      "key": "260719T1600",
+      "kind": "event",
+      "refs": [],
+      "series": "standups"
+    },
+    "core": "fasti",
+    "home": "aof",
+    "key": "260719T1600",
+    "kind": "event",
+    "series": "standups",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

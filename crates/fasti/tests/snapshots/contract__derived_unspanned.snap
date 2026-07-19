@@ -1,0 +1,47 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&unspanned)
+---
+[
+  {
+    "core": "fasti",
+    "data": {
+      "values": [
+        "stray"
+      ]
+    },
+    "home": "aof",
+    "key": "260720",
+    "kind": "event",
+    "refs": [],
+    "series": "standups"
+  },
+  {
+    "core": "fasti",
+    "data": {
+      "values": [
+        "self referential"
+      ]
+    },
+    "home": "aof",
+    "key": "260721",
+    "kind": "event",
+    "refs": [
+      "fasti:standups"
+    ],
+    "series": "standups"
+  },
+  {
+    "core": "fasti",
+    "data": {
+      "values": [
+        "quiet"
+      ]
+    },
+    "home": "aof",
+    "key": "260722",
+    "kind": "event",
+    "refs": [],
+    "series": "standups"
+  }
+]

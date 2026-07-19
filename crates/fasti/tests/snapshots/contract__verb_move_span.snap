@@ -1,0 +1,20 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&moved)
+---
+{
+  "moved": {
+    "from": "aof",
+    "to": "aoa"
+  },
+  "record": {
+    "core": "fasti",
+    "data": {
+      "from": "260401"
+    },
+    "home": "aoa",
+    "kind": "span",
+    "refs": [],
+    "slug": "sabbatical"
+  }
+}

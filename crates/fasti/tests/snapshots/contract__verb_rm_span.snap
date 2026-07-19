@@ -1,0 +1,7 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&deleted)
+---
+{
+  "deleted": "sabbatical"
+}

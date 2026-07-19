@@ -1,0 +1,17 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&applied)
+---
+{
+  "core": "fasti",
+  "data": {
+    "values": [
+      "sprint retro"
+    ]
+  },
+  "home": "aof",
+  "key": "260719T1600",
+  "kind": "event",
+  "refs": [],
+  "series": "standups"
+}

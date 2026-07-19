@@ -1,0 +1,26 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&redact(plan))
+---
+{
+  "change": {
+    "after": {
+      "core": "fasti",
+      "data": {
+        "from": "260401"
+      },
+      "home": "aof",
+      "kind": "span",
+      "refs": [],
+      "slug": "sabbatical"
+    },
+    "before": null,
+    "core": "fasti",
+    "home": "aof",
+    "key": "sabbatical",
+    "kind": "span",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}
