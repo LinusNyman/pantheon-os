@@ -1,0 +1,119 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: out
+---
+$ map get kafe_esaias
+{
+  "core": "mappa",
+  "data": {
+    "address": "Frejgatan 1",
+    "coordinates": {
+      "lat": 59.3293,
+      "lon": 18.0686
+    },
+    "timezone": "Europe/Stockholm"
+  },
+  "home": "clu",
+  "kind": "location",
+  "refs": [],
+  "slug": "kafe_esaias"
+}
+
+$ map get old_mill
+{
+  "core": "mappa",
+  "data": {},
+  "home": "clh_old_mill",
+  "kind": "location",
+  "refs": [],
+  "slug": "old_mill"
+}
+
+$ map list
+[
+  {
+    "core": "mappa",
+    "data": {
+      "url": "https://example.invalid/j/42"
+    },
+    "home": "clh",
+    "kind": "location",
+    "refs": [],
+    "slug": "standup_room"
+  },
+  {
+    "core": "mappa",
+    "data": {},
+    "home": "clh_old_mill",
+    "kind": "location",
+    "refs": [],
+    "slug": "old_mill"
+  },
+  {
+    "core": "mappa",
+    "data": {
+      "address": "Frejgatan 1",
+      "coordinates": {
+        "lat": 59.3293,
+        "lon": 18.0686
+      },
+      "timezone": "Europe/Stockholm"
+    },
+    "home": "clu",
+    "kind": "location",
+    "refs": [],
+    "slug": "kafe_esaias"
+  },
+  {
+    "core": "mappa",
+    "data": {
+      "bounds": {
+        "east": 18.11,
+        "north": 59.32,
+        "south": 59.3,
+        "west": 18.03
+      }
+    },
+    "home": "clu",
+    "kind": "region",
+    "refs": [],
+    "slug": "sodermalm"
+  }
+]
+
+$ map list -k region
+[
+  {
+    "core": "mappa",
+    "data": {
+      "bounds": {
+        "east": 18.11,
+        "north": 59.32,
+        "south": 59.3,
+        "west": 18.03
+      }
+    },
+    "home": "clu",
+    "kind": "region",
+    "refs": [],
+    "slug": "sodermalm"
+  }
+]
+
+$ map where sodermalm
+{
+  "core": "mappa",
+  "home": "clu",
+  "kind": "region",
+  "path": "c_contextus/c_l_locus/cl_u_urbs/clu__/clu__region__sodermalm.json",
+  "slug": "sodermalm"
+}
+
+$ map where old_mill
+{
+  "core": "mappa",
+  "home": "clh_old_mill",
+  "kind": "location",
+  "path": "c_contextus/c_l_locus/cl_h_habitat/clh_old_mill_/clh_old_mill__/clh_old_mill__location.json",
+  "slug": "old_mill"
+}

@@ -1,0 +1,10 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&rename)
+---
+{
+  "error": {
+    "code": 2,
+    "msg": "\"old_mill\" is an entity-as-node: its slug is its node's definition, so renaming it renames the node, which no core may do — use `pan rename clh_old_mill --def <new>` (§5.5, §7.2)"
+  }
+}

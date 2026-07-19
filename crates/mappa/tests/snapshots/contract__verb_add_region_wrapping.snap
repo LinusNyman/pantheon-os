@@ -1,0 +1,19 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&fiji)
+---
+{
+  "core": "mappa",
+  "data": {
+    "bounds": {
+      "east": -178.2,
+      "north": -12.4,
+      "south": -20.7,
+      "west": 176.9
+    }
+  },
+  "home": "clu",
+  "kind": "region",
+  "refs": [],
+  "slug": "fiji"
+}

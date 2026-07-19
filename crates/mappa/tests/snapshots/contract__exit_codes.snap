@@ -1,0 +1,22 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: out
+---
+exit 4: no such slug — no mappa entity named "nowhere" (§7.3)
+exit 2: a slug at two nodes — "the_yard" is at more than one node: clh, clu — name one with -H (§7.3)
+exit 2: -c mints nothing — mappa keeps no series, so -c mints nothing (§7.1, §7.3)
+exit 2: -a keys nothing — mappa keeps no series, so -a keys nothing: a place is not a sample, and its name is its key (§5.4, §7.1)
+exit 2: no series to read — mappa keeps no series: its tokens are both partitioned, so a place is read with `get` or `list` — where you've been is an annales log referencing `mappa:<place>` (§7.1, §8.2, §8.6)
+exit 2: a token mappa lacks — mappa has no "person" token; it declares location, region (§7.1)
+exit 2: a name is one token — a name is one token, and 2 were given — did you mean "the_yard"? (§5.1, §7.3)
+exit 2: add needs a name — name the mappa record (§7.3)
+exit 3: a blank field — --address is blank (§8.2)
+exit 3: a url with whitespace — --url "a link" holds whitespace: a virtual room's address is one token (§8.2)
+exit 2: coordinates that are one token — coordinates are LAT,LON in decimal degrees and "59.3293" is one token — e.g. --coordinates 59.3293,18.0686 (§8.2)
+exit 2: coordinates that are not numbers — latitude "north" is not a number in decimal degrees (§8.2)
+exit 3: a latitude off the globe — latitude 91 is off the globe: it runs -90..90 in decimal degrees (§8.2)
+exit 2: bounds with three corners' worth — bounds are SOUTH,WEST,NORTH,EAST in decimal degrees — the two corners, and 3 were given (§8.2)
+exit 3: bounds inverted — bounds put north below south (5 < 10): an extent runs southwest to northeast (§8.2)
+exit 3: a slug another kind holds — clu already holds "sodermalm" as a region: two kinds spell two files but only one `mappa:sodermalm`, so the ref would be ambiguous (§5.4, §18)
+exit 2: a malformed ref — reference "not-a-ref" is not `core:slug`
+exit 5: an overwrite, piped — <a pending change>

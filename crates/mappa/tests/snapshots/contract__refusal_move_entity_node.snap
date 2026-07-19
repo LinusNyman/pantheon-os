@@ -1,0 +1,10 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&moved)
+---
+{
+  "error": {
+    "code": 2,
+    "msg": "\"old_mill\" is an entity-as-node: its home is its own node, so re-homing it is a node move — use `pan mv clh_old_mill --to <code>`. A file mv would strand the node and everything homed at it (§5.5, §7.2, I3)"
+  }
+}

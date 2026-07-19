@@ -1,0 +1,39 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&redact(pending))
+---
+{
+  "change": {
+    "after": {
+      "core": "mappa",
+      "data": {
+        "address": "Frejgatan 1"
+      },
+      "home": "clu",
+      "kind": "location",
+      "refs": [],
+      "slug": "kafe_esaias"
+    },
+    "before": {
+      "core": "mappa",
+      "data": {
+        "coordinates": {
+          "lat": 59.3293,
+          "lon": 18.0686
+        },
+        "timezone": "Europe/Stockholm"
+      },
+      "home": "clu",
+      "kind": "location",
+      "refs": [],
+      "slug": "kafe_esaias"
+    },
+    "core": "mappa",
+    "home": "clu",
+    "key": "kafe_esaias",
+    "kind": "location",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

@@ -1,0 +1,32 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&resolved)
+---
+{
+  "ambiguous": [],
+  "resolved": [
+    {
+      "core": "mappa",
+      "home": "clh",
+      "kind": "location",
+      "path": "c_contextus/c_l_locus/cl_h_habitat/clh__/clh__location__the_yard.json",
+      "ref": "mappa:the_yard",
+      "shape": {
+        "shape": "partitioned"
+      },
+      "slug": "the_yard"
+    },
+    {
+      "core": "mappa",
+      "home": "clh_old_mill",
+      "kind": "location",
+      "path": "c_contextus/c_l_locus/cl_h_habitat/clh_old_mill_/clh_old_mill__/clh_old_mill__location.json",
+      "ref": "mappa:old_mill",
+      "shape": {
+        "shape": "partitioned"
+      },
+      "slug": "old_mill"
+    }
+  ],
+  "unresolved": []
+}

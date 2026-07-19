@@ -1,0 +1,124 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&schema)
+---
+{
+  "format_version": 1,
+  "name": "mappa",
+  "record": {
+    "$defs": {
+      "Bounds": {
+        "description": "The extent of a `region` (§8.2) — its two corners, southwest then northeast.\n\nA bounding box rather than a polygon: an extent here says roughly where a district\nor a forest *is*, and a polygon is geometry a GIS owns. Storing one would make\nMappa a mapping engine rather than a register of places.",
+        "properties": {
+          "east": {
+            "format": "double",
+            "type": "number"
+          },
+          "north": {
+            "format": "double",
+            "type": "number"
+          },
+          "south": {
+            "format": "double",
+            "type": "number"
+          },
+          "west": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "south",
+          "west",
+          "north",
+          "east"
+        ],
+        "type": "object"
+      },
+      "Coordinates": {
+        "description": "A point on the globe, in decimal degrees (§8.2) — what makes a `location`\naddressable to a machine, beside the `address` that makes it addressable to a\nhand.\n\nDecimal degrees rather than a formatted string: the number is the datum, and a\nhand wanting degrees-minutes-seconds renders them from it (I1). No datum field —\nwhat a hand types is WGS84, and a second one would be a knob (§18).",
+        "properties": {
+          "lat": {
+            "format": "double",
+            "type": "number"
+          },
+          "lon": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lat",
+          "lon"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "One place — the `data` half of an entity file (§6.1).\n\nIts `refs` ride in the envelope, and its home, core, kind, and slug are the file's\nlocation and name (I3), so none of them is stored here. Nor is a display name: a\nname and its slug are one thing and are never allowed to differ (§5.4), so\n`rename` is the only way a name changes and there is no second copy to drift.\n\nOne flat struct rather than an enum over the two kinds, for the reason §7.1 and\n§7.2 give together: the enum §7.1 asks for is a **dispatch type** for a core\ndeclaring two *storage shapes*, and Mappa's two tokens are one shape. Making it an\nenum would turn `edit -k location→region` into a record transformation, when §7.2\nsays it is a file rename and nothing more — and would have `schemars` emit a\ntagged union when §18 forbids writing a variant tag. §8.2's \"real `data`-shape\ndifference\" is what earns the kind split against a scale vocabulary; it does not\nask for two Rust types. A point simply leaves `bounds` absent, and an area\n`coordinates`.",
+    "properties": {
+      "address": {
+        "description": "The postal or street address — the same place, addressed to a hand.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "bounds": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Bounds"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The extent of an area (§8.2). A `location` leaves it absent."
+      },
+      "coordinates": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Coordinates"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Where a point *is* (§8.2). A `region` leaves it absent."
+      },
+      "note": {
+        "description": "A hand's remark on this place.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "timezone": {
+        "description": "The zone the place keeps time in — a property of the place, never of a\nreading taken there.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "url": {
+        "description": "A virtual room's address (§8.2): a meeting link is a place you can be.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "Place",
+    "type": "object"
+  },
+  "tokens": [
+    {
+      "shape": "partitioned",
+      "token": "location"
+    },
+    {
+      "shape": "partitioned",
+      "token": "region"
+    }
+  ]
+}

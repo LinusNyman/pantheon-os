@@ -1,0 +1,10 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: after.clone()
+---
+{
+  "refs": [
+    "mappa:the_mill"
+  ],
+  "data": {}
+}

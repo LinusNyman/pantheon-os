@@ -1,0 +1,24 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&redact(plan))
+---
+{
+  "change": {
+    "after": {
+      "core": "mappa",
+      "data": {},
+      "home": "clu",
+      "kind": "region",
+      "refs": [],
+      "slug": "the_moor"
+    },
+    "before": null,
+    "core": "mappa",
+    "home": "clu",
+    "key": "the_moor",
+    "kind": "region",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}
