@@ -129,6 +129,8 @@ dependencies = [
  "clap",
  "pantheon",
  "porticus",
+ "ratatui",
+ "serde_json",
  "tessera",
 ]
 
@@ -1320,6 +1322,7 @@ name = "porticus"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "insta",
  "pantheon",
  "ratatui",
  "serde_json",

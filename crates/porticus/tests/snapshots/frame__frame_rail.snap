@@ -1,0 +1,11 @@
+---
+source: crates/porticus/tests/frame.rs
+expression: "porticus::as_text(&buffer)"
+---
+P E N S U M   a·actio  +    records  agenda
+▾ a actio
+    ac cura  2
+▾ c contextus
+    cs societas
+
+                                          no todos here

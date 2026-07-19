@@ -12,9 +12,21 @@ repository.workspace = true
 name = "atr"
 path = "src/main.rs"
 
+[features]
+# `porticus` rides the default `tui` feature as everywhere else; **`tessera` does not**
+# — the tiles are a lens's substance, not its chrome, so `--no-default-features` drops
+# the screen and keeps the folds (§14, §12). Nothing trails in behind it: a tile owns
+# no backend (`ratatui-core`, §13), so a headless lens links no terminal.
+default = ["tui"]
+tui = ["dep:porticus", "dep:ratatui"]
+
 [dependencies]
 pantheon.workspace = true
-porticus.workspace = true
 tessera.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
+# A lens writes its own mosaic draw-view (§12, P§3), which paints into a ratatui
+# `Buffer` — so it takes the full crate, upstream's rule for an application (§13).
+porticus = { workspace = true, optional = true }
+ratatui = { workspace = true, optional = true }
