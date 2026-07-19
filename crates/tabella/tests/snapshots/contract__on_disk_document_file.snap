@@ -1,0 +1,10 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: text
+---
++++
+type = "nota"
+tags = ["travel"]
++++
+
+Two weeks in Rome.

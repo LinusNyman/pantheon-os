@@ -1,0 +1,5 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: stdout
+---
+Rome.

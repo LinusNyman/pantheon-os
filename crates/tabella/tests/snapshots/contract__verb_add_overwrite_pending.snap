@@ -1,0 +1,35 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&redact(pending))
+---
+{
+  "change": {
+    "after": {
+      "body": "Rewritten.\n",
+      "core": "tabella",
+      "ext": "md",
+      "home": "ecv",
+      "slug": "trip_idea",
+      "tags": [],
+      "type": null
+    },
+    "before": {
+      "body": "Two weeks in Rome.\n",
+      "core": "tabella",
+      "ext": "md",
+      "home": "ecv",
+      "slug": "trip_idea",
+      "tags": [
+        "travel"
+      ],
+      "type": "nota"
+    },
+    "core": "tabella",
+    "home": "ecv",
+    "key": "trip_idea",
+    "kind": "",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

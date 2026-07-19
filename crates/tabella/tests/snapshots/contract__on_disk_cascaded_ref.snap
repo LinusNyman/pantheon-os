@@ -1,0 +1,10 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: cascaded
+---
+{
+  "refs": [
+    "tabella:journey"
+  ],
+  "data": {}
+}

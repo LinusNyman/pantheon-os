@@ -1,0 +1,13 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&got)
+---
+{
+  "body": "just prose, no fence\n\nand a second paragraph\n",
+  "core": "tabella",
+  "ext": "md",
+  "home": "ecv",
+  "slug": "handmade",
+  "tags": [],
+  "type": null
+}

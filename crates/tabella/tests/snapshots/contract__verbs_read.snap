@@ -1,0 +1,53 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: out
+---
+tab get trip_idea
+  # one document, frontmatter and body (§7.2)
+  => exit 0
+{
+  "body": "Rome.\n",
+  "core": "tabella",
+  "ext": "md",
+  "home": "ecv",
+  "slug": "trip_idea",
+  "tags": [
+    "travel"
+  ],
+  "type": "nota"
+}
+
+tab list
+  # the fold — frontmatter only, never a body (§7.1)
+  => exit 0
+[
+  {
+    "core": "tabella",
+    "ext": "md",
+    "home": "eam",
+    "slug": "on_anger",
+    "tags": [],
+    "type": "quote"
+  },
+  {
+    "core": "tabella",
+    "ext": "md",
+    "home": "ecv",
+    "slug": "trip_idea",
+    "tags": [
+      "travel"
+    ],
+    "type": "nota"
+  }
+]
+
+tab where on_anger
+  # a slug to its home code (§7.3)
+  => exit 0
+{
+  "core": "tabella",
+  "ext": "md",
+  "home": "eam",
+  "path": "e_ego/e_a_anima/ea_m_mores/eam_on_anger.md",
+  "slug": "on_anger"
+}

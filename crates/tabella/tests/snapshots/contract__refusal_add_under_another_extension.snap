@@ -1,0 +1,10 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "ecv already holds \"note\" as a .md: two extensions spell two files but only one `tabella:note`, so the ref would be ambiguous (§5.4, §18)"
+  }
+}

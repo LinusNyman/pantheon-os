@@ -1,0 +1,63 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: out
+---
+tab get nobody
+  # no such document
+  => exit 4: no tabella document named "nobody" (§7.3)
+
+tab get twin
+  # a slug at two nodes is listed, not guessed
+  => exit 2: "twin" is at more than one node: eam, ecv — name one with -H (§7.3)
+
+tab ecv x -r album:mara
+  # a document's frontmatter carries no refs
+  => exit 2: a document's frontmatter carries `type` and `tags` and no refs, so there is nothing for -r to attach to; a note points by *living* at what it is about (§6.1, §7.3, I3)
+
+tab -k person get trip_idea
+  # a Document core declares no tokens
+  => exit 2: tabella declares no tokens, so -k names nothing: an empty `kinds()` is what makes it a Document core, and why its filenames carry no `__` segment (§7.1)
+
+tab ecv x -c
+  # no series to mint
+  => exit 2: tabella keeps no series, so -c mints nothing: the document `add` creates *is* the record (§7.1, §18)
+
+tab ecv x -a 260718
+  # no key to date
+  => exit 2: tabella keeps no series, so -a keys nothing: a document is not a sample, and its name is its key (§5.4, §7.1)
+
+tab series
+  # no series to read
+  => exit 2: tabella keeps no series: a document is one text file, read with `get` or `list` (§7.1, §8.7)
+
+tab list -f raw
+  # raw is one document's body, so only `get` has one
+  => exit 2: -f raw emits a document's bare body, which only `get` reads: a fold never reads bodies and a write emits a record (§7.1, §7.2)
+
+tab --ext txt get trip_idea
+  # only `add` creates a file
+  => exit 2: --ext names the file `add` creates; no other verb changes an extension, since the extension is the shape (§5.2, §7.2)
+
+tab ecv x --ext pdf
+  # the extension set is closed at three
+  => exit 2: --ext takes one of md, txt, mdx; got "pdf" (§6.1)
+
+tab add
+  # a document needs a name
+  => exit 2: name the tabella document (§7.3)
+
+tab ecv !!!
+  # a name that normalizes to empty (§5.1)
+  => exit 2: slug normalizes to empty: "!!!"
+
+tab ecv x some prose -e
+  # prose and -e name two sources for one buffer
+  => exit 2: -e opens the document in an editor, so it cannot also be given prose on the command line: that names two sources for one buffer (§7.3)
+
+tab rename trip_idea twin -y
+  # an occupied slug, tree-wide
+  => exit 3: tabella:twin already names a record at eam — renaming onto it would make the two indistinguishable, and there is no history to tell them apart again (§7.2, §18)
+
+tab ecv trip_idea again
+  # an overwrite, piped, without -y
+  => exit 5: (a value, not an error)

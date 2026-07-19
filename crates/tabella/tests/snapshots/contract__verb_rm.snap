@@ -1,0 +1,7 @@
+---
+source: crates/tabella/tests/contract.rs
+expression: pretty(&removed)
+---
+{
+  "deleted": "trip_idea"
+}
