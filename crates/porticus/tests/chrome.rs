@@ -148,3 +148,40 @@ fn the_name_is_tracked() {
     };
     assert_eq!(ident.tracked(), "P E N S U M");
 }
+
+/// **A chord is not its key.**
+///
+/// Raw mode delivers `Ctrl-D` as `Char('d')` carrying a CONTROL modifier — P§10 notes
+/// the same of `Ctrl-C`, which arrives as a key event rather than a signal. Routing on
+/// the character alone therefore fired the Tier-2 action of every control chord: in a
+/// live `pen`, a bare `Ctrl-D` marked the focused task done and `Ctrl-X` would have
+/// removed it. Found by driving the real binary, not by any unit test — so this one
+/// pins the rule the router now applies.
+///
+/// SHIFT is the exception, and must stay one: `A`, `D` and `X` reach the keymap as
+/// shifted characters, so rejecting SHIFT would dark the whole escalated tier (P§5).
+#[test]
+fn a_modified_key_is_not_its_bare_key() {
+    use ratatui::crossterm::event::KeyModifiers;
+
+    let mutating = KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER;
+
+    // Every Tier-2 key would mutate if a chord reached it.
+    for key in ['a', 'e', 'd', 'x', 'r', 'm', 'A', 'D', 'X'] {
+        assert!(
+            keymap::action(key).is_some(),
+            "`{key}` should still bind bare"
+        );
+    }
+
+    // The router drops anything carrying one of these before the keymap sees it.
+    assert!(mutating.contains(KeyModifiers::CONTROL));
+    assert!(
+        !mutating.contains(KeyModifiers::SHIFT),
+        "SHIFT must survive"
+    );
+    assert!(
+        !KeyModifiers::SHIFT.intersects(mutating),
+        "a shifted `D` must still reach Action::DoneAll (P§5)"
+    );
+}

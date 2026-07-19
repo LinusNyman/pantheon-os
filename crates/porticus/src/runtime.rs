@@ -6,7 +6,7 @@
 
 use pantheon::Code;
 use ratatui::Frame;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout as Cut, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
@@ -460,6 +460,20 @@ fn handle(
     // An error is sticky until the next keystroke clears it (P§4).
     if matches!(state.status, Status::Error(_)) {
         state.status = Status::Idle;
+    }
+
+    // **A chord is not its key.** Raw mode delivers `Ctrl-D` as `Char('d')` with a
+    // CONTROL modifier (P§10 — `Ctrl-C` arrives the same way, as a key event rather
+    // than a signal). Without this check every control chord fired the Tier-2 action
+    // of its bare letter, so `Ctrl-D` silently marked a record done and `Ctrl-X`
+    // removed one. The keymap is three closed tiers of *unmodified* keys (P§5); SHIFT
+    // is the one modifier that carries meaning, because that is how `A`/`D`/`X` reach
+    // us at all.
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
+    {
+        return Ok(());
     }
 
     if state.overlays.last().is_some() {
