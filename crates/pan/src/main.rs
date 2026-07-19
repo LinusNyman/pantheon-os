@@ -203,7 +203,9 @@ fn run(cli: &Cli) -> Result<RunOk> {
         Cmd::Annotate { code, set } => cmd_annotate(cli, code, set),
         Cmd::Lookup(args) => cmd_lookup(cli, args),
         Cmd::Constitution { .. } => Err(not_implemented("constitution", "step 6")),
-        Cmd::Doctor => Err(not_implemented("doctor", "step 2+, once cores exist")),
+        // Infallible: an app that is absent, errors, or answers with nonsense is simply
+        // not installed, which is a finding rather than a failure (§5.0, §5.5).
+        Cmd::Doctor => Ok(cmd_doctor()),
         Cmd::Migrate => Err(not_implemented(
             "migrate",
             "a later step; no prior format version yet",
@@ -374,6 +376,117 @@ const NODE_CASCADE: &str = "the node-level path cascade, §10.1";
 
 fn not_implemented(verb: &str, when: &str) -> Error {
     Error::runtime(format!("`pan {verb}` is not implemented yet ({when})"))
+}
+
+// ── doctor: what is installed, and whether the file→core map is total (§5.5) ──
+
+/// The twelve apps `doctor` probes (§7.3). Versions come off **every** app's
+/// `version -f json`, a verb every layer has; the token map beside them comes off each
+/// **core**'s `schema`. The split is what lets `doctor` see all twelve: a lens owns no
+/// records and so declares no `schema` (§12), and reading versions off that surface
+/// would blind the check to the very apps §15.5 makes it for.
+const KNOWN_SHORTS: &[&str] = &[
+    "alb", "map", "rat", "fas", "pen", "ann", "tab", "aus", "spe", "atr", "stu",
+];
+
+/// Installed apps, their crate and format versions, format mismatches (§15.5), and
+/// any collision across two cores' declared tokens (§5.5).
+///
+/// **A clean run means the file→core map is total**: every token has exactly one
+/// owning core and one shape, which is what lets resolution read a name without
+/// importing a core (§5.0). A Document core is the case that makes that claim
+/// non-trivial — it contributes no tokens at all, so its files reach it by extension
+/// alone (§7.1), and the map is `extension ∪ token` rather than token alone.
+fn cmd_doctor() -> RunOk {
+    let registry = CoreRegistry::discover();
+
+    // `pan` reports itself rather than asking PATH: it is the running binary, so
+    // spawning a copy would answer for whichever `pan` is installed instead of this one.
+    let mut apps = vec![json!({
+        "short": "pan",
+        "name": "pantheon",
+        "version": env!("CARGO_PKG_VERSION"),
+        "format_version": 1,
+    })];
+    let mut absent = Vec::new();
+    let mut formats: std::collections::BTreeMap<u64, Vec<String>> =
+        std::collections::BTreeMap::new();
+    formats.entry(1).or_default().push("pan".to_string());
+
+    for short in KNOWN_SHORTS {
+        match probe_version(short) {
+            Some(value) => {
+                if let Some(format) = value.get("format_version").and_then(Value::as_u64) {
+                    formats
+                        .entry(format)
+                        .or_default()
+                        .push((*short).to_string());
+                }
+                apps.push(value);
+            }
+            None => absent.push(*short),
+        }
+    }
+
+    // Tokens, and who owns them. A core declaring none is a Document core (§7.1) —
+    // reported as such, since its emptiness is a declaration rather than a gap.
+    let mut tokens = Vec::new();
+    let mut document_cores = Vec::new();
+    for core in registry.cores() {
+        if core.kinds.is_empty() {
+            document_cores.push(core.name.clone());
+        }
+        for (token, shape) in &core.kinds {
+            tokens.push(json!({
+                "token": token,
+                "core": core.name,
+                "shape": shape,
+            }));
+        }
+    }
+    tokens.sort_by(|a, b| a["token"].as_str().cmp(&b["token"].as_str()));
+
+    let collisions: Vec<Value> = registry
+        .token_collisions()
+        .into_iter()
+        .map(|(token, cores)| json!({ "token": token, "cores": cores }))
+        .collect();
+
+    // A format bump is a breaking change for every app and gets a migration (§15.5),
+    // so a *disagreement* is what doctor flags; crate versions drift freely beneath it.
+    let agreed = formats.len() <= 1;
+    RunOk::Json(json!({
+        "apps": apps,
+        "absent": absent,
+        "format": {
+            "agreed": agreed,
+            "versions": formats.iter().map(|(v, shorts)| json!({
+                "format_version": v,
+                "apps": shorts,
+            })).collect::<Vec<_>>(),
+        },
+        "tokens": tokens,
+        "document_cores": document_cores,
+        "collisions": collisions,
+        // The totality claim itself (§5.5), stated rather than left to be inferred.
+        "map_total": collisions.is_empty() && document_cores.len() <= 1,
+    }))
+}
+
+/// One app's `version -f json` over PATH (§7.3). An app that is absent, errors, or
+/// emits unparseable JSON is simply not installed — the same tolerance
+/// `CoreRegistry::discover` shows a missing core (§5.0).
+fn probe_version(short: &str) -> Option<Value> {
+    let out = std::process::Command::new(short)
+        .args(["version", "-f", "json"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mut value: Value = serde_json::from_slice(&out.stdout).ok()?;
+    value["short"] = Value::String(short.to_string());
+    Some(value)
 }
 
 fn init_wrapper(shell: Shell) -> String {
