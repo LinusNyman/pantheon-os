@@ -124,10 +124,19 @@ fn the_lineup_is_legal_and_named() {
         18,
     )
     .unwrap();
-    // The tab strip names the lineup in order, and `1`–`9` switch by position (P§4).
-    for view in ["records", "agenda", "card", "insights"] {
-        assert!(frame.contains(view), "the tab strip names {view}: {frame}");
-    }
+    // The tab strip names the lineup **in order**, and `1`–`9` switch by position (P§4)
+    // — so this asserts the sequence, not just membership. Fasti's is P§3's own lineup
+    // plus the `EntityCard`: without a detail view `Enter` on a row would be inert.
+    let strip = frame.lines().next().unwrap_or_default();
+    let named: Vec<&str> = ["records", "calendar", "timeline", "card", "insights"]
+        .into_iter()
+        .filter(|view| strip.contains(view))
+        .collect();
+    assert_eq!(
+        named,
+        ["records", "calendar", "timeline", "card", "insights"],
+        "the tab strip names the lineup in order: {frame}"
+    );
 }
 
 /// An empty node keeps its chrome and says so calmly (I7, P§4) — in Fasti's own
