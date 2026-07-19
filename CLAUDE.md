@@ -52,7 +52,9 @@ Four layers, all over the spine:
 - **Lenses (TUIs, read + relay writes):** `speculum`, `atrium`, `studium`.
 
 Every tool has a three-char short and is both a CLI emitting JSON and a Porticus TUI. Cores land
-**CLI-first**: a bare short prints `help` until its TUI exists (§7.3).
+**CLI-first** until their TUI exists (§7.3) — and "prints `help`", the phrasing §16 uses, is loose
+about what the code does: *piped* emits `help_json()`, but a **TTY** gets the one-line `BARE`
+banner pointing at `--help`. It is the TTY arm step 6 replaces with the TUI.
 
 ## Workspace layout
 
@@ -63,7 +65,7 @@ Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `
 - `crates/porticus`, `crates/tessera` — the peer libs.
 - `crates/<core>` — one crate per core. **`lib.rs` is the thin file, `main.rs` the fat one** — the
   reverse of what §14's "~30-line clap shell" suggests, and the shape all four built cores share.
-  `lib.rs` (66–148 lines) holds only the record struct(s) and `impl Core`; `main.rs` (770–940) holds
+  `lib.rs` (66–148 lines) holds only the record struct(s) and `impl Core`; `main.rs` (771–941) holds
   the clap `Cli`, the twelve verbs, `Ctx`, the editor form, and the tail helpers. Put verb logic in
   `main.rs` — the spine already owns everything a core would otherwise share.
 - `xtask/` — workspace automation (run via `cargo xtask`).
@@ -83,12 +85,25 @@ tokens, so its files reach it by extension alone (§7.1).
 Next real work is **step 6, the first screen** — which is also the gate for the whole
 vertical slice, and where you circle back and fix whatever the screen exposed in steps 1–5.
 
-Three things a later step must not be surprised by (the durable rules that came out of
+Seven things a later step must not be surprised by (the durable rules that came out of
 step 5 live in Conventions below, not here — this list is about what is *unfinished*):
 
 - **`pan`'s node-level cascade (§10.1) is still stubbed.** Its six structural mutators
   (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented.
   The *record*-level cascade (§5.4) is done and is what the cores use.
+- **`pan constitution` (§5.5) is stubbed too, and its message says "step 6"** — unlike the six
+  above, which point at §10.1 rather than a step number. It is the one `pan` verb step 6 owes.
+- **`pan`'s bare short ignores the TTY rule.** It returns `RunOk::Raw` unconditionally, so a
+  *piped* `pan` emits prose where every core emits `help_json()`. §7.3 governs `pan` too.
+- **The `tui` feature is decorative.** Nine crates declare `default = ["tui"]` with
+  `porticus`/`tessera` as optional deps, and there is **not one `#[cfg(feature = "tui")]` in the
+  workspace** — today they link two empty crates and use nothing from them. Whoever writes the
+  first real TUI writes the `cfg` blocks, or the feature keeps meaning nothing. `atrium` has the
+  opposite bug: it takes both libs *unconditionally*, so `--no-default-features` cannot strip the
+  screen from a lens the way §14 and §12 say it must.
+- **`pan` carries a second copy of `emit`** (`crates/pan/src/render.rs`), byte-identical to
+  `pantheon::contract::emit`. The table renderer §7.3 owes has two plug points, not one; collapse
+  them before filling either.
 - **`Store::write_line` mints any `Shape::Series { named: false }` series on first write**
   (§7.3: a determined series is minted by its determinant). For Pensum the determinant is the
   node, so that is right. **Rationes' `balance` is determined by a holding *entity*** — so `rat`
@@ -112,7 +127,11 @@ cargo build --workspace --bins                                 # REQUIRED before
                                                                # need the cores on PATH, and cargo builds no
                                                                # bin for a crate that is not under test
 cargo nextest run --workspace --all-features --no-tests=pass   # falls back to `cargo test` if nextest absent
-cargo build --workspace                                        # CI also cross-builds 5 targets
+test -z "$(find . -name '*.snap.new' -print -quit)"            # CI fails on a PENDING snapshot: assert it or
+                                                               # delete it. Every command above can pass while
+                                                               # this one does not.
+cargo build --workspace                                        # CI runs the `--target` matrix form of this,
+                                                               # over 5 targets on their native runners
 cargo audit                                                    # advisories
 cargo deny check bans licenses sources                         # licenses/bans/sources
 ```
