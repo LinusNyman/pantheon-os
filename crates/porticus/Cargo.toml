@@ -17,6 +17,9 @@ ratatui.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 pulldown-cmark.workspace = true
+# Calendar and Timeline are dated views: month lengths, weekday-of-first, and the
+# day arithmetic a bar's width is. The spine's own date crate (§13), not a second one.
+jiff.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

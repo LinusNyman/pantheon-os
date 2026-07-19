@@ -19,13 +19,17 @@
 //! `ratatui` alone.
 
 mod agenda;
+mod calendar;
 mod entity_card;
 mod insights;
 mod reader;
+mod timeline;
 mod tree_file;
 
 pub use agenda::Agenda;
+pub use calendar::Calendar;
 pub use entity_card::{Card, Chip, EntityCard, Span_ as CardSpan};
 pub use insights::{Chart, Insights, Label, Panel, Series};
 pub use reader::{Document, Reader};
+pub use timeline::Timeline;
 pub use tree_file::TreeFile;

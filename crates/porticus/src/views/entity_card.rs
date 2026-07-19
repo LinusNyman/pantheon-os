@@ -37,6 +37,10 @@ pub struct Span_ {
     pub from: String,
     /// `None` = open, drawn to the range's right edge.
     pub to: Option<String>,
+    /// Its own home and key. A `Timeline` is cross-node, so a bar resolves an action
+    /// exactly as a row does (P§3, P§7) — the address rides with the period rather
+    /// than leaning on a cursor a Full view does not have.
+    pub home: RecordRef,
 }
 
 /// One record in detail — the view-model the app fills each frame.

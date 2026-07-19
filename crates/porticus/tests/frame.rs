@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use pantheon::{Code, NewSpec, plan_new};
-use porticus::view::{Layout, Row, View, ViewId};
+use porticus::view::{Handled, Layout, Nav, Row, View, ViewId};
 use porticus::views::{Agenda, TreeFile};
 use porticus::{Action, App, Ident, Invocation, RecordRef, Target, Writer};
 
@@ -802,4 +802,190 @@ fn the_dim_asks_any_and_the_badge_asks_count() {
     );
     // And the badge that did show carries the exact count.
     assert!(text.contains("ac cura  7"), "{text}");
+}
+
+// ── Calendar (row · Full) and Timeline (draw · Full) — P§3 ────────────────────
+
+/// A `Calendar` is a row-view that *also* paints a grid: the grid is the locator, the
+/// rows beneath it are the focused day (P§3, P§6).
+#[test]
+fn a_calendar_is_a_row_view_with_a_grid() {
+    use porticus::views::Calendar;
+
+    let mut calendar = Calendar::of(Vec::new);
+    assert_eq!(calendar.layout(), Layout::Full);
+    assert_eq!(calendar.id() as ViewId, "calendar");
+    assert!(
+        calendar.rows(&Code::parse("ac").unwrap()).is_some(),
+        "a Calendar is a row-view — `None` would make it a draw-view and forfeit \
+         search, filter and scroll (P§3, P§6)"
+    );
+
+    let grid = calendar.grid().expect("a Calendar declares a grid");
+    assert_eq!(grid.columns.len(), 7, "a week is seven days");
+    assert_eq!(
+        grid.cells.len() % 7,
+        0,
+        "the month is padded to whole weeks either side"
+    );
+    assert!(
+        grid.cells[grid.focused].is_some(),
+        "the focused cell is a real day, never one of the pad cells"
+    );
+}
+
+/// The grid shows the month; the rows show **one day of it**. A dated item on another
+/// day is counted in its own cell and kept out of the list.
+#[test]
+fn a_calendar_lists_only_the_focused_day() {
+    use porticus::views::Calendar;
+
+    // 1 January 1999 is not today, whenever today is — so the row is always elsewhere.
+    let mut calendar = Calendar::of(|| {
+        vec![Row {
+            when: Some("990101".into()),
+            ..row("long_ago", "ac")
+        }]
+    });
+    let rows = calendar.rows(&Code::parse("ac").unwrap()).unwrap();
+    assert!(
+        rows.is_empty(),
+        "a row on another day is not this day's: {rows:?}"
+    );
+}
+
+/// `[` and `]` page the month and `t` returns to today — Tier-3 keys the view declares
+/// so Porticus can route them and Help can list them (P§5).
+#[test]
+fn a_calendar_pages_by_month_and_comes_back() {
+    use porticus::views::Calendar;
+
+    let mut calendar = Calendar::of(Vec::new);
+    let declared: Vec<char> = calendar.nav_keys().iter().map(|(key, _)| *key).collect();
+    assert_eq!(declared, ['t', '[', ']']);
+
+    let opened = calendar.locator();
+    assert_eq!(calendar.navigate(Nav::Key(']')), Handled::Yes);
+    assert_ne!(calendar.locator(), opened, "`]` moves to the next month");
+    assert_eq!(calendar.navigate(Nav::Key('[')), Handled::Yes);
+    assert_eq!(calendar.locator(), opened, "`[` comes back");
+
+    // Three months out and `t` returns, however far the cursor wandered.
+    for _ in 0..3 {
+        calendar.navigate(Nav::Key(']'));
+    }
+    calendar.navigate(Nav::Key('t'));
+    assert_eq!(calendar.locator(), opened, "`t` is today");
+}
+
+/// The cell dates the add: `a` on a calendar keeps the day you pointed at rather than
+/// defaulting to today (§7.3, P§7).
+#[test]
+fn a_calendar_cell_dates_the_add() {
+    use porticus::views::Calendar;
+
+    let mut calendar = Calendar::of(Vec::new);
+    let node = Code::parse("ac").unwrap();
+    calendar.rows(&node);
+
+    let Some(Target::Node { at, .. }) = calendar.target() else {
+        panic!("a dated Full view names its cell through `target` (P§7)");
+    };
+    let at = at.expect("the cell carries its date");
+    assert_eq!(at.len(), 6, "a reading key is YYMMDD (§6.1): {at}");
+
+    // Move a day and the date the add would carry moves with it.
+    calendar.navigate(Nav::Right);
+    calendar.rows(&node);
+    let Some(Target::Node { at: moved, .. }) = calendar.target() else {
+        unreachable!()
+    };
+    assert_ne!(moved.unwrap(), at, "the cell cursor is what dates the add");
+}
+
+/// A `Timeline` is a draw-view whose bars each carry their own home, so it is
+/// cross-node and an action on a bar resolves exactly as a row's would (P§3, P§7).
+#[test]
+fn a_timeline_bar_carries_its_own_home() {
+    use porticus::views::{CardSpan, Timeline};
+
+    struct Bars;
+    impl App for Bars {
+        fn ident(&self) -> Ident {
+            Ident {
+                name: "fasti",
+                short: "fas",
+                tagline: "actio · placement",
+                symbol: '☾',
+                accent: porticus::ident::accent::SOL_GOLD,
+            }
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(
+                Timeline::of(|| {
+                    vec![
+                        CardSpan {
+                            label: "mvp_phase".into(),
+                            from: "260101".into(),
+                            to: Some("260630".into()),
+                            home: RecordRef {
+                                home: Code::parse("ac").unwrap(),
+                                key: "mvp_phase".into(),
+                            },
+                        },
+                        CardSpan {
+                            label: "residence".into(),
+                            from: "260201".into(),
+                            // Open: drawn to the range's right edge (§8.4).
+                            to: None,
+                            home: RecordRef {
+                                home: Code::parse("cs").unwrap(),
+                                key: "residence".into(),
+                            },
+                        },
+                    ]
+                })
+                .offering(&[Action::Edit]),
+            )]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+
+    let root = fresh_root();
+    let text = porticus::as_text(&porticus::render_once(&mut Bars, &root, 80, 14).unwrap());
+    assert!(text.contains("mvp_phase"), "{text}");
+    assert!(text.contains("residence"), "{text}");
+    assert!(text.contains('─'), "a period is drawn as a bar: {text}");
+    // A Full view names its own locator where a Rail view shows the path bar (P§4).
+    assert!(
+        text.contains("2026-01-01"),
+        "the range is the header: {text}"
+    );
+}
+
+/// A Timeline with nothing in it says so calmly and draws no range (I7, P§4).
+#[test]
+fn an_empty_timeline_is_calm() {
+    use porticus::views::{CardSpan, Timeline};
+
+    let mut timeline = Timeline::of(Vec::<CardSpan>::new);
+    assert_eq!(timeline.layout(), Layout::Full);
+    assert!(
+        timeline.rows(&Code::parse("ac").unwrap()).is_none(),
+        "a Timeline is a draw-view: it paints itself (P§3)"
+    );
+    assert_eq!(timeline.locator().as_deref(), Some("no range"));
+    assert_eq!(timeline.empty_line(), "no periods yet");
+    assert!(
+        timeline.target().is_none(),
+        "nothing drawn is nothing focused — never a stale address (I1)"
+    );
 }
