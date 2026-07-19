@@ -58,11 +58,10 @@ impl App for TabellaApp {
             // The document rendered — Tabella's detail view (P§3). Reading only:
             // editing suspends to the hand's own editor (§7.3, P§10).
             Box::new(
-                Reader::of(move |node: &Code| document_at(&for_read, node)).offering(&[
-                    Action::Edit,
-                    Action::Rename,
-                    Action::Remove,
-                ]),
+                Reader::of(move |node: &Code, pinned: Option<&RecordRef>| {
+                    document_at(&for_read, node, pinned)
+                })
+                .offering(&[Action::Edit, Action::Rename, Action::Remove]),
             ),
             Box::new(Insights::of(move || panels(&for_insights))),
         ]
@@ -174,18 +173,31 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
         .collect()
 }
 
-/// The node's one document, body and all.
+/// The pinned document, body and all — else the node's one document.
 ///
-/// This is the one read that *does* open a body, which is exactly what a Reader is
-/// for; where a node holds several, it shows the empty state rather than guessing
-/// (P§3).
-fn document_at(root: &std::path::Path, node: &Code) -> Option<Document> {
+/// This is the one read that *does* open a body, which is exactly what a Reader is for:
+/// a fold never reads bodies (§7.1), and this is not a fold but one record opened
+/// deliberately. An `Enter`-drill names which; with nothing pinned it falls back to the
+/// node's single document, and where a node holds several it shows the empty state
+/// rather than guessing (P§3).
+fn document_at(
+    root: &std::path::Path,
+    node: &Code,
+    pinned: Option<&RecordRef>,
+) -> Option<Document> {
     let store = Store::<Tabella>::new(root.to_path_buf());
-    let mut found = store.fold_documents(Some(node)).ok()?;
-    if found.len() != 1 {
-        return None;
-    }
-    let (dref, _) = found.remove(0);
+    let dref = if let Some(record) = pinned {
+        let at = store.fold_documents(Some(&record.home)).ok()?;
+        at.into_iter()
+            .find(|(dref, _)| dref.slug == record.key)
+            .map(|(dref, _)| dref)?
+    } else {
+        let mut found = store.fold_documents(Some(node)).ok()?;
+        if found.len() != 1 {
+            return None;
+        }
+        found.remove(0).0
+    };
     let whole = store.read_document(&dref).ok()?;
     Some(Document {
         slug: dref.slug,

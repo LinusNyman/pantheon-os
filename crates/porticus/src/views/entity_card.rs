@@ -13,7 +13,7 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
-use crate::action::{Action, Target};
+use crate::action::{Action, RecordRef, Target};
 use crate::view::{Layout, Row, View, ViewId};
 use crate::{Handled, Nav, Theme};
 
@@ -55,13 +55,15 @@ pub struct Card {
 /// The app's card for the node's entity, folded fresh each frame.
 pub struct EntityCard<F> {
     fold: F,
+    /// The record an `Enter`-drill pinned — an address, re-folded each frame (I1).
+    pinned: Option<RecordRef>,
     actions: Vec<Action>,
     empty: &'static str,
 }
 
 impl<F> EntityCard<F>
 where
-    F: FnMut(&Code) -> Option<Card>,
+    F: FnMut(&Code, Option<&RecordRef>) -> Option<Card>,
 {
     /// Capture the instrument's fold (P§3).
     ///
@@ -72,6 +74,7 @@ where
     pub fn of(fold: F) -> Self {
         Self {
             fold,
+            pinned: None,
             actions: Vec::new(),
             empty: "pick a record",
         }
@@ -86,7 +89,7 @@ where
 
 impl<F> View for EntityCard<F>
 where
-    F: FnMut(&Code) -> Option<Card>,
+    F: FnMut(&Code, Option<&RecordRef>) -> Option<Card>,
 {
     fn id(&self) -> ViewId {
         "card"
@@ -116,12 +119,22 @@ where
         Handled::No
     }
 
+    fn is_detail(&self) -> bool {
+        true
+    }
+
+    fn pin(&mut self, record: Option<RecordRef>) {
+        // Nothing else to reset: a card holds no scroll of its own, and everything it
+        // draws is folded from the pin each frame (I1).
+        self.pinned = record;
+    }
+
     fn empty_line(&self) -> &'static str {
         self.empty
     }
 
     fn draw(&mut self, node: &Code, area: Rect, buf: &mut Buffer, theme: Theme) {
-        let Some(card) = (self.fold)(node) else {
+        let Some(card) = (self.fold)(node, self.pinned.as_ref()) else {
             let middle = Rect {
                 y: area.y + area.height / 2,
                 height: 1,

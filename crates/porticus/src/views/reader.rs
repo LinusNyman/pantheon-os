@@ -13,7 +13,7 @@ use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
-use crate::action::{Action, Target};
+use crate::action::{Action, RecordRef, Target};
 use crate::view::{Layout, Row, View, ViewId};
 use crate::{Handled, Nav, Theme};
 
@@ -29,6 +29,8 @@ pub struct Document {
 /// The app's document at the cursor, folded fresh each frame.
 pub struct Reader<F> {
     fold: F,
+    /// The record an `Enter`-drill pinned — an address, re-folded each frame (I1).
+    pinned: Option<RecordRef>,
     actions: Vec<Action>,
     /// How far down the body the eye is — cursor state, not a fold (P§6).
     scroll: u16,
@@ -36,11 +38,12 @@ pub struct Reader<F> {
 
 impl<F> Reader<F>
 where
-    F: FnMut(&Code) -> Option<Document>,
+    F: FnMut(&Code, Option<&RecordRef>) -> Option<Document>,
 {
     pub fn of(fold: F) -> Self {
         Self {
             fold,
+            pinned: None,
             actions: Vec::new(),
             scroll: 0,
         }
@@ -51,11 +54,16 @@ where
         self.actions = actions.to_vec();
         self
     }
+
+    /// A different document starts at its top, not wherever the last one was read to.
+    fn reset(&mut self) {
+        self.scroll = 0;
+    }
 }
 
 impl<F> View for Reader<F>
 where
-    F: FnMut(&Code) -> Option<Document>,
+    F: FnMut(&Code, Option<&RecordRef>) -> Option<Document>,
 {
     fn id(&self) -> ViewId {
         "read"
@@ -93,12 +101,21 @@ where
         }
     }
 
+    fn is_detail(&self) -> bool {
+        true
+    }
+
+    fn pin(&mut self, record: Option<RecordRef>) {
+        self.pinned = record;
+        self.reset();
+    }
+
     fn empty_line(&self) -> &'static str {
         "no document here"
     }
 
     fn draw(&mut self, node: &Code, area: Rect, buf: &mut Buffer, theme: Theme) {
-        let Some(document) = (self.fold)(node) else {
+        let Some(document) = (self.fold)(node, self.pinned.as_ref()) else {
             let middle = Rect {
                 y: area.y + area.height / 2,
                 height: 1,

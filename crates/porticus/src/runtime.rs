@@ -11,7 +11,7 @@ use ratatui::layout::{Constraint, Direction, Layout as Cut, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 
-use crate::action::{Action, Invocation, Relayed, Target, Writer};
+use crate::action::{Action, Invocation, RecordRef, Relayed, Target, Writer};
 use crate::app::App;
 use crate::keymap::{self, Chrome};
 use crate::overlay::{Overlay, Pending, Prompt};
@@ -47,6 +47,11 @@ struct State {
     row: usize,
     /// The filter `/` left behind on a row-view.
     filter: String,
+    /// The record an `Enter`-drill pinned, and the view it drilled *from* — so `Esc`
+    /// returns to the row you came from rather than to lineup `[0]` (P§3).
+    ///
+    /// An address, never a value (I1): the detail view re-folds it every frame.
+    pinned: Option<(RecordRef, usize)>,
     overlays: Vec<Overlay>,
     status: Status,
     /// Cores this app relays to that are **not** on `PATH` — probed once at launch, so
@@ -86,6 +91,7 @@ pub fn run(app: &mut impl App, root: &std::path::Path) -> anyhow::Result<()> {
         focus: Focus::Rail,
         row: 0,
         filter: String::new(),
+        pinned: None,
         overlays: Vec::new(),
         status: Status::Idle,
         missing,
@@ -127,6 +133,11 @@ fn check_lineup(views: &[Box<dyn View>]) -> anyhow::Result<()> {
     anyhow::ensure!(
         views.len() <= 9,
         "a lineup holds at most nine views — a tenth has no number key (P§3)"
+    );
+    anyhow::ensure!(
+        views.iter().filter(|v| v.is_detail()).count() <= 1,
+        "a lineup holds at most one detail view — an instrument has one primitive, so \
+         one detail, which is what lets `Enter` route with no shape tag (P§3)"
     );
     let mut seen = std::collections::HashSet::new();
     for view in views {
@@ -503,11 +514,18 @@ fn handle(
     }
 
     match key.code {
-        // `Esc` at the bare base has nothing to unwind and falls through (P§4).
+        // `Esc` unwinds in order: it pops an overlay (handled above), else un-pins an
+        // `Enter`-drill back to the row it came from, and only with nothing to unwind
+        // does it fall through at the base (P§4).
+        KeyCode::Esc => undrill(state),
         KeyCode::Enter => {
             if state.focus == Focus::Rail {
                 state.rail.descend();
                 refresh(state)?;
+            } else {
+                // On a content row `Enter` **activates**: pin that row's record and
+                // switch to the lineup's detail view (P§3, P§5).
+                drill(state);
             }
         }
         KeyCode::Tab => {
@@ -575,6 +593,14 @@ fn handle_chrome(state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
         }
         Chrome::Switch(index) => {
             if index < state.views.len() {
+                // Reached by its number key with nothing pinned, a detail view shows
+                // the node's one record or its empty state — it never inherits a drill
+                // (P§3). A switch keeps no history, so the pin goes.
+                if state.pinned.take().is_some() {
+                    if let Some(detail) = state.views.iter().position(|v| v.is_detail()) {
+                        state.views[detail].pin(None);
+                    }
+                }
                 state.active = index;
                 state.row = 0;
                 state.filter.clear();
@@ -587,6 +613,41 @@ fn handle_chrome(state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
         Chrome::CyclePane | Chrome::Enter | Chrome::Escape => {}
     }
     Ok(())
+}
+
+/// `Enter` on a content row — **activate** (P§3, P§5).
+///
+/// Pins the focused row's `RecordRef` and switches to the lineup's detail view, which
+/// folds that record each frame (I1). A lineup with no detail view leaves `Enter` inert
+/// on a leaf and says so on the status line.
+fn drill(state: &mut State) {
+    let Some(detail) = state.views.iter().position(|v| v.is_detail()) else {
+        state.status = Status::Notice("nothing to open here".into());
+        return;
+    };
+    let Some(Target::Row(record)) = current_target(state) else {
+        return;
+    };
+    state.pinned = Some((record.clone(), state.active));
+    state.views[detail].pin(Some(record));
+    state.active = detail;
+    // An `Enter`-drill lands on the **content** you just opened — the one case where
+    // focus does not start on the rail (P§6).
+    state.focus = Focus::Content;
+}
+
+/// `Esc` at the base — un-pin an `Enter`-drill back to the row it came from (P§4).
+///
+/// A one-level drill-back, distinct from a number-key switch, which keeps no history.
+fn undrill(state: &mut State) {
+    let Some((_, from)) = state.pinned.take() else {
+        return;
+    };
+    if let Some(detail) = state.views.iter().position(|v| v.is_detail()) {
+        state.views[detail].pin(None);
+    }
+    state.active = from.min(state.views.len().saturating_sub(1));
+    state.focus = Focus::Content;
 }
 
 fn motion(state: &mut State, nav: Nav) -> anyhow::Result<()> {
@@ -1108,6 +1169,7 @@ pub fn render_once(
         focus: Focus::Rail,
         row: 0,
         filter: String::new(),
+        pinned: None,
         overlays: Vec::new(),
         status: Status::Idle,
         missing: Vec::new(),

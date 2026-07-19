@@ -16,7 +16,7 @@ use pantheon::Code;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use crate::action::{Action, Target};
+use crate::action::{Action, RecordRef, Target};
 use crate::theme::Theme;
 
 /// The switcher label and the Help key. Unique within a lineup; the number key is
@@ -120,6 +120,30 @@ pub trait View {
     /// (P§4): a Calendar's month, a Timeline's range. Defaults to the view's id.
     fn locator(&self) -> Option<String> {
         None
+    }
+
+    /// Whether this is a **detail view** — one that renders a single *pinned* record
+    /// (P§3).
+    ///
+    /// A lineup holds **at most one**, which is what lets `Enter` route with no shape
+    /// tag on the record: an instrument has one primitive, so it has one detail.
+    /// [`run`](crate::run) rejects a second.
+    fn is_detail(&self) -> bool {
+        false
+    }
+
+    /// Porticus hands the pinned record down (P§3).
+    ///
+    /// `Enter` on a content row pins that row's [`RecordRef`] and switches here; `Esc`
+    /// un-pins with `None` and returns to the row it drilled from. A detail view folds
+    /// the pinned record **each frame** (I1) — this only says *which*, never carries
+    /// the record itself.
+    ///
+    /// A pinned record gone underneath (another hand, a hook — I8, §6.4) falls to the
+    /// view's empty state, never a stale record: the fold simply finds nothing, which
+    /// is the same answer as never having pinned.
+    fn pin(&mut self, record: Option<RecordRef>) {
+        let _ = record;
     }
 
     /// The one dim, centred line shown when there is nothing to draw (P§4).
