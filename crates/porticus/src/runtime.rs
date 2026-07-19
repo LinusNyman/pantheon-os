@@ -115,7 +115,7 @@ pub fn run(app: &mut impl App, root: &std::path::Path) -> anyhow::Result<()> {
         if key.kind != KeyEventKind::Press {
             continue;
         }
-        handle(&mut screen, app, &mut state, key)?;
+        handle(Some(&mut screen), app, &mut state, key)?;
     }
     Ok(())
 }
@@ -485,7 +485,7 @@ fn filtered(rows: &[Row], filter: &str) -> Vec<Row> {
 // ── input (P§5) ──────────────────────────────────────────────────────────────
 
 fn handle(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     key: KeyEvent,
@@ -510,7 +510,7 @@ fn handle(
     }
 
     if state.overlays.last().is_some() {
-        return handle_overlay(screen, app, state, key);
+        return handle_overlay(screen.as_deref_mut(), app, state, key);
     }
 
     match key.code {
@@ -549,7 +549,7 @@ fn handle(
 }
 
 fn handle_char(
-    screen: &mut Screen,
+    screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     c: char,
@@ -688,7 +688,7 @@ fn refresh(state: &mut State) -> anyhow::Result<()> {
 /// Resolve the target, ask the app for the invocation, then run Porticus's own confirm
 /// policy over it. The app never decides whether something confirms (P§5, P-II).
 fn begin(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     action: Action,
@@ -701,13 +701,24 @@ fn begin(
     // A **scoped** action presupposes a row source, so it is a row-view's alone: a
     // draw-view returning `None` from `rows` has no set to enumerate (P§7).
     if matches!(action, Action::DoneAll | Action::RemoveAll) {
-        return begin_scoped(screen, app, state, action);
+        return begin_scoped(screen.as_deref_mut(), app, state, action);
     }
 
     let Some(target) = target_for(state, action) else {
         state.status = Status::Notice("pick a row first".into());
         return Ok(());
     };
+
+    // A view may declare that an action needs a line first (P§5) — `annotate` has
+    // nothing to say until a `key=value` is typed.
+    if let Some(label) = state.views[state.active].prompts_for(action) {
+        state.overlays.push(Overlay::Line {
+            prompt: Prompt::Field(action, target),
+            label: label.to_owned(),
+            buffer: String::new(),
+        });
+        return Ok(());
+    }
 
     // `r` and `m` take a line prompt before there is anything to confirm (P§5).
     if action == Action::Rename {
@@ -742,14 +753,20 @@ fn begin(
 }
 
 fn commit_or_confirm(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     action: Action,
     invocation: Invocation,
 ) -> anyhow::Result<()> {
     if action.confirms() {
-        let pending = compute(screen, app, String::new(), invocation)?;
+        let pending = compute(
+            screen.as_deref_mut(),
+            app,
+            &state.root.clone(),
+            String::new(),
+            invocation,
+        )?;
         state.overlays.push(Overlay::Confirm {
             action,
             pending: vec![pending],
@@ -760,7 +777,7 @@ fn commit_or_confirm(
         });
         return Ok(());
     }
-    let out = relay_one(screen, app, &invocation, None)?;
+    let out = relay_one(screen, app, &state.root.clone(), &invocation, None)?;
     report(state, &invocation, &out);
     refresh(state)
 }
@@ -773,7 +790,7 @@ fn commit_or_confirm(
 /// own `--dry-run`, and therefore its own plan token: an item that *shifted* underneath
 /// is refused at commit rather than acted on stale (§7.3).
 fn begin_scoped(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     action: Action,
@@ -787,6 +804,7 @@ fn begin_scoped(
         return Ok(());
     }
 
+    let root = state.root.clone();
     let mut pending = Vec::new();
     for (key, target) in targets {
         let Some(invocation) = app.on_action(single, &target) else {
@@ -795,7 +813,7 @@ fn begin_scoped(
             state.status = Status::Notice(format!("{} does not apply here", action.label()));
             return Ok(());
         };
-        pending.push(compute(screen, app, key, invocation)?);
+        pending.push(compute(screen.as_deref_mut(), app, &root, key, invocation)?);
     }
 
     let snapshot: Vec<String> = pending.iter().map(|p| p.key.clone()).collect();
@@ -840,12 +858,13 @@ fn row_key(target: &Target) -> String {
 
 /// Run one item's `--dry-run` and keep what it computed (P§7).
 fn compute(
-    screen: &mut Screen,
+    screen: Option<&mut Screen>,
     app: &mut impl App,
+    root: &std::path::Path,
     key: String,
     invocation: Invocation,
 ) -> anyhow::Result<Pending> {
-    let dry = execute(screen, app, &invocation.dry_run())?;
+    let dry = execute(screen, app, &rooted(&invocation.dry_run(), root))?;
     let value = dry.json();
     let token = value
         .as_ref()
@@ -863,12 +882,13 @@ fn compute(
 
 /// Run one write.
 fn relay_one(
-    screen: &mut Screen,
+    screen: Option<&mut Screen>,
     app: &mut impl App,
+    root: &std::path::Path,
     invocation: &Invocation,
     token: Option<&str>,
 ) -> anyhow::Result<Relayed> {
-    execute(screen, app, &invocation.committed(token))
+    execute(screen, app, &rooted(&invocation.committed(token), root))
 }
 
 /// Put whatever came back on the status line (P§4).
@@ -888,11 +908,29 @@ fn report(state: &mut State, invocation: &Invocation, out: &Relayed) {
 /// this one will take it. Suspending around a child that does not need it costs a
 /// redraw; not suspending around one that does corrupts the screen.
 fn execute(
-    screen: &mut Screen,
+    screen: Option<&mut Screen>,
     app: &mut impl App,
     invocation: &Invocation,
 ) -> anyhow::Result<Relayed> {
-    Ok(screen.suspend(|| app.execute(invocation))??)
+    Ok(Screen::suspend_maybe(screen, || app.execute(invocation))??)
+}
+
+/// Every relay names the tree it is acting on (§7.3's `-C`).
+///
+/// Porticus adds this rather than trusting each instrument to, because the failure is
+/// silent and severe: `run` is *given* a root, but a relay without `-C` resolves
+/// `$PANTHEON_ROOT` instead — so a TUI opened with `-C /some/tree` would read one tree
+/// and write to another. The env var is the caller's ambient state (§6.2); the root the
+/// screen is drawing is the fact, and the relay must carry it.
+///
+/// `-C` is universal (§7.3), so this is safe for every instrument.
+fn rooted(invocation: &Invocation, root: &std::path::Path) -> Invocation {
+    let mut args = vec!["-C".to_string(), root.display().to_string()];
+    args.extend(invocation.args.iter().cloned());
+    Invocation {
+        short: invocation.short.clone(),
+        args,
+    }
 }
 
 fn target_for(state: &mut State, action: Action) -> Option<Target> {
@@ -924,12 +962,20 @@ fn target_for(state: &mut State, action: Action) -> Option<Target> {
 fn current_target(state: &mut State) -> Option<Target> {
     let node = state.rail.selected()?;
     let view = &mut state.views[state.active];
-    // A draw-view carries its own selection and names it as an address; a row-view
+    // A draw/Full view carries its own selection and names it as an address; a row-view
     // defaults to None and Porticus uses the focused Row's (P§3).
     if let Some(target) = view.target() {
         return Some(target);
     }
-    let rows = filtered(&view.rows(&node)?, &state.filter);
+    let Some(rows) = view.rows(&node) else {
+        // **`None` is a draw-view, not an empty one** (P§3). A draw-view that names no
+        // target of its own is *about the selected node* — `pan`'s tree tab is the case
+        // — so the node is the subject. An empty row-view returns `Some(vec![])` and
+        // falls through below with nothing, which is the honest answer there: it has a
+        // set, and the set is empty.
+        return Some(Target::Node { node, at: None });
+    };
+    let rows = filtered(&rows, &state.filter);
     let index = state.row.min(rows.len().saturating_sub(1));
     rows.get(index).map(|row| row.target.clone())
 }
@@ -941,7 +987,7 @@ fn pretty(value: &serde_json::Value) -> String {
 // ── overlay input (P§4) ──────────────────────────────────────────────────────
 
 fn handle_overlay(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     key: KeyEvent,
@@ -953,7 +999,7 @@ fn handle_overlay(
             state.overlays.pop();
             return Ok(());
         }
-        KeyCode::Enter => return submit(screen, app, state),
+        KeyCode::Enter => return submit(screen.as_deref_mut(), app, state),
         KeyCode::Backspace if text_entry => {
             if let Some(buffer) = state.overlays.last_mut().and_then(Overlay::buffer_mut) {
                 buffer.pop();
@@ -978,7 +1024,7 @@ fn handle_overlay(
 }
 
 fn handle_confirm_key(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     c: char,
@@ -988,7 +1034,7 @@ fn handle_confirm_key(
         Some(Overlay::Confirm { heavy: Some(_), .. })
     );
     match c {
-        'y' if !heavy => submit(screen, app, state),
+        'y' if !heavy => submit(screen.as_deref_mut(), app, state),
         'X' if heavy => submit(screen, app, state),
         'n' => {
             state.overlays.pop();
@@ -1013,7 +1059,11 @@ fn live_search(state: &mut State) {
     }
 }
 
-fn submit(screen: &mut Screen, app: &mut impl App, state: &mut State) -> anyhow::Result<()> {
+fn submit(
+    mut screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+) -> anyhow::Result<()> {
     let Some(overlay) = state.overlays.pop() else {
         return Ok(());
     };
@@ -1031,7 +1081,14 @@ fn submit(screen: &mut Screen, app: &mut impl App, state: &mut State) -> anyhow:
             pending,
             snapshot,
             ..
-        } => commit(screen, app, state, action, &pending, &snapshot),
+        } => commit(
+            screen.as_deref_mut(),
+            app,
+            state,
+            action,
+            &pending,
+            &snapshot,
+        ),
         Overlay::Line { prompt, buffer, .. } => submit_line(screen, app, state, prompt, buffer),
         Overlay::Title | Overlay::Help => Ok(()),
     }
@@ -1045,7 +1102,7 @@ fn submit(screen: &mut Screen, app: &mut impl App, state: &mut State) -> anyhow:
 /// hand never saw. So the set is derived again and compared against the snapshot the
 /// overlay was opened over; a difference re-prompts rather than commits.
 fn commit(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     action: Action,
@@ -1057,15 +1114,22 @@ fn commit(
         if now != snapshot {
             state.status =
                 Status::Error("the set changed underneath — look again before committing".into());
-            return begin_scoped(screen, app, state, action);
+            return begin_scoped(screen.as_deref_mut(), app, state, action);
         }
     }
 
     // *n* single relays, each carrying its own plan token. The first failure stops the
     // run and says why: a bulk action that half-applied while reporting success would
     // be worse than one that stopped.
+    let root = state.root.clone();
     for (done, item) in pending.iter().enumerate() {
-        let out = relay_one(screen, app, &item.invocation, item.token.as_deref())?;
+        let out = relay_one(
+            screen.as_deref_mut(),
+            app,
+            &root,
+            &item.invocation,
+            item.token.as_deref(),
+        )?;
         if !out.ok() {
             state.status = Status::Error(format!(
                 "{} — after {done} of {}",
@@ -1083,7 +1147,7 @@ fn commit(
 }
 
 fn submit_line(
-    screen: &mut Screen,
+    mut screen: Option<&mut Screen>,
     app: &mut impl App,
     state: &mut State,
     prompt: Prompt,
@@ -1093,6 +1157,14 @@ fn submit_line(
         return Ok(());
     }
     match prompt {
+        Prompt::Field(action, target) => {
+            let Some(mut invocation) = app.on_action(action, &target) else {
+                state.status = Status::Notice(format!("{} does not apply here", action.label()));
+                return Ok(());
+            };
+            invocation.args.push(buffer);
+            commit_or_confirm(screen.as_deref_mut(), app, state, action, invocation)
+        }
         Prompt::Rename(target) => {
             let Some(invocation) = app.on_action(Action::Rename, &target) else {
                 state.status = Status::Notice("rename does not apply here".into());
@@ -1100,7 +1172,13 @@ fn submit_line(
             };
             let mut invocation = invocation;
             invocation.args.push(buffer);
-            commit_or_confirm(screen, app, state, Action::Rename, invocation)
+            commit_or_confirm(
+                screen.as_deref_mut(),
+                app,
+                state,
+                Action::Rename,
+                invocation,
+            )
         }
         Prompt::QuickAddCode => {
             state.overlays.push(Overlay::Line {
@@ -1122,7 +1200,7 @@ fn submit_line(
             };
             let mut invocation = invocation;
             invocation.args.push(buffer);
-            commit_or_confirm(screen, app, state, Action::Add, invocation)
+            commit_or_confirm(screen.as_deref_mut(), app, state, Action::Add, invocation)
         }
         Prompt::PickHome => {
             // A Full view's `a` has no tree cursor to resolve a home from (P§7).
@@ -1196,6 +1274,96 @@ pub fn as_text(buffer: &ratatui::buffer::Buffer) -> String {
         }
         out.push_str(line.trim_end());
         out.push('\n');
+    }
+    out
+}
+
+/// Drive an instrument with scripted keys, with no terminal involved.
+///
+/// This runs **the same [`handle`] the loop runs** and the same relay — the only
+/// difference is that there is no screen to suspend around a child, which a headless
+/// driver has nothing to do about anyway ([`Screen::suspend_maybe`]).
+///
+/// It exists because three separate defects in this crate passed every unit test and
+/// were caught only by driving a real binary in a pty: a control chord firing its bare
+/// key's action, a relay that killed the screen after committing, and an action whose
+/// target never resolved. A pty proves the lifecycle but has no size, so it draws no
+/// cells and cannot be asserted against. This closes that gap: keys in, final frame
+/// out, writes really performed.
+///
+/// Returns the frame after the last key.
+///
+/// # Errors
+/// If the lineup is invalid, the tree cannot be walked, or a relay fails to spawn.
+pub fn drive(
+    app: &mut impl App,
+    root: &std::path::Path,
+    keys: &[ratatui::crossterm::event::KeyEvent],
+    width: u16,
+    height: u16,
+) -> anyhow::Result<String> {
+    let views = app.lineup();
+    check_lineup(&views)?;
+    let mut state = State {
+        rail: Rail::new(root)?,
+        views,
+        active: 0,
+        focus: Focus::Rail,
+        row: 0,
+        filter: String::new(),
+        pinned: None,
+        overlays: Vec::new(),
+        status: Status::Idle,
+        missing: Vec::new(),
+        root: root.to_path_buf(),
+        quit: false,
+    };
+    let ident = app.ident();
+    let theme = Theme::of(&ident);
+    for key in keys {
+        if state.quit {
+            break;
+        }
+        handle(None, app, &mut state, *key)?;
+    }
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))?;
+    terminal.draw(|frame| draw(frame, app, &mut state, theme, &ident))?;
+    Ok(as_text(terminal.backend().buffer()))
+}
+
+/// Spell a key script the way a hand would type it: `"2d"` is two keystrokes, and the
+/// named ones are written `<enter>`, `<esc>`, `<tab>`, `<up>`, `<down>`, `<left>`,
+/// `<right>`, `<bs>`.
+///
+/// # Panics
+/// On an unknown `<name>`, which is a typo in a test rather than a runtime condition.
+#[must_use]
+pub fn keys(script: &str) -> Vec<ratatui::crossterm::event::KeyEvent> {
+    use ratatui::crossterm::event::{KeyCode, KeyEvent};
+    let mut out = Vec::new();
+    let mut rest = script;
+    while !rest.is_empty() {
+        if let Some(end) = rest.strip_prefix('<').and_then(|r| r.find('>')) {
+            let name = &rest[1..=end];
+            let code = match name {
+                "enter" => KeyCode::Enter,
+                "esc" => KeyCode::Esc,
+                "tab" => KeyCode::Tab,
+                "up" => KeyCode::Up,
+                "down" => KeyCode::Down,
+                "left" => KeyCode::Left,
+                "right" => KeyCode::Right,
+                "bs" => KeyCode::Backspace,
+                other => panic!("unknown key `<{other}>` in a key script"),
+            };
+            out.push(KeyEvent::from(code));
+            rest = &rest[end + 2..];
+            continue;
+        }
+        let mut chars = rest.chars();
+        let c = chars.next().expect("rest is non-empty");
+        out.push(KeyEvent::from(KeyCode::Char(c)));
+        rest = chars.as_str();
     }
     out
 }

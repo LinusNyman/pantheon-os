@@ -45,6 +45,6 @@ pub mod views;
 pub use action::{Action, Invocation, RecordRef, Relayed, Target, Writer};
 pub use app::App;
 pub use ident::Ident;
-pub use runtime::{as_text, render_once, run};
+pub use runtime::{as_text, drive, keys, render_once, run};
 pub use theme::Theme;
 pub use view::{Handled, Layout, Nav, Row, View, ViewId};

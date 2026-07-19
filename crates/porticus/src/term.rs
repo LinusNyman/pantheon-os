@@ -75,6 +75,29 @@ impl Screen {
     /// # Errors
     /// If the terminal cannot be retaken after the child returns.
     pub fn suspend<T>(&mut self, child: impl FnOnce() -> T) -> std::io::Result<T> {
+        Self::suspend_maybe(Some(self), child)
+    }
+
+    /// [`Screen::suspend`], but tolerant of there being no screen to suspend.
+    ///
+    /// A headless driver (the scripted-key harness tests use) owns no terminal, so
+    /// there is nothing to leave and nothing to retake — the child just runs. Keeping
+    /// this on the same function as the real path is what makes a test exercise the
+    /// *same* relay the loop does rather than a parallel one.
+    ///
+    /// # Errors
+    /// If the terminal cannot be retaken after the child returns.
+    pub fn suspend_maybe<T>(
+        screen: Option<&mut Screen>,
+        child: impl FnOnce() -> T,
+    ) -> std::io::Result<T> {
+        let Some(screen) = screen else {
+            return Ok(child());
+        };
+        screen.suspend_inner(child)
+    }
+
+    fn suspend_inner<T>(&mut self, child: impl FnOnce() -> T) -> std::io::Result<T> {
         leave();
         let outcome = child();
         raise()?;

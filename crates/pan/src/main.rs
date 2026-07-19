@@ -20,6 +20,10 @@ use pantheon::{
     resolve_all, resolve_code, resolve_root, set_annotations, validate,
 };
 
+// The screen rides the `tui` feature; drop it and the structural CLI stands alone (§14).
+#[cfg(feature = "tui")]
+mod screen;
+
 #[derive(Parser)]
 #[command(
     name = "pan",
@@ -169,6 +173,24 @@ fn main() -> ExitCode {
 }
 
 /// Whether to emit JSON: `-f json`, or (no `-f`) a non-terminal stdout (§7.3).
+/// `pan`'s surface, as JSON (§7.3).
+///
+/// A system tool carries its own structural set rather than a core's twelve (§5.5),
+/// which is the shape of what it is and no licence for a core to grow one (§18).
+fn help_json() -> Value {
+    json!({
+        "name": "pantheon",
+        "short": "pan",
+        "about": "the structure: codes, files, refs, node annotations (§5.5, §10)",
+        "verbs": [
+            "tree", "resolve", "cd", "init", "constitution", "doctor", "migrate",
+            "validate", "annotate", "new", "rename", "mv", "mv-file", "rm",
+            "rename-prefix", "rename-pattern",
+        ],
+        "bare": "opens the structural TUI at a terminal; emits this down a pipe",
+    })
+}
+
 fn as_json(cli: &Cli) -> bool {
     match cli.format {
         Some(Format::Json) => true,
@@ -179,9 +201,23 @@ fn as_json(cli: &Cli) -> bool {
 
 fn run(cli: &Cli) -> Result<RunOk> {
     let Some(cmd) = &cli.cmd else {
-        // A bare `pan` is the TUI; it prints help until the TUI lands (§7.3, step 6).
+        // A bare short opens the TUI at a terminal; **piped, it emits help as JSON**
+        // (§7.3). `pan` had been the one exception — it answered a pipe with prose
+        // where every core answers with the contract — and the TTY rule governs it too.
+        if as_json(cli) {
+            return Ok(RunOk::Json(help_json()));
+        }
+        #[cfg(feature = "tui")]
+        {
+            let root = resolve_root(cli.root.as_deref())?;
+            screen::open(&root).map_err(|e| Error::runtime(e.to_string()))?;
+            return Ok(RunOk::Raw(String::new()));
+        }
+        // Headless: there is no screen to open, so help is the whole answer (§14).
+        #[cfg(not(feature = "tui"))]
         return Ok(RunOk::Raw(
-            "pan — PantheonOS structural CLI. The TUI lands at step 6; run `pan --help` for commands.\n"
+            "pan — PantheonOS structural CLI. Built without the `tui` feature; run \
+             `pan --help` for commands.\n"
                 .to_string(),
         ));
     };

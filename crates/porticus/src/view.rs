@@ -122,6 +122,21 @@ pub trait View {
         None
     }
 
+    /// An action this view needs a **line** for before there is anything to confirm,
+    /// and the prompt's label (P§5).
+    ///
+    /// `r` already works this way for every view — a rename has no new name until you
+    /// type one. This lets a view say the same of another action: `pan`'s tree tab
+    /// needs a `key=value` before `annotate` means anything (§10.3, §5.5).
+    ///
+    /// The view declares *that* a line is wanted and what to call it; Porticus still
+    /// owns the prompt, the appending, and the confirm that follows (P-II). A view
+    /// never runs a prompt of its own.
+    fn prompts_for(&self, action: Action) -> Option<&'static str> {
+        let _ = action;
+        None
+    }
+
     /// Whether this is a **detail view** — one that renders a single *pinned* record
     /// (P§3).
     ///
