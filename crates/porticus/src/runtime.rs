@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use crate::action::{Action, Invocation, Relayed, Target, Writer};
 use crate::app::App;
 use crate::keymap::{self, Chrome};
-use crate::overlay::{Overlay, Prompt};
+use crate::overlay::{Overlay, Pending, Prompt};
 use crate::rail::Rail;
 use crate::term::Screen;
 use crate::theme::Theme;
@@ -361,25 +361,47 @@ fn draw_overlay(
                 theme.text(),
             ))]
         }
-        Overlay::Confirm {
-            invocation,
-            token,
-            change,
-            heavy,
-            ..
-        } => {
-            let mut lines = vec![
-                Line::from(Span::styled(invocation.display(), theme.name())),
-                Line::from(Span::styled(String::new(), theme.text())),
-            ];
-            for line in change.lines().take(area.height as usize / 2) {
-                lines.push(Line::from(Span::styled(line.to_owned(), theme.text())));
-            }
-            if let Some(token) = token {
+        Overlay::Confirm { pending, heavy, .. } => {
+            let mut lines = Vec::new();
+            // The overlay **names the full set and its count** (P§7). One item shows
+            // its computed change; many show what will be run, because n changes would
+            // not fit and a truncated list reads as the whole set.
+            if let [only] = pending.as_slice() {
                 lines.push(Line::from(Span::styled(
-                    format!("plan {token}"),
-                    theme.dim(),
+                    only.invocation.display(),
+                    theme.name(),
                 )));
+                lines.push(Line::from(String::new()));
+                for line in only.change.lines().take(area.height as usize / 2) {
+                    lines.push(Line::from(Span::styled(line.to_owned(), theme.text())));
+                }
+                if let Some(token) = &only.token {
+                    lines.push(Line::from(Span::styled(
+                        format!("plan {token}"),
+                        theme.dim(),
+                    )));
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    format!("{} records", pending.len()),
+                    theme.name(),
+                )));
+                lines.push(Line::from(String::new()));
+                let room = (area.height as usize / 2).max(1);
+                for item in pending.iter().take(room) {
+                    lines.push(Line::from(Span::styled(
+                        item.invocation.display(),
+                        theme.text(),
+                    )));
+                }
+                if pending.len() > room {
+                    // Say what is not shown. A list that silently stopped would let the
+                    // count and the visible rows disagree.
+                    lines.push(Line::from(Span::styled(
+                        format!("… and {} more", pending.len() - room),
+                        theme.dim(),
+                    )));
+                }
             }
             lines.push(Line::from(Span::styled(
                 match heavy {
@@ -615,6 +637,12 @@ fn begin(
         return Ok(());
     }
 
+    // A **scoped** action presupposes a row source, so it is a row-view's alone: a
+    // draw-view returning `None` from `rows` has no set to enumerate (P§7).
+    if matches!(action, Action::DoneAll | Action::RemoveAll) {
+        return begin_scoped(screen, app, state, action);
+    }
+
     let Some(target) = target_for(state, action) else {
         state.status = Status::Notice("pick a row first".into());
         return Ok(());
@@ -660,44 +688,135 @@ fn commit_or_confirm(
     invocation: Invocation,
 ) -> anyhow::Result<()> {
     if action.confirms() {
-        let dry = execute(screen, app, &invocation.dry_run())?;
-        let value = dry.json();
-        let token = value
-            .as_ref()
-            .and_then(|v| v["token"].as_str().map(str::to_owned));
-        let change = value
-            .as_ref()
-            .map_or_else(|| dry.stdout.clone(), |v| pretty(&v["change"]));
+        let pending = compute(screen, app, String::new(), invocation)?;
         state.overlays.push(Overlay::Confirm {
             action,
-            invocation,
-            token,
-            change,
+            pending: vec![pending],
+            // A focused-row confirm has no membership to re-scan: it names one record
+            // and the per-item token already guards that one (P§7).
+            snapshot: Vec::new(),
             heavy: None,
         });
         return Ok(());
     }
-    relay_and_report(screen, app, state, &invocation, None)
+    let out = relay_one(screen, app, &invocation, None)?;
+    report(state, &invocation, &out);
+    refresh(state)
 }
 
-/// Run the write and put whatever came back on the status line (P§4, P§7).
-fn relay_and_report(
+/// `D` / `X` — every item at the current node, as *n* single relays under one
+/// acknowledgement (P§7).
+///
+/// The set is the view's own rows, so the action reaches exactly what is on screen
+/// (filter included) rather than a second, differently-derived list. Each item gets its
+/// own `--dry-run`, and therefore its own plan token: an item that *shifted* underneath
+/// is refused at commit rather than acted on stale (§7.3).
+fn begin_scoped(
     screen: &mut Screen,
     app: &mut impl App,
     state: &mut State,
+    action: Action,
+) -> anyhow::Result<()> {
+    let Some(single) = action.escalates_from() else {
+        return Ok(());
+    };
+    let targets = row_targets(state);
+    if targets.is_empty() {
+        state.status = Status::Notice("nothing here to act on".into());
+        return Ok(());
+    }
+
+    let mut pending = Vec::new();
+    for (key, target) in targets {
+        let Some(invocation) = app.on_action(single, &target) else {
+            // One item the action does not apply to is not a reason to refuse the rest,
+            // but it *is* a reason not to claim the set is what it looked like.
+            state.status = Status::Notice(format!("{} does not apply here", action.label()));
+            return Ok(());
+        };
+        pending.push(compute(screen, app, key, invocation)?);
+    }
+
+    let snapshot: Vec<String> = pending.iter().map(|p| p.key.clone()).collect();
+    let count = pending.len();
+    state.overlays.push(Overlay::Confirm {
+        action,
+        pending,
+        snapshot,
+        // Remove-all is irreversible and keeps no undo (§18), so it takes the heaviest
+        // friction: the count named and an explicit, distinct key (P§5).
+        heavy: action.is_heavy().then_some(count),
+    });
+    Ok(())
+}
+
+/// The current view's rows as targets, keyed for the membership re-scan.
+///
+/// `None` from `rows` means a draw-view, which has no set — the scoped action is simply
+/// unavailable there (P§7).
+fn row_targets(state: &mut State) -> Vec<(String, Target)> {
+    let Some(node) = state.rail.selected() else {
+        return Vec::new();
+    };
+    let filter = state.filter.clone();
+    let Some(rows) = state.views[state.active].rows(&node) else {
+        return Vec::new();
+    };
+    filtered(&rows, &filter)
+        .into_iter()
+        .map(|row| (row_key(&row.target), row.target))
+        .collect()
+}
+
+/// A record's identity within the set. `Target::Node` has none — it names no record —
+/// which is why only row targets can join a scoped set.
+fn row_key(target: &Target) -> String {
+    match target {
+        Target::Row(record) => format!("{}:{}", record.home.as_str(), record.key),
+        Target::Node { node, .. } => node.as_str().to_owned(),
+    }
+}
+
+/// Run one item's `--dry-run` and keep what it computed (P§7).
+fn compute(
+    screen: &mut Screen,
+    app: &mut impl App,
+    key: String,
+    invocation: Invocation,
+) -> anyhow::Result<Pending> {
+    let dry = execute(screen, app, &invocation.dry_run())?;
+    let value = dry.json();
+    let token = value
+        .as_ref()
+        .and_then(|v| v["token"].as_str().map(str::to_owned));
+    let change = value
+        .as_ref()
+        .map_or_else(|| dry.stdout.clone(), |v| pretty(&v["change"]));
+    Ok(Pending {
+        key,
+        invocation,
+        token,
+        change,
+    })
+}
+
+/// Run one write.
+fn relay_one(
+    screen: &mut Screen,
+    app: &mut impl App,
     invocation: &Invocation,
     token: Option<&str>,
-) -> anyhow::Result<()> {
-    let committed = invocation.committed(token);
-    let out = execute(screen, app, &committed)?;
+) -> anyhow::Result<Relayed> {
+    execute(screen, app, &invocation.committed(token))
+}
+
+/// Put whatever came back on the status line (P§4).
+fn report(state: &mut State, invocation: &Invocation, out: &Relayed) {
     if out.ok() {
         state.status = Status::Notice(invocation.display());
     } else {
         state.status = Status::Error(out.message());
     }
-    // A relay's return is a refresh event (P§6). The view re-folds on the next draw;
-    // nothing is cached back (I1).
-    refresh(state)
 }
 
 /// Run one invocation, suspending the screen around it.
@@ -847,11 +966,59 @@ fn submit(screen: &mut Screen, app: &mut impl App, state: &mut State) -> anyhow:
             Ok(())
         }
         Overlay::Confirm {
-            invocation, token, ..
-        } => relay_and_report(screen, app, state, &invocation, token.as_deref()),
+            action,
+            pending,
+            snapshot,
+            ..
+        } => commit(screen, app, state, action, &pending, &snapshot),
         Overlay::Line { prompt, buffer, .. } => submit_line(screen, app, state, prompt, buffer),
         Overlay::Title | Overlay::Help => Ok(()),
     }
+}
+
+/// Commit an acknowledged set (P§7).
+///
+/// **The membership is re-scanned first.** A per-item plan token catches an item that
+/// *shifted* underneath, but it cannot catch one that was *added* — a hook appending a
+/// task while the overlay sat open would otherwise be swept into a "remove all" the
+/// hand never saw. So the set is derived again and compared against the snapshot the
+/// overlay was opened over; a difference re-prompts rather than commits.
+fn commit(
+    screen: &mut Screen,
+    app: &mut impl App,
+    state: &mut State,
+    action: Action,
+    pending: &[Pending],
+    snapshot: &[String],
+) -> anyhow::Result<()> {
+    if !snapshot.is_empty() {
+        let now: Vec<String> = row_targets(state).into_iter().map(|(key, _)| key).collect();
+        if now != snapshot {
+            state.status =
+                Status::Error("the set changed underneath — look again before committing".into());
+            return begin_scoped(screen, app, state, action);
+        }
+    }
+
+    // *n* single relays, each carrying its own plan token. The first failure stops the
+    // run and says why: a bulk action that half-applied while reporting success would
+    // be worse than one that stopped.
+    for (done, item) in pending.iter().enumerate() {
+        let out = relay_one(screen, app, &item.invocation, item.token.as_deref())?;
+        if !out.ok() {
+            state.status = Status::Error(format!(
+                "{} — after {done} of {}",
+                out.message(),
+                pending.len()
+            ));
+            return refresh(state);
+        }
+    }
+    state.status = match pending.len() {
+        1 => Status::Notice(pending[0].invocation.display()),
+        n => Status::Notice(format!("{} — {n} records", action.label())),
+    };
+    refresh(state)
 }
 
 fn submit_line(

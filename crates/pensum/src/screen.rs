@@ -112,10 +112,10 @@ impl App for PensumApp {
                 "pen",
                 ["move", "-H", home.as_str(), key, "--to"],
             )),
-            // `D`/`X` are offered but not yet built as one-shot node verbs: Porticus
-            // would need n relays under one acknowledgement (P§7), and a core has no
-            // bulk verb to give it (§18 — no thirteenth verb). Left unapplied rather
-            // than faked, so the status line says so.
+            // `D` and `X` need no mapping of their own: Porticus enumerates the view's
+            // rows and asks for the *single-row* action per item, which is exactly what
+            // P§7 means by "n single relays under one acknowledgement" — and why a core
+            // grows no bulk verb for them (§18, no thirteenth verb).
             _ => None,
         }
     }

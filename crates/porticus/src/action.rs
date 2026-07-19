@@ -62,6 +62,30 @@ impl Action {
         }
     }
 
+    /// The focused-row action a scoped one escalates from (P§5).
+    ///
+    /// This mapping is why `D` and `X` need no verb of their own. A scoped action is
+    /// *n single relays* (P§7), so Porticus enumerates the view's rows and asks the app
+    /// for **this** action per item — the same one `d` or `x` would have built. A core
+    /// therefore grows no bulk verb, which is what §18 means by no thirteenth verb.
+    #[must_use]
+    pub fn escalates_from(self) -> Option<Action> {
+        match self {
+            Action::DoneAll => Some(Action::Done),
+            Action::RemoveAll => Some(Action::Remove),
+            _ => None,
+        }
+    }
+
+    /// Whether this action demands the heavier, distinct keystroke (P§5).
+    ///
+    /// Remove-all alone: it is irreversible, §18 keeps no undo, and the count named
+    /// beside an explicit key is the only friction left to give it.
+    #[must_use]
+    pub fn is_heavy(self) -> bool {
+        self == Action::RemoveAll
+    }
+
     /// The label Help shows (P§4), generated from the live binding so it cannot drift.
     #[must_use]
     pub fn label(self) -> &'static str {

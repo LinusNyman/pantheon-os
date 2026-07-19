@@ -185,3 +185,44 @@ fn a_modified_key_is_not_its_bare_key() {
         "a shifted `D` must still reach Action::DoneAll (P§5)"
     );
 }
+
+/// A scoped action escalates from a focused-row one (P§5, P§7).
+///
+/// This is why `D` and `X` need no verb of their own: Porticus enumerates the view's
+/// rows and asks the app for the *single-row* action per item, so a scoped write is
+/// *n single relays under one acknowledgement* and a core grows no bulk verb (§18 —
+/// no thirteenth verb).
+#[test]
+fn a_scoped_action_escalates_from_a_row_action() {
+    assert_eq!(Action::DoneAll.escalates_from(), Some(Action::Done));
+    assert_eq!(Action::RemoveAll.escalates_from(), Some(Action::Remove));
+    // A focused-row action escalates from nothing — it is already the leaf.
+    for action in [Action::Done, Action::Remove, Action::Edit, Action::Add] {
+        assert_eq!(action.escalates_from(), None);
+    }
+}
+
+/// Remove-all alone takes the heavier keystroke (P§5).
+///
+/// Verified against the real binary too: `X` followed by `y` leaves every record in
+/// place, while `X` followed by `X` commits. A stray `y` must never be enough for the
+/// one action §18 keeps no undo for.
+#[test]
+fn only_remove_all_is_heavy() {
+    assert!(Action::RemoveAll.is_heavy());
+    for action in [
+        Action::DoneAll,
+        Action::Remove,
+        Action::Done,
+        Action::Edit,
+        Action::Rename,
+        Action::Move,
+        Action::Add,
+        Action::QuickAdd,
+    ] {
+        assert!(
+            !action.is_heavy(),
+            "{action:?} should not demand the heavy key"
+        );
+    }
+}
