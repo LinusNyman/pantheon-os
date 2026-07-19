@@ -1,0 +1,7 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&deleted)
+---
+{
+  "deleted": "the_studio"
+}

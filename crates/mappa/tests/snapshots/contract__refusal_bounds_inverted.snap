@@ -1,0 +1,10 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "bounds put north below south (5 < 10): an extent runs southwest to northeast (§8.2)"
+  }
+}

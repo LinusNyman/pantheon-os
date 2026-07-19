@@ -1,0 +1,21 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&rekinded)
+---
+{
+  "core": "mappa",
+  "data": {
+    "bounds": {
+      "east": 18.11,
+      "north": 59.32,
+      "south": 59.3,
+      "west": 18.03
+    },
+    "note": "the island south",
+    "timezone": "Europe/Stockholm"
+  },
+  "home": "clu",
+  "kind": "region",
+  "refs": [],
+  "slug": "sodermalm"
+}

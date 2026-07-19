@@ -1,0 +1,14 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&applied)
+---
+{
+  "core": "mappa",
+  "data": {
+    "address": "Frejgatan 1"
+  },
+  "home": "clu",
+  "kind": "location",
+  "refs": [],
+  "slug": "kafe_esaias"
+}

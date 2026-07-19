@@ -1,0 +1,10 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "mappa:the_mill already names a record at clu — renaming onto it would make the two indistinguishable, and there is no history to tell them apart again (§7.2, §18)"
+  }
+}

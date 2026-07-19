@@ -1,0 +1,24 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&renamed)
+---
+{
+  "cascade": [
+    {
+      "path": "c_contextus/c_l_locus/cl_h_habitat/clh__/clh__location__the_yard.json",
+      "refs": 1
+    }
+  ],
+  "record": {
+    "core": "mappa",
+    "data": {},
+    "home": "clh",
+    "kind": "location",
+    "refs": [],
+    "slug": "the_mill"
+  },
+  "renamed": {
+    "from": "the_milll",
+    "to": "the_mill"
+  }
+}

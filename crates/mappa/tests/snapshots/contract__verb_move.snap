@@ -1,0 +1,18 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&moved)
+---
+{
+  "moved": {
+    "from": "clh",
+    "to": "clu"
+  },
+  "record": {
+    "core": "mappa",
+    "data": {},
+    "home": "clu",
+    "kind": "location",
+    "refs": [],
+    "slug": "the_studio"
+  }
+}

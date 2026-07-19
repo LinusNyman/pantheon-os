@@ -1,0 +1,14 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&findings)
+---
+{
+  "findings": [
+    {
+      "code": "duplicate_slug",
+      "msg": "mappa:the_studio also names a record at clh — a ref meeting both lists them rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
+      "path": "c_contextus/c_l_locus/cl_h_habitat/clh__/clh__location__the_studio.json",
+      "severity": "warning"
+    }
+  ]
+}

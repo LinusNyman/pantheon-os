@@ -1,0 +1,14 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&got)
+---
+{
+  "core": "mappa",
+  "data": {
+    "note": "a house of its own"
+  },
+  "home": "clh_old_mill",
+  "kind": "location",
+  "refs": [],
+  "slug": "old_mill"
+}

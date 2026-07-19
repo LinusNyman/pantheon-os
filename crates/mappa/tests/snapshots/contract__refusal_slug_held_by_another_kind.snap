@@ -1,0 +1,10 @@
+---
+source: crates/mappa/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "clu already holds \"sodermalm\" as a region: two kinds spell two files but only one `mappa:sodermalm`, so the ref would be ambiguous (§5.4, §18)"
+  }
+}
