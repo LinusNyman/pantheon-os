@@ -12,10 +12,10 @@ aus ls nosuch
   # a scope naming no node
   => exit 4: no node with code "nosuch"
 aus run
-  # applying a proposal is not built yet
-  => exit 1: `aus run` is not implemented yet — a rule already runs (`aus plan`), but applying what it proposes needs the capability check that stands between a rule and your records (§9.5)
+  # rules that cannot be executed, applying
+  => exit 1: 4 rule(s)
 aus plan
-  # rules that cannot be executed
+  # rules that cannot be executed, planning
   => exit 1: 4 rule(s)
 aus run (PANTHEON_RULE=1)
   # a rule may not re-enter the engine

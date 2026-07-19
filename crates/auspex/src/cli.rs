@@ -20,6 +20,8 @@ use pantheon::code::Code;
 use pantheon::contract::{self, Response};
 use pantheon::{Error, Result, resolve_root};
 
+use crate::grant::{Grant, Proposal};
+
 const ABOUT: &str = "Auspex — the rules engine: reads the tree for signs and proposes \
                      intentions (§9).";
 
@@ -114,9 +116,9 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Ls { scope } => cmd_ls(cli, scope.as_deref()),
         Cmd::Plan { scope } => cmd_plan(cli, scope.as_deref()),
         Cmd::Test { rule } => cmd_test(cli, rule),
+        Cmd::Run { scope, trigger } => cmd_run(cli, scope.as_deref(), trigger.as_deref()),
         Cmd::Help => Ok(Response::Json(help_json())),
         Cmd::Version => Ok(Response::Json(version_json())),
-        Cmd::Run { .. } => Err(not_implemented(cmd)),
     }
 }
 
@@ -166,21 +168,6 @@ fn refused_under_rule(verb: &str) -> Error {
         "`{verb}` re-enters the engine and PANTHEON_RULE=1 refuses it: a rule reads the \
          tree through the core CLIs, never by calling `aus` — an `aus plan` inside a \
          rule would re-evaluate that rule without bound (§9.3)"
-    ))
-}
-
-/// `run` alone, now that `plan` and `test` evaluate rules.
-///
-/// What `run` still lacks is not the running — that is `plan`'s, and shared — but the
-/// *applying*: the capability check, the dedupe, and the writes themselves (§9.5).
-/// Declared rather than hidden, so `--help` tells the truth about what `aus` will be
-/// and the §9.3 refusal has something to refuse.
-fn not_implemented(cmd: &Cmd) -> Error {
-    Error::runtime(format!(
-        "`aus {}` is not implemented yet — a rule already runs (`aus plan`), but \
-         applying what it proposes needs the capability check that stands between a \
-         rule and your records (§9.5)",
-        verb_of(cmd)
     ))
 }
 
@@ -258,7 +245,7 @@ fn cmd_plan(cli: &Cli, scope: Option<&str>) -> Result<Response> {
     let mut failed = false;
     let mut rows = Vec::with_capacity(rules.len());
     for rule in &rules {
-        let context = context_for(rule, &now, "manual");
+        let context = context_for(rule, &now, "manual", None);
         let outcome = crate::rule::evaluate(
             &rule.path,
             &root,
@@ -292,7 +279,7 @@ fn cmd_test(cli: &Cli, rule_name: &str) -> Result<Response> {
     // hand asking to run the rule, not asking to hand it nothing. Handing a rule an
     // empty stdin would make it fail at parsing a context it was never given.
     let context = if fixture.trim().is_empty() {
-        context_for(rule, &today()?, "manual").to_string()
+        context_for(rule, &today()?, "manual", None).to_string()
     } else {
         fixture
     };
@@ -325,19 +312,232 @@ fn one_named<'a>(rules: &'a [crate::Rule], name: &str) -> Result<&'a crate::Rule
     }
 }
 
+// ── applying proposals (§9.5) ────────────────────────────────────────────────
+
+/// The write that woke a run: a core and a home (§9.3).
+struct Trigger {
+    core: String,
+    home: String,
+}
+
+/// Evaluate the rules in scope and **apply** what they propose (§9.4, §9.6).
+///
+/// The one verb that filters by `watch=`: a `--trigger core@home` names the write
+/// that woke this run, and a rule evaluates only if it watches that core (§9.3). A
+/// hand's bare `aus run` names no trigger, so every rule in scope evaluates — and a
+/// TUI-open hook is a bare run too (§9.4), which is why a run with no trigger honestly
+/// signs `manual`: it cannot tell the two apart, and the spec makes them the same.
+fn cmd_run(cli: &Cli, scope: Option<&str>, trigger: Option<&str>) -> Result<Response> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let at = scope.map(Code::parse).transpose()?;
+    let rules = crate::discover(&root, at.as_ref())?;
+    let now = today()?;
+    let trigger = trigger.map(parse_trigger).transpose()?;
+    let sign = if trigger.is_some() { "hook" } else { "manual" };
+    // Learned once, not per proposal: the name→short map a proposal's `core` needs to
+    // become a spawnable binary (§5.0). A core absent here is one a proposal cannot
+    // reach, reported per proposal.
+    let registry = pantheon::CoreRegistry::discover();
+
+    let mut failed = false;
+    let mut rows = Vec::new();
+    for rule in &rules {
+        if !watched(rule, trigger.as_ref()) {
+            continue;
+        }
+        let context = context_for(rule, &now, sign, trigger.as_ref());
+        let outcome = crate::rule::evaluate(
+            &rule.path,
+            &root,
+            &context.to_string(),
+            crate::rule::DEADLINE,
+        );
+        rows.push(applied_row(
+            rule,
+            outcome,
+            &root,
+            &now,
+            &registry,
+            &mut failed,
+        ));
+    }
+    Ok(outcome_response(rows, failed))
+}
+
+/// Whether a rule evaluates for this wake (§9.3).
+///
+/// With no trigger, every rule in scope does — a wake that is not a single write has
+/// nothing for `watch=` to filter against. With one, a rule evaluates iff its `watch`
+/// set names the trigger's core, an empty `watch` meaning any.
+fn watched(rule: &crate::Rule, trigger: Option<&Trigger>) -> bool {
+    match trigger {
+        None => true,
+        Some(trigger) => {
+            rule.header.watch.is_empty() || rule.header.watch.iter().any(|c| c == &trigger.core)
+        }
+    }
+}
+
+fn parse_trigger(raw: &str) -> Result<Trigger> {
+    let (core, home) = raw
+        .split_once('@')
+        .ok_or_else(|| Error::usage(format!("--trigger is `core@home`, got {raw:?} (§9.3)")))?;
+    if core.is_empty() || home.is_empty() {
+        return Err(Error::usage(format!(
+            "--trigger is `core@home`, got {raw:?} (§9.3)"
+        )));
+    }
+    Ok(Trigger {
+        core: core.to_string(),
+        home: home.to_string(),
+    })
+}
+
+/// One rule's whole outcome — evaluated, checked against its grant, deduped, applied.
+///
+/// The batch is the unit of trust. A malformed proposal, a grant it does not parse
+/// against, an unauthorized write, or two proposals colliding on one key each reject
+/// **the entire rule's batch** (§9.5): a rule that got one write wrong is not to be
+/// trusted with the rest. Only once the whole batch passes does anything apply.
+fn applied_row(
+    rule: &crate::Rule,
+    outcome: crate::rule::Outcome,
+    root: &std::path::Path,
+    now: &str,
+    registry: &pantheon::CoreRegistry,
+    failed: &mut bool,
+) -> Value {
+    let mut row = json!({ "rule": rule.name, "scope": rule.scope.as_str() });
+
+    let writes = match outcome {
+        crate::rule::Outcome::Failed(why) => {
+            *failed = true;
+            row["error"] = json!(why);
+            return row;
+        }
+        crate::rule::Outcome::Proposed(writes) => writes,
+    };
+
+    // A proposal that is not a well-formed core call is a rule bug, and rejects the
+    // batch — Auspex will not apply a half-understood set (§9.3).
+    let proposals: std::result::Result<Vec<Proposal>, _> = writes
+        .iter()
+        .map(|v| serde_json::from_value::<Proposal>(v.clone()))
+        .collect();
+    let Ok(proposals) = proposals else {
+        *failed = true;
+        row["rejected"] = json!("a proposal is not a `core`/`verb`/`home` call (§9.3)");
+        return row;
+    };
+
+    // The grant is the whole guard (§9.5). A grant Auspex cannot parse fails closed —
+    // it rejects the batch rather than reading as an empty (deny-all) grant.
+    let grant = match Grant::parse(&rule.header.writes) {
+        Ok(grant) => grant,
+        Err(why) => {
+            *failed = true;
+            row["rejected"] = json!(format!("its grant will not parse: {why}"));
+            return row;
+        }
+    };
+
+    // Step 2 — capability check. One unauthorized proposal rejects the batch.
+    for proposal in &proposals {
+        if let Err(why) = grant.authorize(proposal) {
+            *failed = true;
+            row["rejected"] = json!(why);
+            return row;
+        }
+    }
+
+    // Step 4 — two proposals on one key is a rule error, not an upsert (§9.5).
+    if let Some(collision) = one_key_twice(&proposals, now) {
+        *failed = true;
+        row["rejected"] = json!(collision);
+        return row;
+    }
+
+    // Step 5 — apply in order, with `-y` and `PANTHEON_NO_HOOKS=1` inside `apply`.
+    let mut applied = Vec::new();
+    let mut errors = Vec::new();
+    for proposal in &proposals {
+        let Some(short) = short_of(registry, &proposal.core) else {
+            errors.push(format!(
+                "{}: no core named {:?} is installed (§5.0)",
+                proposal.label(),
+                proposal.core
+            ));
+            continue;
+        };
+        match crate::apply::apply(proposal, short, root, now) {
+            Ok(()) => applied.push(proposal.label()),
+            Err(why) => errors.push(why),
+        }
+    }
+    row["applied"] = json!(applied);
+    if !errors.is_empty() {
+        *failed = true;
+        row["errors"] = json!(errors);
+    }
+    row
+}
+
+/// The binary short for a core's name, from what discovery learned (§5.0).
+fn short_of<'a>(registry: &'a pantheon::CoreRegistry, core: &str) -> Option<&'a str> {
+    registry
+        .cores()
+        .iter()
+        .find(|c| c.name == core)
+        .map(|c| c.short.as_str())
+}
+
+/// The first key two proposals in a batch would both land on, if any (§9.5 step 4).
+///
+/// A record's identity is its `core@home/series` plus the key Auspex derives — an
+/// explicit `key`, or the slug a `name` normalizes to (§5.1), or `now` for a date-keyed
+/// line. Two proposals sharing that would upsert one over the other with nothing to
+/// show for the first, so the batch is refused instead.
+fn one_key_twice(proposals: &[Proposal], now: &str) -> Option<String> {
+    let mut seen = std::collections::HashSet::new();
+    for proposal in proposals {
+        let id = proposal
+            .key
+            .clone()
+            .or_else(|| proposal.name.as_deref().and_then(pantheon::normalize))
+            .unwrap_or_else(|| now.to_string());
+        let series = proposal
+            .series
+            .as_deref()
+            .map(|s| format!("/{s}"))
+            .unwrap_or_default();
+        let slot = format!("{}@{}{series}:{id}", proposal.core, proposal.home);
+        if !seen.insert(slot.clone()) {
+            return Some(format!(
+                "two proposals land on {slot} — one would discard the other, so the \
+                 batch is a rule error (§9.5)"
+            ));
+        }
+    }
+    None
+}
+
 /// The context handed to a rule on stdin (§9.3).
 ///
-/// No `trigger` key: this PR's two verbs are both triggerless, and §9.3 says a trigger
-/// is **absent** where no single write authored the wake rather than being present and
-/// empty — a wake that is not a write stays silent instead of naming one that never
-/// happened.
-fn context_for(rule: &crate::Rule, now: &str, sign: &str) -> Value {
-    json!({
+/// A `trigger` rides along only where one write authored the wake — §9.3 says it is
+/// **absent** otherwise rather than present and empty, a wake that is not a write
+/// staying silent instead of naming one that never happened. `plan` and `test` pass
+/// `None`; only a triggered `run` passes `Some`.
+fn context_for(rule: &crate::Rule, now: &str, sign: &str, trigger: Option<&Trigger>) -> Value {
+    let mut ctx = json!({
         "sign": sign,
         "rule": rule.name,
         "scope": rule.scope.as_str(),
         "now": now,
-    })
+    });
+    if let Some(trigger) = trigger {
+        ctx["trigger"] = json!({ "core": trigger.core, "home": trigger.home });
+    }
+    ctx
 }
 
 /// Today, as the `YYMMDD` a rule keys by.

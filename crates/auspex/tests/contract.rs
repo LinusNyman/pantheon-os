@@ -304,12 +304,14 @@ fn exit_codes() {
         ("every rule in the tree", &["ls"], &[]),
         ("a scope that is a real node", &["ls", "csa"], &[]),
         ("a scope naming no node", &["ls", "nosuch"], &[]),
-        ("applying a proposal is not built yet", &["run"], &[]),
         // This file's rules are written by hand and never chmod'd, which is exactly
         // the case §9.1 leaves to the author: a rule is executed directly, so one
         // without its exec bit cannot run. Every rule failing is still exit 1, not a
-        // crash — "skipped and reported; others are unaffected" (§9.5).
-        ("rules that cannot be executed", &["plan"], &[]),
+        // crash — "skipped and reported; others are unaffected" (§9.5). `run` and
+        // `plan` meet it the same way, both evaluating before either could apply or
+        // print.
+        ("rules that cannot be executed, applying", &["run"], &[]),
+        ("rules that cannot be executed, planning", &["plan"], &[]),
         ("a rule may not re-enter the engine", &["run"], &rule),
         ("but it may read", &["ls"], &rule),
     ];

@@ -31,7 +31,9 @@ use pantheon::classify::{self, FileClass};
 use pantheon::code::Code;
 use pantheon::tree::{Node, TreeRoot, build_tree};
 
+mod apply;
 mod cli;
+mod grant;
 mod rule;
 // The screen rides the `tui` feature; drop it and the rules browser is a CLI (§14).
 #[cfg(feature = "tui")]
