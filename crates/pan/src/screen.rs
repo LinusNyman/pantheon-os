@@ -31,21 +31,31 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
 
-use crate::{Cli, RunOk};
+use crate::cli::{Cli, RunOk};
 
 /// Open `pan`'s screen.
 ///
 /// # Errors
 /// If the tree cannot be walked or the terminal cannot be taken.
 pub fn open(root: &std::path::Path) -> anyhow::Result<()> {
-    let mut app = PanApp {
-        root: root.to_path_buf(),
-    };
-    porticus::run(&mut app, root)
+    porticus::run(&mut PanApp::new(root), root)
 }
 
-struct PanApp {
+/// `pan`'s screen, as an `App` (P§2).
+///
+/// Public so a test can build the **real** one and drive it — the same object `open`
+/// runs, with the same two tabs and the same in-process relay.
+pub struct PanApp {
     root: std::path::PathBuf,
+}
+
+impl PanApp {
+    #[must_use]
+    pub fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+        }
+    }
 }
 
 impl App for PanApp {
@@ -103,7 +113,7 @@ impl App for PanApp {
 fn in_process(invocation: &Invocation) -> Relayed {
     let argv =
         std::iter::once(OsString::from("pan")).chain(invocation.args.iter().map(OsString::from));
-    let cli = match Cli::try_parse_from(crate::with_lookup_verb(argv)) {
+    let cli = match Cli::try_parse_from(crate::cli::with_lookup_verb(argv)) {
         Ok(cli) => cli,
         Err(e) => {
             return Relayed {
@@ -113,7 +123,7 @@ fn in_process(invocation: &Invocation) -> Relayed {
             };
         }
     };
-    match crate::run(&cli) {
+    match crate::cli::run(&cli) {
         Ok(RunOk::Json(value)) => Relayed {
             code: 0,
             stdout: value.to_string(),

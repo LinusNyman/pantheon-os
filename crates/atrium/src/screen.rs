@@ -9,28 +9,36 @@ use porticus::views::Agenda;
 use porticus::{Action, App, Ident, Invocation, RecordRef, Target, View, Writer};
 use serde_json::Value;
 
+use crate::cli::{ALBUM, PENSUM, TABELLA};
 use crate::mosaic::Mosaic;
-use crate::{ALBUM, PENSUM, TABELLA};
 
 /// Open the mosaic.
 ///
 /// # Errors
 /// If the tree cannot be walked or the terminal cannot be taken.
 pub fn open(root: &std::path::Path) -> anyhow::Result<()> {
-    porticus::run(
-        &mut Atrium {
-            root: root.to_path_buf(),
-        },
-        root,
-    )
+    porticus::run(&mut Atrium::new(root), root)
 }
 
 /// The root the screen is drawing.
 ///
 /// Held rather than left to `$PANTHEON_ROOT`: a lens opened with `-C` must fold the
 /// tree it was pointed at, not the caller's ambient one (§6.2, §7.3).
-struct Atrium {
+pub struct Atrium {
     root: std::path::PathBuf,
+}
+
+impl Atrium {
+    /// Public so a test can build the **real** lens and drive it — the same object
+    /// `open` runs, with the same tiles and the same **subprocess** relay, so a driven
+    /// write crosses the JSON boundary exactly as it does in a hand's terminal
+    /// (I4, I5, §12).
+    #[must_use]
+    pub fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+        }
+    }
 }
 
 impl App for Atrium {
