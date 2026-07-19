@@ -738,3 +738,68 @@ fn every_relay_carries_the_root_it_is_drawing() {
         "and still carry -y (§7.3): {relayed}"
     );
 }
+
+/// **The dim asks `any_at`; the badge asks `count_at`** (P§6).
+///
+/// The split is the point: an instrument whose count is costly overrides `any_at` to
+/// answer the dim without a full fold, so the badge stays exact where it shows and the
+/// dim stays cheap everywhere. The rail had been asking `count_at` for both, which made
+/// that override unreachable — a declared escape hatch that nothing could reach.
+///
+/// This asserts the cheap question is actually asked, and that `count_at` is spared
+/// where `any_at` already said no.
+#[test]
+fn the_dim_asks_any_and_the_badge_asks_count() {
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Asked {
+        any: Vec<String>,
+        count: Vec<String>,
+    }
+
+    struct Counting(Arc<Mutex<Asked>>);
+    impl App for Counting {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(TreeFile::of(|_: &Code| Vec::new()))]
+        }
+        fn count_at(&mut self, node: &Code) -> usize {
+            self.0.lock().unwrap().count.push(node.as_str().to_owned());
+            7
+        }
+        fn any_at(&mut self, node: &Code) -> bool {
+            self.0.lock().unwrap().any.push(node.as_str().to_owned());
+            // Only `ac` holds anything — so only `ac` may be counted.
+            node.as_str() == "ac"
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+
+    let root = fresh_root();
+    let asked = Arc::new(Mutex::new(Asked::default()));
+    let text = porticus::as_text(
+        &porticus::render_once(&mut Counting(Arc::clone(&asked)), &root, 72, 12).unwrap(),
+    );
+
+    let asked = asked.lock().unwrap();
+    assert!(
+        asked.any.iter().any(|c| c == "a"),
+        "every visible node is asked the cheap question: {:?}",
+        asked.any
+    );
+    assert!(
+        asked.count.iter().all(|c| c == "ac"),
+        "`count_at` must be spared where `any_at` said no: {:?}",
+        asked.count
+    );
+    // And the badge that did show carries the exact count.
+    assert!(text.contains("ac cura  7"), "{text}");
+}
