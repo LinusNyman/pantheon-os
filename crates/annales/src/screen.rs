@@ -6,7 +6,7 @@
 
 use std::ffi::OsString;
 
-use annales::Annales;
+use crate::Annales;
 use clap::Parser;
 use pantheon::{Code, Response, Store};
 use porticus::action::{Invocation, Relayed};
@@ -14,21 +14,32 @@ use porticus::view::Row;
 use porticus::views::{Chart, Insights, Panel, TreeFile};
 use porticus::{Action, App, Ident, RecordRef, Target, View, Writer};
 
-use crate::{Cli, with_default_verb};
+use crate::cli::{Cli, with_default_verb};
 
 /// Open Annales' screen.
 ///
 /// # Errors
 /// If the tree cannot be walked or the terminal cannot be taken.
 pub fn open(root: &std::path::Path) -> anyhow::Result<()> {
-    let mut app = AnnalesApp {
-        root: root.to_path_buf(),
-    };
-    porticus::run(&mut app, root)
+    porticus::run(&mut AnnalesApp::new(root), root)
 }
 
-struct AnnalesApp {
+/// Annales's screen, as an `App` (P§2).
+///
+/// Public so a test can build the **real** one and drive it — the same object `open`
+/// runs, with the same lineup and the same in-process relay. It carries a root and
+/// nothing else: everything drawn is folded from readings each frame (I1).
+pub struct AnnalesApp {
     root: std::path::PathBuf,
+}
+
+impl AnnalesApp {
+    #[must_use]
+    pub fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+        }
+    }
 }
 
 impl App for AnnalesApp {
@@ -98,7 +109,7 @@ fn in_process(invocation: &Invocation) -> Relayed {
             };
         }
     };
-    match crate::run(&cli, true) {
+    match crate::cli::run(&cli, true) {
         Ok(Response::Json(value)) => Relayed {
             code: 0,
             stdout: value.to_string(),

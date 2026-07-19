@@ -23,6 +23,26 @@ use serde::{Deserialize, Serialize};
 
 use pantheon::{Core, Error, Result, Shape};
 
+// The CLI and the screen are the lib's, and `main.rs` is the ~30-line clap shell §14
+// asks for. They live here rather than in the bin for one reason: an integration test
+// links the *lib*, so a screen in the bin is a screen no test can reach — and step 6
+// found three defects that only driving a screen caught (P§3, §14).
+//
+// **What that must not cost is I4.** A core's CLI JSON is the only thing that crosses a
+// component boundary, and a verb reachable as a Rust function would be a second door
+// into this core. So the verbs stay `pub(crate)`: the only things public here are
+// [`run_cli`] — the whole CLI, entered exactly as the binary enters it — and
+// [`AlbumApp`], which relays through that same CLI. Neither is a way to call a verb
+// directly, and nothing else is exposed.
+mod cli;
+// The screen rides the `tui` feature; drop it and the core is headless (§14).
+#[cfg(feature = "tui")]
+mod screen;
+
+pub use cli::run_cli;
+#[cfg(feature = "tui")]
+pub use screen::AlbumApp;
+
 /// A period an agent is away (§8.1). Keys are `YYMMDD`, the same shape a series key
 /// wears (§5.4), and `to` is absent while the period is still open.
 ///

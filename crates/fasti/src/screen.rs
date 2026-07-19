@@ -11,8 +11,8 @@
 
 use std::ffi::OsString;
 
+use crate::{Fasti, FastiRecord};
 use clap::Parser;
-use fasti::{Fasti, FastiRecord};
 use pantheon::{Code, EntityRef, Response, SeriesRef, Store};
 use porticus::action::{Invocation, Relayed};
 use porticus::view::Row;
@@ -20,21 +20,32 @@ use porticus::views::Agenda;
 use porticus::views::{Card, CardSpan, Chart, Chip, EntityCard, Insights, Panel, TreeFile};
 use porticus::{Action, App, Ident, RecordRef, Target, View, Writer};
 
-use crate::{Cli, with_default_verb};
+use crate::cli::{Cli, with_default_verb};
 
 /// Open Fasti's screen.
 ///
 /// # Errors
 /// If the tree cannot be walked or the terminal cannot be taken.
 pub fn open(root: &std::path::Path) -> anyhow::Result<()> {
-    let mut app = FastiApp {
-        root: root.to_path_buf(),
-    };
-    porticus::run(&mut app, root)
+    porticus::run(&mut FastiApp::new(root), root)
 }
 
-struct FastiApp {
+/// Fasti's screen, as an `App` (P§2).
+///
+/// Public so a test can build the **real** one and drive it — the same object `open`
+/// runs, with the same lineup and the same in-process relay. It carries a root and
+/// nothing else: everything drawn is folded from readings each frame (I1).
+pub struct FastiApp {
     root: std::path::PathBuf,
+}
+
+impl FastiApp {
+    #[must_use]
+    pub fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+        }
+    }
 }
 
 impl App for FastiApp {
@@ -137,7 +148,7 @@ fn in_process(invocation: &Invocation) -> Relayed {
             };
         }
     };
-    match crate::run(&cli, true) {
+    match crate::cli::run(&cli, true) {
         Ok(Response::Json(value)) => Relayed {
             code: 0,
             stdout: value.to_string(),
@@ -170,7 +181,7 @@ fn store(root: &std::path::Path) -> Store<Fasti> {
 /// A file whose bytes disagree with its token is dropped rather than drawn wrong: a
 /// screen is not the place to report a parse failure, and the CLI verb over the same
 /// file says so plainly (exit `3`, §13).
-fn spans(root: &std::path::Path, at: Option<&Code>) -> Vec<(EntityRef, fasti::Span)> {
+fn spans(root: &std::path::Path, at: Option<&Code>) -> Vec<(EntityRef, crate::Span)> {
     store(root)
         .fold_entities(at, Some(Fasti::SPAN))
         .unwrap_or_default()

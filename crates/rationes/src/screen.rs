@@ -9,29 +9,40 @@
 
 use std::ffi::OsString;
 
+use crate::{Holding, Rationes, Record};
 use clap::Parser;
 use pantheon::{Code, EntityRef, PresentLine, Response, Store};
 use porticus::action::{Invocation, Relayed};
 use porticus::view::Row;
 use porticus::views::{Card, Chart, Chip, EntityCard, Insights, Panel, TreeFile};
 use porticus::{Action, App, Ident, RecordRef, Target, View, Writer};
-use rationes::{Holding, Rationes, Record};
 
-use crate::{Cli, with_default_verb};
+use crate::cli::{Cli, with_default_verb};
 
 /// Open Rationes' screen.
 ///
 /// # Errors
 /// If the tree cannot be walked or the terminal cannot be taken.
 pub fn open(root: &std::path::Path) -> anyhow::Result<()> {
-    let mut app = RationesApp {
-        root: root.to_path_buf(),
-    };
-    porticus::run(&mut app, root)
+    porticus::run(&mut RationesApp::new(root), root)
 }
 
-struct RationesApp {
+/// Rationes's screen, as an `App` (P§2).
+///
+/// Public so a test can build the **real** one and drive it — the same object `open`
+/// runs, with the same lineup and the same in-process relay. It carries a root and
+/// nothing else: everything drawn is folded from readings each frame (I1).
+pub struct RationesApp {
     root: std::path::PathBuf,
+}
+
+impl RationesApp {
+    #[must_use]
+    pub fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+        }
+    }
 }
 
 impl App for RationesApp {
@@ -124,7 +135,7 @@ fn in_process(invocation: &Invocation) -> Relayed {
             };
         }
     };
-    match crate::run(&cli, true) {
+    match crate::cli::run(&cli, true) {
         Ok(Response::Json(value)) => Relayed {
             code: 0,
             stdout: value.to_string(),
