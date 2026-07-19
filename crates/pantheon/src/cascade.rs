@@ -229,9 +229,12 @@ impl Cascade {
                 &self.to,
             )?;
         }
-        // One batch, one completion. This is where step 8's single, *triggerless*
-        // `aus run` fires — triggerless because a batch touching several cores and
+        // One batch, one completion. This is where the single, *triggerless* `aus
+        // run` is noted — triggerless because a batch touching several cores and
         // homes at once has no one write to name as the trigger (§5.4, §9.3–§9.4).
+        // Noted rather than fired, so a verb that rewrites a record *and* cascades
+        // its refs still wakes Auspex once, from `contract::dispatch`.
+        crate::hook::note_batch();
         Ok(())
     }
 }

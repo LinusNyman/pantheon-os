@@ -131,6 +131,38 @@ relays a nameless `add` with no field prompt; responsive top/bottom split and a 
 rail; passive overlays yielding to a nav key; header showing the node not the whole trail).
 Lenses and releases shift to 10 and 11.
 
+**Step 8's hook half landed first, and it is the spine's, not each core's.** §16 step 8 says the
+`aus`-not-on-`PATH` no-op "is exercised" through steps 1–7 — it was not: no core spawned anything,
+and `PANTHEON_NO_HOOKS` was read nowhere. It is real now, in `pantheon::hook`, and the shape is
+worth knowing before touching it. **The `Store` mutators *note* a write, `contract::dispatch`
+*fires* once at process end** — so a verb writing three lines wakes Auspex once, not three times,
+and no core crate carries a line of it (`Store` is generic over `Core`, so `C::NAME` is the trigger
+the spine forwards without naming a core, I5). Two consequences a later step must not trip on:
+
+- **Two notes that disagree collapse to a triggerless wake**, which is §9.3's own rule — a trigger
+  names a write, and a `move` between homes or a rename cascade (`Cascade::apply`, which *notes*
+  rather than fires, for exactly this reason) has no one write to name. Do not "fix" this into
+  naming the last writer.
+- **`pan` is not covered and does not need to be.** It hand-rolls its own tail instead of calling
+  `dispatch`, and holds no `Store`. When §10.1's node-level cascade lands, `pan`'s tail owes
+  `hook::wake_if_noted()` a call — nothing else will make it.
+
+A screen opening wakes bare and triggerless from `porticus::run`, one site for all nine
+instruments — and deliberately **not** from `porticus::drive`, so a driven screen in a test stays
+quiet. `pensum/tests/hook.rs` pins all of it against a fake `aus` on the child's `PATH`; it needs
+no `unsafe set_var` because the env is set on the child, not this process.
+
+Two further things the spawn needs, both easy to leave out and neither caught by a test:
+
+- **Nulled stdio and an un-awaited child are not detachment.** §13 names the mechanism —
+  `process_group(0)` on Unix, the `DETACHED_PROCESS` creation flag on Windows — and without it the
+  child stays in the caller's process group, so a `Ctrl-C` at the terminal can kill a rule
+  mid-write.
+- **`hook::suppress()` is how a process opts out of waking**, and Auspex calls it at startup.
+  Without it `aus`'s own rules browser spawns `aus run` on open, since `porticus::run` wakes for
+  every instrument. It is the twin of the `PANTHEON_NO_HOOKS` Auspex sets on the cores it spawns:
+  one says *not this process*, the other *not that child*, and neither substitutes for the other.
+
 ### What step 6 deliberately left
 
 Not oversights — decisions, each with the reason:

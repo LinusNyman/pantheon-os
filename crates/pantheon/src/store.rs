@@ -407,6 +407,7 @@ impl<C: Core> Store<C> {
             std::fs::create_dir_all(parent)?;
         }
         crate::lock::with_record_lock(&path, |_| Ok(Vec::new()))?;
+        crate::hook::note_write(C::NAME, home);
         Ok(SeriesRef {
             home: home.clone(),
             kind: kind.to_string(),
@@ -478,7 +479,9 @@ impl<C: Core> Store<C> {
                 out.push('\n');
             }
             Ok(out.into_bytes())
-        })
+        })?;
+        crate::hook::note_write(C::NAME, &sref.home);
+        Ok(())
     }
 
     /// Drop one keyed line (§7.2). Irreversible — §18 keeps no history.
@@ -510,6 +513,7 @@ impl<C: Core> Store<C> {
             Ok(out.into_bytes())
         })?;
         if found {
+            crate::hook::note_write(C::NAME, &sref.home);
             Ok(())
         } else {
             Err(Error::not_found(format!(
@@ -546,6 +550,10 @@ impl<C: Core> Store<C> {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&sref.path, &path)?;
+        // Both ends: a relocation that crosses homes has written at each, which is
+        // what collapses the wake to triggerless (§9.3).
+        crate::hook::note_write(C::NAME, &sref.home);
+        crate::hook::note_write(C::NAME, to_home);
         Ok(SeriesRef {
             home: to_home.clone(),
             kind: sref.kind.clone(),
@@ -671,6 +679,7 @@ impl<C: Core> Store<C> {
             Ok(out.into_bytes())
         })?;
         if found {
+            crate::hook::note_write(C::NAME, &sref.home);
             Ok(())
         } else {
             Err(Error::not_found(format!(
@@ -1002,6 +1011,7 @@ impl<C: Core> Store<C> {
             std::fs::create_dir_all(parent)?;
         }
         crate::lock::with_record_lock(&path, move |_| Ok(encoded))?;
+        crate::hook::note_write(C::NAME, &addr.home);
         Ok(EntityRef {
             home: addr.home.clone(),
             kind: addr.kind.clone(),
@@ -1014,7 +1024,10 @@ impl<C: Core> Store<C> {
     /// Delete an entity file (§7.2). Irreversible — §18 keeps no history.
     pub fn remove_entity(&self, eref: &EntityRef) -> Result<()> {
         match std::fs::remove_file(&eref.path) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                crate::hook::note_write(C::NAME, &eref.home);
+                Ok(())
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::not_found(format!(
                 "no entity {:?} at {} (§7.3)",
                 eref.slug,
@@ -1046,6 +1059,11 @@ impl<C: Core> Store<C> {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&eref.path, &path)?;
+        // Both ends, as in `relocate_series` — a `move` across homes has no one write
+        // to name (§9.3); a `rename` or `edit -k` in place notes the same home twice
+        // and still names it.
+        crate::hook::note_write(C::NAME, &eref.home);
+        crate::hook::note_write(C::NAME, &to.home);
         Ok(EntityRef {
             home: to.home.clone(),
             kind: to.kind.clone(),
@@ -1250,6 +1268,7 @@ impl<C: Core> Store<C> {
             std::fs::create_dir_all(parent)?;
         }
         crate::lock::with_record_lock(&path, move |_| Ok(encoded))?;
+        crate::hook::note_write(C::NAME, &addr.home);
         Ok(DocumentRef {
             home: addr.home.clone(),
             slug: addr.slug.clone(),
@@ -1261,7 +1280,10 @@ impl<C: Core> Store<C> {
     /// Delete a document (§7.2). Irreversible — §18 keeps no history.
     pub fn remove_document(&self, dref: &DocumentRef) -> Result<()> {
         match std::fs::remove_file(&dref.path) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                crate::hook::note_write(C::NAME, &dref.home);
+                Ok(())
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::not_found(format!(
                 "no document {:?} at {} (§7.3)",
                 dref.slug,
@@ -1292,6 +1314,9 @@ impl<C: Core> Store<C> {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::rename(&dref.path, &path)?;
+        // Both ends, as in the other two relocations (§9.3).
+        crate::hook::note_write(C::NAME, &dref.home);
+        crate::hook::note_write(C::NAME, &to.home);
         Ok(DocumentRef {
             home: to.home.clone(),
             slug: to.slug.clone(),
