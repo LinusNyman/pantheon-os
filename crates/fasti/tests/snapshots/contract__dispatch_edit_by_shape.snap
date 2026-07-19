@@ -1,0 +1,31 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: out
+---
+$ fas edit mvp --to 260901
+{
+  "core": "fasti",
+  "data": {
+    "from": "260101",
+    "to": "260901"
+  },
+  "home": "aof",
+  "kind": "span",
+  "refs": [],
+  "slug": "mvp"
+}
+
+$ fas edit 260719 'kickoff done'
+{
+  "core": "fasti",
+  "data": {
+    "values": [
+      "kickoff done"
+    ]
+  },
+  "home": "aof",
+  "key": "260719",
+  "kind": "event",
+  "refs": [],
+  "series": "standups"
+}

@@ -1,0 +1,17 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&renamed)
+---
+{
+  "cascade": [],
+  "record": {
+    "core": "fasti",
+    "home": "aof",
+    "kind": "event",
+    "series": "dailies"
+  },
+  "renamed": {
+    "from": "standups",
+    "to": "dailies"
+  }
+}

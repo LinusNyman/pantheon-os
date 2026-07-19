@@ -1,0 +1,44 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&resolved)
+---
+{
+  "ambiguous": [],
+  "resolved": [
+    {
+      "core": "fasti",
+      "home": "aof",
+      "kind": "span",
+      "path": "a_actio/a_o_opus/ao_f_fabrica/aof__/aof__span__employment.json",
+      "ref": "fasti:employment",
+      "shape": {
+        "shape": "partitioned"
+      },
+      "slug": "employment"
+    },
+    {
+      "core": "fasti",
+      "home": "aof",
+      "kind": "event",
+      "path": "a_actio/a_o_opus/ao_f_fabrica/aof__/aof__event__standups.jsonl",
+      "ref": "fasti:standups",
+      "shape": {
+        "named": true,
+        "shape": "series"
+      },
+      "slug": "standups"
+    },
+    {
+      "core": "fasti",
+      "home": "aof_mvp_phase",
+      "kind": "span",
+      "path": "a_actio/a_o_opus/ao_f_fabrica/aof_mvp_phase_/aof_mvp_phase__/aof_mvp_phase__span.json",
+      "ref": "fasti:mvp_phase",
+      "shape": {
+        "shape": "partitioned"
+      },
+      "slug": "mvp_phase"
+    }
+  ],
+  "unresolved": []
+}

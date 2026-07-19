@@ -1,0 +1,187 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: out
+---
+$ fas get mvp_phase
+{
+  "core": "fasti",
+  "data": {
+    "from": "260101",
+    "to": "260630"
+  },
+  "home": "aof",
+  "kind": "span",
+  "refs": [],
+  "slug": "mvp_phase"
+}
+
+$ fas get standups
+{
+  "core": "fasti",
+  "data": {
+    "until": "1500",
+    "values": [
+      "demo"
+    ]
+  },
+  "home": "aof",
+  "key": "260720T1400",
+  "kind": "event",
+  "refs": [],
+  "series": "standups"
+}
+
+$ fas series standups
+[
+  {
+    "core": "fasti",
+    "data": {
+      "values": [
+        "kickoff"
+      ]
+    },
+    "home": "aof",
+    "key": "260719",
+    "kind": "event",
+    "refs": [
+      "fasti:mvp_phase"
+    ],
+    "series": "standups"
+  },
+  {
+    "core": "fasti",
+    "data": {
+      "until": "1500",
+      "values": [
+        "demo"
+      ]
+    },
+    "home": "aof",
+    "key": "260720T1400",
+    "kind": "event",
+    "refs": [],
+    "series": "standups"
+  }
+]
+
+$ fas series standups --from 260720
+[
+  {
+    "core": "fasti",
+    "data": {
+      "until": "1500",
+      "values": [
+        "demo"
+      ]
+    },
+    "home": "aof",
+    "key": "260720T1400",
+    "kind": "event",
+    "refs": [],
+    "series": "standups"
+  }
+]
+
+$ fas list
+[
+  {
+    "core": "fasti",
+    "data": {
+      "from": "240301"
+    },
+    "home": "aof",
+    "kind": "span",
+    "refs": [
+      "album:dare_robotics"
+    ],
+    "slug": "employment"
+  },
+  {
+    "core": "fasti",
+    "data": {
+      "from": "260101",
+      "to": "260630"
+    },
+    "home": "aof",
+    "kind": "span",
+    "refs": [],
+    "slug": "mvp_phase"
+  },
+  {
+    "core": "fasti",
+    "data": {
+      "until": "1500",
+      "values": [
+        "demo"
+      ]
+    },
+    "home": "aof",
+    "key": "260720T1400",
+    "kind": "event",
+    "refs": [],
+    "series": "standups"
+  }
+]
+
+$ fas list -k span
+[
+  {
+    "core": "fasti",
+    "data": {
+      "from": "240301"
+    },
+    "home": "aof",
+    "kind": "span",
+    "refs": [
+      "album:dare_robotics"
+    ],
+    "slug": "employment"
+  },
+  {
+    "core": "fasti",
+    "data": {
+      "from": "260101",
+      "to": "260630"
+    },
+    "home": "aof",
+    "kind": "span",
+    "refs": [],
+    "slug": "mvp_phase"
+  }
+]
+
+$ fas list -k event
+[
+  {
+    "core": "fasti",
+    "data": {
+      "until": "1500",
+      "values": [
+        "demo"
+      ]
+    },
+    "home": "aof",
+    "key": "260720T1400",
+    "kind": "event",
+    "refs": [],
+    "series": "standups"
+  }
+]
+
+$ fas where mvp_phase
+{
+  "core": "fasti",
+  "home": "aof",
+  "kind": "span",
+  "path": "a_actio/a_o_opus/ao_f_fabrica/aof__/aof__span__mvp_phase.json",
+  "slug": "mvp_phase"
+}
+
+$ fas where standups
+{
+  "core": "fasti",
+  "home": "aof",
+  "kind": "event",
+  "path": "a_actio/a_o_opus/ao_f_fabrica/aof__/aof__event__standups.jsonl",
+  "series": "standups"
+}

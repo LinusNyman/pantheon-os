@@ -1,0 +1,36 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&redact(pending))
+---
+{
+  "change": {
+    "after": {
+      "core": "fasti",
+      "data": {
+        "from": "260101",
+        "to": "260901"
+      },
+      "home": "aof",
+      "kind": "span",
+      "refs": [],
+      "slug": "mvp_phase"
+    },
+    "before": {
+      "core": "fasti",
+      "data": {
+        "from": "260101"
+      },
+      "home": "aof",
+      "kind": "span",
+      "refs": [],
+      "slug": "mvp_phase"
+    },
+    "core": "fasti",
+    "home": "aof",
+    "key": "mvp_phase",
+    "kind": "span",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}

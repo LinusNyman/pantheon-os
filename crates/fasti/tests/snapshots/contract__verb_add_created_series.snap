@@ -1,0 +1,12 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&created)
+---
+{
+  "created": {
+    "core": "fasti",
+    "home": "aof",
+    "kind": "event",
+    "series": "standups"
+  }
+}

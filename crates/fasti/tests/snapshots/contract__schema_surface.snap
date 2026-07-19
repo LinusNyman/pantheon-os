@@ -1,0 +1,90 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&schema)
+---
+{
+  "format_version": 1,
+  "name": "fasti",
+  "record": {
+    "$defs": {
+      "Event": {
+        "additionalProperties": false,
+        "description": "One dated occurrence — the `data` half of a series line (§5.4, §8.4).\n\nThe occurrence's key (its date, plus a time where a hand gave one) and its `refs`\nride in the envelope, and its home, core, kind, and series name are the file's\nlocation and name (I3). What is left is what a hand actually gave.\n\n**The span it belongs to is a ref, not a field** (§8.4, I9). A `span` field here\nwould be a second reference form for one edge, invisible to the cascade that keeps\n`core:slug` honest (§5.4) — and it is exactly the in-record kind §6.1 says a series\nnever carries.\n\nValues stay strings on disk, for Annales' reason (§8.6): a record is read by hand as\noften as by code (I6, I8), and an occurrence is described in words far more often\nthan it is measured.",
+        "properties": {
+          "note": {
+            "description": "A hand's remark on this occurrence.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "until": {
+            "description": "When it ends — `hhmm`, or `YYMMDDThhmm` where it runs past its own day. The\n*start* is the line's key, which is what makes \"a meeting 4–5pm\" one record\nrather than two (§7.3, §8.4). Absent for an occurrence with no duration: a\ndeadline is a point.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "values": {
+            "description": "What the occurrence is, in the order it was given. Empty for a line whose whole\ncontent is its references — a deadline that *is* its `pensum:` ref is still an\noccurrence.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "Span": {
+        "additionalProperties": false,
+        "description": "A period or state — the `data` half of a partitioned entity file (§6.1, §8.4).\n\nIts `refs` ride in the envelope, and its home, core, kind, and slug are the file's\nlocation and name (I3), so none of them is stored here. What is left is the period\nitself: when it opened, when it closed if it has, and a hand's remark.\n\n`from` is **required** and `to` is **optionally absent** — an absent `to` is an open\nspan, the state you are still in, and closing it is an ordinary `edit` that corrects\nthe one object in place (I1, §6.1). There is no `open` flag beside it: a boolean\nthat merely restates whether a field is present is a second copy of the same fact,\nfree to drift from it (§18).",
+        "properties": {
+          "from": {
+            "description": "The day the period opens, `YYMMDD` — the same shape a series key wears (§5.4),\nso a span and an event sort against each other without a parser.",
+            "type": "string"
+          },
+          "note": {
+            "description": "A hand's remark on this span.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to": {
+            "description": "The day it closes; absent while it is still open (§8.4).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "from"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "anyOf": [
+      {
+        "$ref": "#/$defs/Span"
+      },
+      {
+        "$ref": "#/$defs/Event"
+      }
+    ],
+    "description": "The `Record` a core with two tokens declares (§7.1) — **a dispatch type, not a disk\nformat**.\n\n`untagged`, so each file stores the bare variant payload and **no tag is ever\nwritten** (§7.1, §18): the filename's token already says which variant a file holds\n(§5.2), and a stored tag would be a second copy of a fact the path already carries\n(I3).\n\nUntagged serde takes the first variant that parses, so the discrimination has to be\nmade *total* rather than lucky. Two things do it here, and only the first is the\ngeneral rule: `deny_unknown_fields` on both variants makes their field sets disjoint,\nwhich is the precedent Rationes set for a two-shape core and the reason a body that\nis neither shape is refused outright rather than read as the nearer one. Fasti also\nhappens to carry an independent discriminant — [`Span::from`] is the one required\nfield anywhere here, so a body with it is a span and a body without it falls through\nto [`Event`], whose every field is optional.\n\n**The filename stays authoritative regardless** (§5.2). Where a body disagrees with\nthe token it is filed under — a hand-edited file, an older format (I6, §13) — the\nenum still reads it as *some* variant, so every verb goes through\n[`FastiRecord::as_span`] / [`as_event`](FastiRecord::as_event), which compare the two\nand fail with a sentence naming the disagreement (exit `3`, §6.4) rather than\nemitting a record as the shape it is not. That guard is what the second discriminant\nbuys: a mis-filed record gets a sentence, and only a genuinely unknown key falls back\non serde's own refusal.",
+    "title": "FastiRecord"
+  },
+  "tokens": [
+    {
+      "shape": "partitioned",
+      "token": "span"
+    },
+    {
+      "named": true,
+      "shape": "series",
+      "token": "event"
+    }
+  ]
+}

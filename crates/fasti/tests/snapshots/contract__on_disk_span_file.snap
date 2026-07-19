@@ -1,0 +1,11 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: span.clone()
+---
+{
+  "refs": [],
+  "data": {
+    "from": "260101",
+    "to": "260630"
+  }
+}

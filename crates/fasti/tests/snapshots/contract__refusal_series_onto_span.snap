@@ -1,0 +1,10 @@
+---
+source: crates/fasti/tests/contract.rs
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "aof already holds \"mvp\" as a span: two shapes spell two files but only one `fasti:mvp`, so the ref would be ambiguous (§5.4, §18)"
+  }
+}
