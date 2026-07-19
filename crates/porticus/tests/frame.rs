@@ -377,3 +377,154 @@ fn insights_with_nothing_to_show_says_so() {
         "the chrome still stands:\n{text}"
     );
 }
+
+/// The contact card: title, labeled fields, ref chips (P§3).
+///
+/// One implementation serves Album's contact, Mappa's place and Rationes' holding, so
+/// what it renders is pinned once here rather than three times downstream (I3).
+#[test]
+fn the_entity_card_draws_its_model() {
+    use porticus::views::{Card, Chip, EntityCard};
+
+    struct Carded;
+    impl App for Carded {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(EntityCard::of(|_: &Code| {
+                Some(Card {
+                    title: "mara".into(),
+                    fields: vec![
+                        ("kind".into(), "person".into()),
+                        ("closeness".into(), "friend".into()),
+                    ],
+                    chips: vec![Chip {
+                        label: "album:alex".into(),
+                        reference: "album:alex".into(),
+                    }],
+                    strip: Vec::new(),
+                })
+            }))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let text = porticus::as_text(&porticus::render_once(&mut Carded, &root, 72, 14).unwrap());
+    for want in [
+        "mara",
+        "kind",
+        "person",
+        "closeness",
+        "friend",
+        "album:alex",
+    ] {
+        assert!(text.contains(want), "`{want}` missing:\n{text}");
+    }
+}
+
+/// A detail view **never guesses among several** (P§3): with nothing to pin it shows
+/// its empty "pick a record" state rather than choosing one.
+#[test]
+fn a_detail_view_with_no_single_record_says_pick_one() {
+    use porticus::views::EntityCard;
+
+    struct Unpinned;
+    impl App for Unpinned {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(EntityCard::of(|_: &Code| None))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let text = porticus::as_text(&porticus::render_once(&mut Unpinned, &root, 60, 12).unwrap());
+    assert!(text.contains("pick a record"), "{text}");
+}
+
+/// The Reader renders frontmatter over a Markdown body (P§3).
+///
+/// Headings, emphasis, and list bullets survive; the fence's two fields sit above the
+/// prose. What it must *not* do is offer to edit in place — that suspends to the hand's
+/// own editor (P§11), which is why this view has no input surface beyond scrolling.
+#[test]
+fn the_reader_renders_a_document() {
+    use porticus::views::{Document, Reader};
+
+    struct Reading;
+    impl App for Reading {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(Reader::of(|_: &Code| {
+                Some(Document {
+                    slug: "a_note".into(),
+                    r#type: Some("principium".into()),
+                    tags: vec!["mores".into()],
+                    body: "# A heading\n\nProse with *emphasis*.\n\n- one\n- two\n".into(),
+                })
+            }))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let buffer = porticus::render_once(&mut Reading, &root, 72, 18).unwrap();
+    insta::assert_snapshot!("frame_reader", porticus::as_text(&buffer));
+}
+
+/// A node with no document is calm, not empty-looking (I7).
+#[test]
+fn the_reader_with_no_document_says_so() {
+    use porticus::views::{Document, Reader};
+
+    struct Nothing;
+    impl App for Nothing {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(Reader::of(|_: &Code| -> Option<Document> {
+                None
+            }))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let text = porticus::as_text(&porticus::render_once(&mut Nothing, &root, 60, 12).unwrap());
+    assert!(text.contains("no document here"), "{text}");
+}

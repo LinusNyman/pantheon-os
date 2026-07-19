@@ -20,6 +20,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 
 use annales::{Annales, LogReading};
+
+// The screen rides the `tui` feature; drop it and the core is headless (§14).
+#[cfg(feature = "tui")]
+mod screen;
 use pantheon::envelope::{Key, Line, Ref};
 use pantheon::{
     Checkpoint, Code, Core, Error, RecordChange, Response, Result, SeriesRef, SeriesTarget, Store,
@@ -33,8 +37,9 @@ const VERBS: &[&str] = &[
     "help", "version",
 ];
 
-const BARE: &str =
-    "ann — Annales (actio · fact). The TUI lands at step 6; run `ann --help` for the verbs.\n";
+/// What a headless build prints for a bare short (§14, §7.3).
+#[cfg(not(feature = "tui"))]
+const BARE: &str = "ann — Annales (actio · fact). Built without the `tui` feature; run `ann --help` for the verbs.\n";
 
 #[derive(Parser)]
 #[command(
@@ -196,12 +201,20 @@ fn with_default_verb(raw: impl Iterator<Item = OsString>) -> Vec<OsString> {
 
 fn run(cli: &Cli, as_json: bool) -> Result<Response> {
     let Some(cmd) = &cli.cmd else {
-        // A bare short opens the TUI at a terminal; piped, it emits help (§7.3).
-        return Ok(if as_json {
-            Response::Json(help_json())
-        } else {
-            Response::Raw(BARE.to_string())
-        });
+        // A bare short opens the TUI at a terminal; piped, it emits help (§7.3) — a
+        // screen has nothing to draw down a pipe.
+        if as_json {
+            return Ok(Response::Json(help_json()));
+        }
+        #[cfg(feature = "tui")]
+        {
+            let root = resolve_root(cli.root.as_deref())?;
+            screen::open(&root).map_err(|e| Error::runtime(e.to_string()))?;
+            return Ok(Response::Raw(String::new()));
+        }
+        // Headless: there is no screen to open, so help is the whole answer (§14).
+        #[cfg(not(feature = "tui"))]
+        return Ok(Response::Raw(BARE.to_string()));
     };
     match cmd {
         Cmd::Add {
