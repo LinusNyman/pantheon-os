@@ -1,0 +1,16 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 225
+expression: pretty(&applied)
+---
+{
+  "core": "rationes",
+  "data": {
+    "currency": "usd",
+    "note": "joint"
+  },
+  "home": "crp",
+  "kind": "account",
+  "refs": [],
+  "slug": "checking"
+}

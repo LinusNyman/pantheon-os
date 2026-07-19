@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 512
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "\"checking\" carries a balance series, and a claim carries none — remove its readings before changing what it is (§8.3, §10.2)"
+  }
+}

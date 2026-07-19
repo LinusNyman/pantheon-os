@@ -1,0 +1,13 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 242
+expression: pretty(&edited)
+---
+{
+  "core": "rationes",
+  "data": {},
+  "home": "crb",
+  "kind": "asset",
+  "refs": [],
+  "slug": "bicycle"
+}

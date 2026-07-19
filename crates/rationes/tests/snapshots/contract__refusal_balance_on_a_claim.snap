@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 500
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "\"passport\" is a claim, and a claim carries no balance series: an expiry is a field, not a figure sampled over time — set it with `rat edit passport --expires <YYMMDD>` (§8.3, §6.4)"
+  }
+}

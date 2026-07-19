@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 470
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 4,
+    "msg": "no rationes entity named \"nonexistent\" (§7.3)"
+  }
+}

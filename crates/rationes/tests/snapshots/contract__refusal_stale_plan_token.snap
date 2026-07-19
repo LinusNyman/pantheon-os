@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 636
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 3,
+    "msg": "plan token is stale: the record changed since the dry-run — review again (§7.3)"
+  }
+}

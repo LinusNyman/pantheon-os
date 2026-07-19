@@ -1,0 +1,122 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 398
+expression: out
+---
+$ rat list
+0 [
+  {
+    "as_of": "260718",
+    "balance": 900.0,
+    "core": "rationes",
+    "data": {
+      "currency": "usd"
+    },
+    "home": "crb",
+    "kind": "asset",
+    "refs": [],
+    "slug": "bicycle"
+  },
+  {
+    "core": "rationes",
+    "data": {
+      "expires": "300101"
+    },
+    "home": "cri",
+    "kind": "claim",
+    "refs": [],
+    "slug": "passport"
+  },
+  {
+    "as_of": "260719",
+    "balance": 4310.0,
+    "core": "rationes",
+    "data": {
+      "currency": "usd"
+    },
+    "home": "crp",
+    "kind": "account",
+    "refs": [],
+    "slug": "checking"
+  }
+]
+
+$ rat list -k asset
+0 [
+  {
+    "as_of": "260718",
+    "balance": 900.0,
+    "core": "rationes",
+    "data": {
+      "currency": "usd"
+    },
+    "home": "crb",
+    "kind": "asset",
+    "refs": [],
+    "slug": "bicycle"
+  }
+]
+
+$ rat get checking
+0 {
+  "as_of": "260719",
+  "balance": 4310.0,
+  "core": "rationes",
+  "data": {
+    "currency": "usd"
+  },
+  "home": "crp",
+  "kind": "account",
+  "refs": [],
+  "slug": "checking"
+}
+
+$ rat series checking
+0 [
+  {
+    "core": "rationes",
+    "data": {
+      "amount": 4200.0
+    },
+    "home": "crp",
+    "key": "260718",
+    "kind": "balance",
+    "refs": [],
+    "series": "checking"
+  },
+  {
+    "core": "rationes",
+    "data": {
+      "amount": 4310.0
+    },
+    "home": "crp",
+    "key": "260719",
+    "kind": "balance",
+    "refs": [],
+    "series": "checking"
+  }
+]
+
+$ rat series checking --from 260719
+0 [
+  {
+    "core": "rationes",
+    "data": {
+      "amount": 4310.0
+    },
+    "home": "crp",
+    "key": "260719",
+    "kind": "balance",
+    "refs": [],
+    "series": "checking"
+  }
+]
+
+$ rat where passport
+0 {
+  "core": "rationes",
+  "home": "cri",
+  "kind": "claim",
+  "path": "c_contextus/c_r_res/cr_i_iura/cri__/cri__claim__passport.json",
+  "slug": "passport"
+}

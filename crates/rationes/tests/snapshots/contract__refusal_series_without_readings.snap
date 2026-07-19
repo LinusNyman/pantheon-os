@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 450
+expression: pretty(&err)
+---
+{
+  "error": {
+    "code": 4,
+    "msg": "\"checking\" holds no balance readings yet — `rat crp checking <amount>` writes the first, which is what mints the series (§7.3, §8.3)"
+  }
+}

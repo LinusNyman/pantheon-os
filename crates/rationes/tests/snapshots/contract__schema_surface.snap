@@ -1,0 +1,93 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 135
+expression: pretty(&schema)
+---
+{
+  "format_version": 1,
+  "name": "rationes",
+  "record": {
+    "$defs": {
+      "Balance": {
+        "additionalProperties": false,
+        "description": "One balance reading — the `data` half of a series line (§5.4).\n\nKeyed by date, so it is a **sample**: a correction rewrites the keyed line, it\nnever stacks a second, and the present is the line at the latest key (I1, §6.1).\nThe holding it belongs to is the series file's name slot, so it is not stored here\neither (I3) — which is what \"determined, not named\" means on disk (§7.1).",
+        "properties": {
+          "amount": {
+            "description": "The balance or valuation, in the holding's own currency.",
+            "format": "double",
+            "type": "number"
+          },
+          "note": {
+            "description": "What a hand typed past the figure.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "type": "object"
+      },
+      "Holding": {
+        "additionalProperties": false,
+        "description": "One holding — the `data` half of an entity file (§6.1).\n\nIts `refs` ride in the envelope, and its home, core, kind, and slug are the file's\nlocation and name (I3), so none of them is stored here. Nor is a balance: a\nbalance is sampled, so it lives in the companion series and the present is derived\nfrom it (I1). There is no `current_value` field and there will not be one.\n\nOne flat struct across the three kinds, for Album's reason (§8.1): the three\ntokens are one shape and one primitive, and `edit -k` is a file rename rather than\na record transformation (§7.2). A `claim` simply leaves `currency` absent, and an\n`account` leaves `expires` absent.",
+        "properties": {
+          "currency": {
+            "description": "The unit its balance is read in — `usd`, `eur`, `shares`. A fold sums *by* it\nrather than across it: adding dollars to shares would be a lie (§8.3, I1).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires": {
+            "description": "When the holding lapses (`YYMMDD`) — a `claim`'s expiry, which §8.3 makes a\n**field** precisely because it is one date and not a series of them.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note": {
+            "description": "A hand's remark on this holding — the editor form's buffer (§7.3).",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "anyOf": [
+      {
+        "$ref": "#/$defs/Balance"
+      },
+      {
+        "$ref": "#/$defs/Holding"
+      }
+    ],
+    "description": "The two record bodies Rationes files, as one dispatch type (§7.1).\n\n**A dispatch type, not a disk format.** The filename's token already says which\nvariant a file holds (§5.2), so this is `untagged`: each file stores the bare\nvariant payload and no tag is ever written (§18). `deny_unknown_fields` on both\nvariants is what makes the untagged read *total* rather than merely lucky — a\nholding cannot be mistaken for a balance in either direction, whichever order\nserde tries them in.\n\nThis is the first `Record` in the workspace that is an enum, and it is one for\nexactly the reason §7.1 gives: Rationes declares two **shapes**. Album's three\ntokens stayed a flat struct because they are one shape (§8.1).",
+    "title": "Record"
+  },
+  "tokens": [
+    {
+      "shape": "partitioned",
+      "token": "account"
+    },
+    {
+      "shape": "partitioned",
+      "token": "asset"
+    },
+    {
+      "shape": "partitioned",
+      "token": "claim"
+    },
+    {
+      "named": false,
+      "shape": "series",
+      "token": "balance"
+    }
+  ]
+}

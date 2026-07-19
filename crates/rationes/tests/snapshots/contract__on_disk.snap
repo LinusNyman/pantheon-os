@@ -1,0 +1,13 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 697
+expression: "format!(\"{}--- balance ---\\n{}\", holding, reading)"
+---
+{
+  "refs": [],
+  "data": {
+    "currency": "usd"
+  }
+}
+--- balance ---
+{"key":"260718","refs":[],"data":{"amount":4200.0}}

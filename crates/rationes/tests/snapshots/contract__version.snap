@@ -1,0 +1,11 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 146
+expression: pretty(&version)
+---
+{
+  "format_version": 1,
+  "name": "rationes",
+  "short": "rat",
+  "version": "0.1.0"
+}

@@ -1,0 +1,29 @@
+---
+source: crates/rationes/tests/contract.rs
+assertion_line: 604
+expression: pretty(&redact(plan))
+---
+{
+  "change": {
+    "after": {
+      "core": "rationes",
+      "data": {
+        "amount": 4200.0
+      },
+      "home": "crp",
+      "key": "260718",
+      "kind": "balance",
+      "refs": [],
+      "series": "checking"
+    },
+    "before": null,
+    "core": "rationes",
+    "home": "crp",
+    "key": "260718",
+    "kind": "balance",
+    "series": "checking",
+    "verb": "add"
+  },
+  "plan": "add",
+  "token": "[redacted]"
+}
