@@ -2,29 +2,40 @@
 
 use std::ffi::OsString;
 
+use crate::{Mappa, Place};
 use clap::Parser;
-use mappa::{Mappa, Place};
 use pantheon::{Code, EntityRef, Response, Store};
 use porticus::action::{Invocation, Relayed};
 use porticus::view::Row;
 use porticus::views::{Card, Chart, Chip, EntityCard, Insights, Panel, TreeFile};
 use porticus::{Action, App, Ident, RecordRef, Target, View, Writer};
 
-use crate::{Cli, with_default_verb};
+use crate::cli::{Cli, with_default_verb};
 
 /// Open Mappa's screen.
 ///
 /// # Errors
 /// If the tree cannot be walked or the terminal cannot be taken.
 pub fn open(root: &std::path::Path) -> anyhow::Result<()> {
-    let mut app = MappaApp {
-        root: root.to_path_buf(),
-    };
-    porticus::run(&mut app, root)
+    porticus::run(&mut MappaApp::new(root), root)
 }
 
-struct MappaApp {
+/// Mappa's screen, as an `App` (P§2).
+///
+/// Public so a test can build the **real** one and drive it — the same object `open`
+/// runs, with the same lineup and the same in-process relay. It carries a root and
+/// nothing else: everything drawn is folded from readings each frame (I1).
+pub struct MappaApp {
     root: std::path::PathBuf,
+}
+
+impl MappaApp {
+    #[must_use]
+    pub fn new(root: &std::path::Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+        }
+    }
 }
 
 impl App for MappaApp {
@@ -117,7 +128,7 @@ fn in_process(invocation: &Invocation) -> Relayed {
             };
         }
     };
-    match crate::run(&cli, true) {
+    match crate::cli::run(&cli, true) {
         Ok(Response::Json(value)) => Relayed {
             code: 0,
             stdout: value.to_string(),
