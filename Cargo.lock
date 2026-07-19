@@ -1143,6 +1143,8 @@ dependencies = [
  "clap",
  "insta",
  "pantheon",
+ "porticus",
+ "ratatui",
  "serde_json",
 ]
 

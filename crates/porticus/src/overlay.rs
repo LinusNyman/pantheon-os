@@ -12,6 +12,9 @@ use crate::action::{Action, Invocation, Target};
 pub enum Prompt {
     /// `r` — the new name, which will re-slug the record and cascade its refs (§5.4).
     Rename(Target),
+    /// An action a view asked for a line first (`View::prompts_for`) — the typed line
+    /// is appended to the invocation and the confirm policy runs as usual.
+    Field(Action, Target),
     /// `A` — quick add by code: the node, then the content.
     QuickAddCode,
     /// `A`, second leg — the content, at the code just given.

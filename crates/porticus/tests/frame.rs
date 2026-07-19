@@ -670,3 +670,71 @@ fn a_lineup_holds_at_most_one_detail_view() {
         "a second detail view must be refused: {err}"
     );
 }
+
+/// **Every relay names the tree it is acting on** (§7.3's `-C`).
+///
+/// Porticus adds this rather than trusting each instrument to, because the failure is
+/// silent and severe: `run` is *given* a root, but a relay without `-C` resolves
+/// `$PANTHEON_ROOT` instead — so a TUI opened with `-C /some/tree` would read one tree
+/// and write to another, and nothing on screen would say so.
+///
+/// Found by driving `pan`'s annotate through the scripted-key harness against a temp
+/// tree with no `PANTHEON_ROOT` set: the write went nowhere. Every core had it.
+#[test]
+fn every_relay_carries_the_root_it_is_drawing() {
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct Spy(Arc<Mutex<Vec<String>>>);
+    impl App for Spy {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(
+                TreeFile::of(|_: &Code| vec![row("buy_milk", "ac")]).offering(&[Action::Done]),
+            )]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            1
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, t: &Target) -> Option<Invocation> {
+            let Target::Row(record) = t else { return None };
+            Some(Invocation::new("pen", ["edit", &record.key, "--done"]))
+        }
+        fn execute(&mut self, i: &Invocation) -> std::io::Result<porticus::Relayed> {
+            self.0.lock().unwrap().push(i.display());
+            Ok(porticus::Relayed {
+                code: 0,
+                stdout: "{}".into(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    let root = fresh_root();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    // `<tab>` moves focus to the content, then `d` relays on the focused row.
+    porticus::drive(
+        &mut Spy(Arc::clone(&seen)),
+        &root,
+        &porticus::keys("<tab>d"),
+        60,
+        10,
+    )
+    .unwrap();
+
+    let calls = seen.lock().unwrap();
+    let relayed = calls.first().expect("`d` must relay");
+    assert!(
+        relayed.contains("-C") && relayed.contains(&root.display().to_string()),
+        "a relay must name the tree the screen is drawing: {relayed}"
+    );
+    assert!(
+        relayed.contains("-y"),
+        "and still carry -y (§7.3): {relayed}"
+    );
+}

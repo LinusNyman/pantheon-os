@@ -15,11 +15,21 @@ repository.workspace = true
 name = "pan"
 path = "src/main.rs"
 
+[features]
+# `pan`'s TUI (§10) rides the default feature like every instrument's; drop it and the
+# structural CLI stands alone (§14).
+default = ["tui"]
+tui = ["dep:porticus", "dep:ratatui"]
+
 [dependencies]
 pantheon.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
+porticus = { workspace = true, optional = true }
+# `pan` writes its own two tabs (§10, P§3), which paint into a ratatui `Buffer` — so it
+# takes the full crate, upstream's rule for an application (§13).
+ratatui = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta.workspace = true
