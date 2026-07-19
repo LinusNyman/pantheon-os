@@ -22,6 +22,7 @@ clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+schemars.workspace = true   # `Core::Record: JsonSchema` — the `schema` verb (§7.2)
 porticus = { workspace = true, optional = true }
 tessera = { workspace = true, optional = true }
 
