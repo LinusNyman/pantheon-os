@@ -65,32 +65,7 @@ struct State {
 /// if the terminal cannot be taken.
 pub fn run(app: &mut impl App, root: &std::path::Path) -> anyhow::Result<()> {
     let views = app.lineup();
-    anyhow::ensure!(
-        !views.is_empty(),
-        "a lineup needs at least one view — `[0]` is what launch opens (P§3)"
-    );
-    anyhow::ensure!(
-        views.len() <= 9,
-        "a lineup holds at most nine views — a tenth has no number key (P§3)"
-    );
-    {
-        let mut seen = std::collections::HashSet::new();
-        for view in &views {
-            anyhow::ensure!(
-                seen.insert(view.id()),
-                "view ids are unique within a lineup — the switcher and Help key off them (P§3)"
-            );
-            for (key, _) in view.nav_keys() {
-                anyhow::ensure!(
-                    !keymap::is_reserved(*key),
-                    "view `{}` declares Tier-3 key `{key}`, which Tier 1 or 2 already \
-                     reserves — a reserved key stays reserved even where its action is \
-                     not offered (P§5)",
-                    view.id()
-                );
-            }
-        }
-    }
+    check_lineup(&views)?;
 
     // Porticus knows which core a `Writer` targets, so it **probes `PATH` and dims the
     // action** before the key is pressed (P§7, §12). Only a lens needs this: a core's
@@ -135,6 +110,39 @@ pub fn run(app: &mut impl App, root: &std::path::Path) -> anyhow::Result<()> {
             continue;
         }
         handle(&mut screen, app, &mut state, key)?;
+    }
+    Ok(())
+}
+
+/// The lineup rules (P§3), checked before a terminal is ever taken.
+///
+/// Called by [`run`] **and** by [`render_once`]: a rule enforced on only one of them
+/// would let a test pass a lineup the real loop refuses, or — worse, and what happened
+/// here first — let an invalid lineup panic on an index instead of erroring.
+fn check_lineup(views: &[Box<dyn View>]) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !views.is_empty(),
+        "a lineup needs at least one view — `[0]` is what launch opens (P§3)"
+    );
+    anyhow::ensure!(
+        views.len() <= 9,
+        "a lineup holds at most nine views — a tenth has no number key (P§3)"
+    );
+    let mut seen = std::collections::HashSet::new();
+    for view in views {
+        anyhow::ensure!(
+            seen.insert(view.id()),
+            "view ids are unique within a lineup — the switcher and Help key off them (P§3)"
+        );
+        for (key, _) in view.nav_keys() {
+            anyhow::ensure!(
+                !keymap::is_reserved(*key),
+                "view `{}` declares Tier-3 key `{key}`, which Tier 1 or 2 already \
+                 reserves — a reserved key stays reserved even where its action is \
+                 not offered (P§5)",
+                view.id()
+            );
+        }
     }
     Ok(())
 }
@@ -888,4 +896,63 @@ fn submit_line(
             commit_or_confirm(screen, app, state, Action::Add, invocation)
         }
     }
+}
+
+// ── a seam for tests ─────────────────────────────────────────────────────────
+
+/// Draw one frame into an off-screen buffer, with no terminal involved.
+///
+/// This exists so an instrument's screen can be **snapshotted like its JSON is**
+/// (§7.2): the contract's own tests freeze what a core emits, and without this the
+/// other half of I8 — what a *human* sees — would be the only surface in the suite
+/// that nothing pins.
+///
+/// It runs the same [`draw`] the loop runs, so a snapshot that passes here is the
+/// frame the loop would have put on the terminal.
+///
+/// # Errors
+/// If the lineup is invalid or the tree cannot be walked.
+pub fn render_once(
+    app: &mut impl App,
+    root: &std::path::Path,
+    width: u16,
+    height: u16,
+) -> anyhow::Result<ratatui::buffer::Buffer> {
+    let views = app.lineup();
+    check_lineup(&views)?;
+    let mut state = State {
+        rail: Rail::new(root)?,
+        views,
+        active: 0,
+        focus: Focus::Rail,
+        row: 0,
+        filter: String::new(),
+        overlays: Vec::new(),
+        status: Status::Idle,
+        missing: Vec::new(),
+        root: root.to_path_buf(),
+        quit: false,
+    };
+    let ident = app.ident();
+    let theme = Theme::of(&ident);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))?;
+    terminal.draw(|frame| draw(frame, app, &mut state, theme, &ident))?;
+    Ok(terminal.backend().buffer().clone())
+}
+
+/// The buffer's visible text, one line per row, trailing blanks trimmed — what a
+/// snapshot should hold, rather than the styled cells behind it.
+#[must_use]
+pub fn as_text(buffer: &ratatui::buffer::Buffer) -> String {
+    let width = buffer.area.width;
+    let mut out = String::new();
+    for row in 0..buffer.area.height {
+        let mut line = String::new();
+        for column in 0..width {
+            line.push_str(buffer[(column, row)].symbol());
+        }
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    out
 }

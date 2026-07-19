@@ -78,8 +78,18 @@ impl Screen {
         leave();
         let outcome = child();
         raise()?;
-        // The child owned the screen; nothing on it is ours to believe.
-        self.terminal.clear()?;
+        // The child owned the screen, so nothing ratatui believes about it is true any
+        // more and the next draw must repaint every cell.
+        //
+        // **Rebuilt rather than cleared.** `Terminal::clear` would do it, but it first
+        // asks the terminal where the cursor is — a *round-trip* that waits on a reply
+        // and fails outright ("the cursor position could not be read within a normal
+        // duration") wherever nothing answers: a pty with no reader, a terminal busy
+        // behind a slow child, a session being torn down. That failure would land
+        // **after** the relayed write had already committed, so the write would stand
+        // while the screen died reporting it. A fresh `Terminal` has empty buffers,
+        // which is the whole of what is wanted here, and asks the terminal nothing.
+        self.terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
         Ok(outcome)
     }
 }
