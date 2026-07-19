@@ -99,7 +99,7 @@ fn run(cli: &Cli, as_json: bool) -> anyhow::Result<Option<Value>> {
     // The TTY rule governs here as everywhere (§7.3): a screen has nothing to draw
     // down a pipe, so a piped lens emits the figures behind its mosaic instead.
     if as_json {
-        return Ok(Some(figures()));
+        return Ok(Some(figures(&root)));
     }
 
     #[cfg(feature = "tui")]
@@ -110,8 +110,7 @@ fn run(cli: &Cli, as_json: bool) -> anyhow::Result<Option<Value>> {
     // Headless: there is no screen to open, so the fold is the whole answer (§12).
     #[cfg(not(feature = "tui"))]
     {
-        let _ = root;
-        Ok(Some(figures()))
+        Ok(Some(figures(&root)))
     }
 }
 
@@ -119,12 +118,12 @@ fn run(cli: &Cli, as_json: bool) -> anyhow::Result<Option<Value>> {
 ///
 /// This is the same derivation the screen draws, so an LLM reads what a human sees
 /// (I8). Nothing consumes a lens in turn (§18), so this JSON answers a hand.
-fn figures() -> Value {
+fn figures(root: &std::path::Path) -> Value {
     json!({
-        "open_tasks": count(PENSUM, &["list"]),
-        "people": count(ALBUM, &["list"]),
-        "logs": count(ANNALES, &["list"]),
-        "documents": count(TABELLA, &["list"]),
+        "open_tasks": count(root, PENSUM, &["list"]),
+        "people": count(root, ALBUM, &["list"]),
+        "logs": count(root, ANNALES, &["list"]),
+        "documents": count(root, TABELLA, &["list"]),
     })
 }
 
@@ -132,8 +131,8 @@ fn figures() -> Value {
 ///
 /// `null` rather than `0`: a zero is a fold that ran and found nothing, and an absent
 /// core is not the same answer (§12).
-fn count(short: &str, args: &[&str]) -> Value {
-    match tessera::read(short, args) {
+fn count(root: &std::path::Path, short: &str, args: &[&str]) -> Value {
+    match tessera::read(root, short, args) {
         Some(Value::Array(rows)) => json!(rows.len()),
         _ => Value::Null,
     }

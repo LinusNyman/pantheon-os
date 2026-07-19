@@ -104,9 +104,19 @@ pub fn draw(face: &Face, area: Rect, buf: &mut Buffer, accent: Color, dim: Color
 /// `None` where the core is absent, failed, or answered with something that is not
 /// JSON. A tile whose core isn't installed is simply **absent**, not broken (§12) —
 /// which is what makes installing one app real (§15.5).
+///
+/// **`root` is named, never inherited.** A tile reads the tree its caller is showing,
+/// and `$PANTHEON_ROOT` is the caller's ambient state (§6.2) — a lens opened with `-C`
+/// would otherwise fold one tree while drawing another. `-C` is universal (§7.3), so
+/// every core takes it.
 #[must_use]
-pub fn read(short: &str, args: &[&str]) -> Option<Value> {
-    let out = Command::new(short).args(args).output().ok()?;
+pub fn read(root: &std::path::Path, short: &str, args: &[&str]) -> Option<Value> {
+    let out = Command::new(short)
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -133,16 +143,23 @@ pub struct Count {
     short: &'static str,
     args: Vec<String>,
     gloss: Option<String>,
+    root: std::path::PathBuf,
 }
 
 impl Count {
     #[must_use]
-    pub fn of(caption: impl Into<String>, short: &'static str, args: &[&str]) -> Self {
+    pub fn of(
+        root: impl Into<std::path::PathBuf>,
+        caption: impl Into<String>,
+        short: &'static str,
+        args: &[&str],
+    ) -> Self {
         Self {
             caption: caption.into(),
             short,
             args: args.iter().map(|a| (*a).to_string()).collect(),
             gloss: None,
+            root: root.into(),
         }
     }
 
@@ -159,7 +176,7 @@ impl Tile for Count {
         // An absent core is an absent figure, never a zero — a zero is a fold that ran
         // and found nothing, and the two must not read the same (§12). A non-array
         // answer is the same absence: the verb did not return a fold.
-        let value = match read(self.short, &args) {
+        let value = match read(&self.root, self.short, &args) {
             Some(Value::Array(rows)) => rows.len().to_string(),
             _ => "—".to_string(),
         };
