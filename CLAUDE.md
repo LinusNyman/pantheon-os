@@ -74,18 +74,24 @@ CLI-first behaviour survives on.
 
 Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `xtask`.
 
-- `crates/pantheon` — the spine lib (~5.7k lines; nearly all the logic). `crates/pan` — the bin over
-  it, its own crate, now with its own `screen.rs` too.
-- `crates/porticus` (~3.8k lines), `crates/tessera` — the peer libs. Porticus links `ratatui` whole;
+- `crates/pantheon` — the spine lib (~5.7k lines; nearly all the logic). `crates/pan` — the tool
+  over it, its own crate, with `cli.rs` and `screen.rs` of its own.
+- `crates/porticus` (~4.2k lines), `crates/tessera` — the peer libs. Porticus links `ratatui` whole;
   Tessera takes `ratatui-core` and links no Porticus, now or ever.
-- `crates/<core>` — one crate per core, **three files**. **`lib.rs` is the thin file, `main.rs` the
-  fat one** — the reverse of what §14's "~30-line clap shell" suggests, and the shape all seven
-  cores share. `lib.rs` (66–270 lines) holds only the record struct(s) and `impl Core`;
-  `main.rs` (784–1741) holds the clap `Cli`, the twelve verbs, `Ctx`, the editor form, and the tail
-  helpers; `screen.rs` (197–384, behind `tui`) holds `impl App` and the folds its views close over.
-  Put verb logic in `main.rs` — the spine already owns everything a core would otherwise share.
+- **Every instrument is a lib with a five-line bin over it** — `main.rs` is §14's "~30-line clap
+  shell" and holds nothing but `fn main() { <crate>::run_cli() }`. Four files:
+  `lib.rs` holds the record struct(s), `impl Core`, and the module declarations;
+  `cli.rs` (785–1742) holds the clap `Cli`, the twelve verbs, `Ctx`, the editor form, and the tail
+  helpers; `screen.rs` (208–395, behind `tui`) holds `impl App` and the folds its views close over.
+  Put verb logic in `cli.rs` — the spine already owns everything a core would otherwise share.
   **A two-shape core sits at the top of every range** (Fasti, then Rationes): a `Record` enum, a
   shape question in front of each verb, and two token vocabularies to refuse across.
+- **Why the lib and not the bin: an integration test links the lib.** A screen in the bin is a
+  screen no test can reach, and step 6 proved that gap expensive. **What it must not cost is I4** —
+  a verb reachable as a Rust function would be a second door into a core — so each lib exposes
+  exactly two things, `run_cli` and its `App`, while `Cli`, `run`, and every verb stay `pub(crate)`.
+  Keep it that way: the JSON is the only contract, and this is the one place the type system now
+  carries that rather than the crate layout.
 - `xtask/` — workspace automation (run via `cargo xtask`).
 - `docs/` — the mdBook spec. `deny.toml`, `dist-workspace.toml`, `release-plz.toml` — supply chain & release.
 
@@ -131,19 +137,29 @@ Not oversights — decisions, each with the reason:
 - **§10.2's auto-apply and candidate fixes.** A `Finding` carries a code, a severity, a path
   and a message — no candidates. The validate tab shows findings; offering or applying a fix
   needs the spine to produce candidates first.
-- **`Calendar` and `Timeline`** waited for Fasti at step 7 — see below; Fasti now exists and they
-  are the one piece of step 7 that is still owed.
+- **`Calendar` and `Timeline`** waited for Fasti at step 7. Both now exist — see the catalog note
+  below; step 6's deferral is closed.
 
-### What step 7 deliberately left
+### The chrome grew two views, and the shape grew a lib
 
-- **P§3's `Calendar` and `Timeline` views still do not exist in `crates/porticus/`.** Fasti was
-  built in a worktree parallel to two siblings, and Porticus is shared, so the chrome work was
-  held back rather than landed into a contended crate. `fas`'s screen uses the existing catalog —
-  `TreeFile`, `Agenda` (the derived calendar), `EntityCard`, `Insights` — and a span fills `Card`'s
-  strip natively, since `Timeline`'s bar and the strip are one type. **This is now unblocked and
-  is the obvious next chrome commit.**
-- **The `resolve.rs` gap Rationes found is reported, not patched** — see below. Same reason: a
-  spine change with two sibling branches in flight.
+Step 7's follow-ups, all landed:
+
+- **`Calendar` (row · Full) and `Timeline` (draw · Full)** are in the catalog. A Calendar is a
+  **row-view that also paints a grid** — P§3 is explicit that it is row + Full — so the grid is the
+  locator, the rows beneath it are the focused day, and search/filter/scroll stay Porticus's (P§6).
+  It declares its grid through `View::grid()`, exactly as `Insights` hands up `Panel`s; the app
+  never paints. `[`/`]` page the month and `t` returns to today, as declared Tier-3 keys. **The cell
+  dates the add** — `a` relays `--at 260718` — which is what `Target::Node.at` was built for at step
+  6 with nothing to exercise it.
+- **`Span_` carries a `home`**, as P§3 always specified. A Timeline is cross-node, so a bar resolves
+  an action the way a row does (P§7); without an address a draw-view could not offer `Edit` at all.
+- **A row-view's focused row wins over any address the view also names.** A dated Full view names
+  its *cell* so `a` can date the add, and that cell must not stand in for the event under the cursor.
+- **The body is drawn before the header**, though it appears second. A Full view's locator is
+  *derived* — a Timeline's range is its bars' extent — so asking the header first reports the fold
+  before last. Invisible to every earlier view, whose locators are constants or cursor state.
+- **Every instrument is now a lib with a five-line bin**, so its screen can be driven. See the
+  workspace layout above for the rule and its I4 guard.
 
 ### Things a later step must not be surprised by
 
@@ -151,19 +167,16 @@ Not oversights — decisions, each with the reason:
   (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented,
   so `r`/`m`/`x` are **dark** in `pan`'s TUI — `on_action` returns `None` and Porticus greys
   them (P§7). The *record*-level cascade (§5.4) is done and is what the cores use.
-- **`pan resolve` mis-registers a *named* determined series — an open spine bug.**
-  `pan resolve rationes:checking` returns **ambiguous** between the holding and its balance
-  series, and `pan validate` raises a spurious `duplicate_slug` for the same pair, though §5.4
-  and §7.1 say a determined series is never a ref target and its name is skipped for uniqueness.
-  One branch causes it: `resolve.rs::register_record` picks the ref-target identity off
-  `FileClass` alone, and `crp__balance__checking.jsonl` has three segments, so `classify` calls
-  it `NamedSeries` — correctly, since classification is *structural* and **only the registry's
-  `named` bit tells the two apart** (`SeriesRef`'s own doc comment in `store.rs` says so). The
-  `DeterminedSeries` arm, which routes to `register_series_lines`, is reached only by the
-  nameless form. The fix looks like gating the `NamedSeries` arm on
-  `reg.shape_of_kind(&kind) == Some(Shape::Series { named: false })`. **Rationes-only** —
-  Pensum's determined series is nameless and Fasti's `event` is hand-named, which is why nothing
-  before step 7 could reach it.
+- **`classify` is structural, and only the registry knows what a name *means*.** A determined
+  series whose determinant is a *slug* (`crp__balance__checking.jsonl`) wears the same three
+  segments as a hand-named one, so `classify` calls it `NamedSeries` — correctly. Only the
+  registry's `named` bit separates them, which is what `SeriesRef`'s doc comment in `store.rs`
+  says. `resolve.rs::register_record` once picked the ref-target identity off `FileClass` alone
+  and so registered `rationes:checking` twice, making every holding ambiguous against its own
+  balance file and raising a spurious `duplicate_slug`; it now asks the registry and routes a
+  `named: false` token to `register_series_lines` like the nameless form. **Anything else reading
+  `FileClass` to decide what a file *is* owes the registry the same question.** Pinned by
+  `pantheon/tests/units.rs::a_determined_series_is_never_a_ref_target_even_when_it_carries_a_name`.
 - **`Store::write_line` mints any `Shape::Series { named: false }` series on first write**
   (§7.3: a determined series is minted by its determinant). For Pensum the determinant is the
   node, so that is right. **Rationes' `balance` is determined by a holding *entity***, and the
@@ -181,19 +194,31 @@ Not oversights — decisions, each with the reason:
   (`find_documents` tree-wide, then `pantheon::occupied_slug` for the shared wording). Any
   future Document core must do the same, or a rename will silently produce two records with
   one name. `tabella/tests/contract.rs::refusal_rename_onto_an_occupied_slug` guards it.
-- **No core can carry a `porticus::drive` test today.** `screen.rs` is a module of the *bin*, and
-  an integration test links the *lib*, so no core's `App` is nameable from `tests/`. `drive` is
-  exercised only by `porticus/tests/frame.rs` against a fake app — which is a thin guarantee given
-  that step 6 found three defects reaching `main` past a full green suite, caught only by driving
-  a real binary. Closing it means moving the screen into the lib, and that is a shape question for
-  **all seven cores at once** (§14), not one a single core settles. Flagged by two step-7 cores
-  independently; unchanged so far, deliberately.
+- **Every instrument's screen is now driven by its own `tests/screen.rs`** — nine of them, plus
+  Atrium's `tests/relay.rs`. Each builds the *real* `App` (`PensumApp::new(&root)`) and drives it
+  with `porticus::drive`, so a keystroke reaches a file and is read back **through the binary**.
+  Add one whenever you add an instrument; a lineup is otherwise checked nowhere but a hand's
+  terminal, since `check_lineup` runs at launch.
+- **`atrium/tests/relay.rs` is the only test of §12's cross-process relay**, and it is alone in its
+  file on purpose: it mutates `PATH` so Porticus can discover the cores, and Cargo gives each
+  integration-test file its own process, so a lone test there races nothing. It locates the
+  binaries *beside `atr`* rather than through a core's `CARGO_BIN_EXE_*`, because a lens depends on
+  no core and could not name one (I5). Keep both properties if you touch it.
+- **A `#[cfg]` above a `mod` you delete lands on whatever follows.** Removing Atrium's
+  `mod mosaic;` orphaned its `#[cfg(feature = "tui")]` onto the next `use`, and `PathBuf` vanished
+  from headless builds while `--all-features` stayed green. **`cargo build --no-default-features`
+  is the only thing that catches this class** — the feature matrix is not optional here.
 - **The table renderer now meets nested `data` for the first time.** Mappa is the first core whose
   `data` carries an object, so `map list -f table` renders `{"lat":59.3293,"lon":18.0686}` inside
   the cell. This is what §7.3 describes — `data`'s keys hoisted, and "the flatness test is
   deliberately *not* recursive" — so it is designed behaviour rather than a defect. It is merely
   *visible* now, and worth a deliberate call (a nested value could fall back to pretty JSON as
   `pan tree` does). That is a spine commit.
+- **Two contract facts that only a screen test pinned**, both found by writing the first one for a
+  core: a **partitioned entity is named by `slug`** where a **series line is named by `key`**; and
+  **`ann … -c` mints an empty series**, so a fixture stopping there has a file with no records in
+  it. Pensum's twin: a plain `pen list` is every *open* task, so `--all` is required to see a done
+  one, and `done` carries the **date** rather than a flag.
 
 ## Commands (match CI exactly — see `.github/workflows/ci.yml`)
 
@@ -211,6 +236,9 @@ test -z "$(find . -name '*.snap.new' -print -quit)"            # CI fails on a P
                                                                # this one does not.
 cargo build --workspace                                        # CI runs the `--target` matrix form of this,
                                                                # over 5 targets on their native runners
+cargo build --workspace --no-default-features                  # the headless half (§14). Catches what nothing
+                                                               # else does: a `#[cfg]` orphaned onto the wrong
+                                                               # item is invisible under --all-features
 cargo audit                                                    # advisories
 cargo deny check bans licenses sources                         # licenses/bans/sources
 ```
@@ -290,7 +318,9 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   has no size, so it draws no cells and echoes scripted input in cooked mode before the app takes
   raw mode. `drive` runs the same `handle` and the same relay, returns the final frame, and
   really performs writes. Three defects reached `main` past a full green suite and were caught
-  only by driving a real binary; two more fell out within minutes of `drive` existing.
+  only by driving a real binary; two more fell out within minutes of `drive` existing. **Every
+  instrument now has a `tests/screen.rs` that drives its real `App`** — see the shape rule in
+  the workspace layout, which exists to make that possible.
 
 ## Non-goals (§18) — do not build
 
