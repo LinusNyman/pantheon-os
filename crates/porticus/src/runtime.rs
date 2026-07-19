@@ -18,7 +18,7 @@ use crate::overlay::{Overlay, Pending, Prompt};
 use crate::rail::Rail;
 use crate::term::Screen;
 use crate::theme::Theme;
-use crate::view::{Handled, Layout, Nav, Row, View};
+use crate::view::{Grid, Handled, Layout, Nav, Row, View};
 
 /// Which pane owns the arrows and the `/` scope (P§6).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -203,8 +203,13 @@ fn draw(
         ])
         .split(area);
 
-    draw_header(frame, state, theme, ident, bands[0]);
+    // **The body first, though it is drawn second.** A Full view names its own locator
+    // in the header (P§4), and a locator is *derived* — a Timeline's range is its bars'
+    // extent, which it only knows once it has folded them. Asking the header first
+    // reports the fold before last, so the range lags a frame and is simply absent on
+    // the first. The bands are separate rects, so the order of the two calls is free.
     draw_body(frame, app, state, theme, bands[1]);
+    draw_header(frame, state, theme, ident, bands[0]);
     draw_status(frame, state, theme, bands[2]);
 
     if let Some(top) = state.overlays.last() {
@@ -275,6 +280,13 @@ fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Th
     // back (I1).
     let rows = state.views[state.active].rows(&node);
     if let Some(rows) = rows {
+        // A dated Full row-view paints a month grid above its rows: the grid is the
+        // locator, the rows beneath it are the focused day (P§3). It stays a row-view
+        // throughout, so search, filter and scroll are unchanged (P§6).
+        let content = match state.views[state.active].grid() {
+            Some(grid) => draw_grid(frame, &grid, theme, content),
+            None => content,
+        };
         // `Some(vec![])` is a real empty result; `None` is a draw-view, which paints
         // its own empty (P§3).
         let rows = filtered(&rows, &state.filter);
@@ -290,6 +302,67 @@ fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Th
         }
     } else {
         state.views[state.active].draw(&node, content, frame.buffer_mut(), theme);
+    }
+}
+
+/// Draw the month grid and return what is left of the area for the day's rows (P§3).
+///
+/// Two lines per week: the day numbers, and a marker line under them — a cell says
+/// *that* something falls there, never how many, which is a number the eye would have
+/// to read (P§8). The focused cell carries the accent, so the day and its rows below
+/// are visibly the same selection.
+fn draw_grid(frame: &mut Frame, grid: &Grid, theme: Theme, area: Rect) -> Rect {
+    const CELL: usize = 4;
+    let columns = grid.columns.len().max(1);
+    let weeks = grid.cells.len().div_ceil(columns);
+    // Header + two lines a week + one blank before the rows.
+    let wanted = u16::try_from(1 + weeks * 2 + 1).unwrap_or(u16::MAX);
+    if area.height <= wanted {
+        return area; // too short to be worth halving — let the rows have it
+    }
+
+    let mut header = String::with_capacity(grid.columns.len() * CELL);
+    for column in &grid.columns {
+        for _ in 0..CELL.saturating_sub(column.chars().count()) {
+            header.push(' ');
+        }
+        header.push_str(column);
+    }
+    let mut lines = vec![Line::from(Span::styled(header, theme.dim()))];
+    for week in 0..weeks {
+        let mut days = Vec::new();
+        let mut marks = Vec::new();
+        for column in 0..columns {
+            let index = week * columns + column;
+            let (label, mark, style) = match grid.cells.get(index).and_then(Option::as_ref) {
+                Some(cell) => (
+                    cell.label.clone(),
+                    if cell.items == 0 { " " } else { "·" },
+                    if index == grid.focused {
+                        theme.focus()
+                    } else {
+                        theme.text()
+                    },
+                ),
+                // A pad cell: the weeks either side of the month are blank, not absent.
+                None => (String::new(), " ", theme.dim()),
+            };
+            days.push(Span::styled(format!("{label:>CELL$}"), style));
+            marks.push(Span::styled(format!("{mark:>CELL$}"), theme.dim()));
+        }
+        lines.push(Line::from(days));
+        lines.push(Line::from(marks));
+    }
+
+    let head = Rect {
+        height: wanted,
+        ..area
+    };
+    frame.render_widget(Paragraph::new(lines).style(theme.text()), head);
+    Rect {
+        y: area.y + wanted,
+        height: area.height - wanted,
+        ..area
     }
 }
 
@@ -981,19 +1054,18 @@ fn target_for(state: &mut State, action: Action) -> Option<Target> {
 fn current_target(state: &mut State) -> Option<Target> {
     let node = state.rail.selected()?;
     let view = &mut state.views[state.active];
-    // A draw/Full view carries its own selection and names it as an address; a row-view
-    // defaults to None and Porticus uses the focused Row's (P§3).
-    if let Some(target) = view.target() {
-        return Some(target);
-    }
     let Some(rows) = view.rows(&node) else {
-        // **`None` is a draw-view, not an empty one** (P§3). A draw-view that names no
-        // target of its own is *about the selected node* — `pan`'s tree tab is the case
-        // — so the node is the subject. An empty row-view returns `Some(vec![])` and
-        // falls through below with nothing, which is the honest answer there: it has a
-        // set, and the set is empty.
-        return Some(Target::Node { node, at: None });
+        // **`None` is a draw-view, not an empty one** (P§3). A draw/Full view carries
+        // its own selection and names it as an address — a Timeline's focused bar. One
+        // that names none is *about the selected node* — `pan`'s tree tab is the case —
+        // so the node is the subject.
+        return view.target().or(Some(Target::Node { node, at: None }));
     };
+    // A **row-view's** focused row wins over any address the view also names. A dated
+    // Full view names its *cell* so `a` can date the add (P§7, `target_for`), and that
+    // cell must not stand in for the event the cursor is actually on. An empty row-view
+    // returns `Some(vec![])` and falls through below with nothing, which is the honest
+    // answer there: it has a set, and the set is empty.
     let rows = filtered(&rows, &state.filter);
     let index = state.row.min(rows.len().saturating_sub(1));
     rows.get(index).map(|row| row.target.clone())

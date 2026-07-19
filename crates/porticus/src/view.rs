@@ -49,6 +49,38 @@ pub struct Row {
     pub when: Option<String>,
 }
 
+/// One day-cell of a [`Grid`].
+///
+/// It carries a count and not the items themselves: the items are the view's `rows`,
+/// which is what keeps search, filter and scroll Porticus's (P§6). A cell says only
+/// *how many* fall here, drawn as a marker rather than a number the eye has to read.
+#[derive(Clone, Debug)]
+pub struct GridCell {
+    /// What the cell shows — a day number.
+    pub label: String,
+    /// How many of the view's items fall on this day.
+    pub items: usize,
+}
+
+/// A month grid a **dated Full row-view** paints above its rows (P§3).
+///
+/// The view hands up the shape and Porticus draws it, exactly as `Insights` hands up
+/// `Panel`s — so a calendar is drawn once for every instrument that wants one (I3).
+///
+/// Declaring a grid does not stop a view being a row-view. `rows` still supplies the
+/// focused day's items and Porticus still renders, searches and scrolls them (P§6);
+/// the grid is the *locator* and the rows beneath it are the day. The cell cursor is
+/// the view's own, moved through [`View::navigate`] like any Tier-3 motion.
+#[derive(Clone, Debug)]
+pub struct Grid {
+    /// Column headers — `Mo`…`Su`.
+    pub columns: Vec<&'static str>,
+    /// Row-major cells; `None` pads the weeks either side of the month.
+    pub cells: Vec<Option<GridCell>>,
+    /// Index into `cells` of the focused day.
+    pub focused: usize,
+}
+
 /// Side-effect-free motion delivered to a view (P§3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Nav {
@@ -90,6 +122,14 @@ pub trait View {
     /// For row-less views. Draws into the caller's buffer, like everything else here.
     fn draw(&mut self, node: &Code, area: Rect, buf: &mut Buffer, theme: Theme) {
         let _ = (node, area, buf, theme);
+    }
+
+    /// A dated Full row-view's month grid, drawn above its rows (P§3).
+    ///
+    /// `None` for every view that is not a calendar — which is every other view in the
+    /// catalog. Folded fresh each frame like `rows` and `draw`, never held (I1).
+    fn grid(&mut self) -> Option<Grid> {
+        None
     }
 
     /// Which standard actions this view offers (P§5). A key whose action is not

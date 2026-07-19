@@ -1,13 +1,13 @@
 //! Fasti's TUI — a thin Porticus provider (P§2). Rides the `tui` feature (§14).
 //!
-//! Four views, and the lineup is where Fasti's two shapes show as two surfaces: a
-//! `TreeFile` of what is placed at a node, an `Agenda` of every occurrence by date —
-//! **the calendar, derived at render and stored nowhere** (§8.4, I1) — and an
-//! `EntityCard` whose strip is the one thing a span natively is, a period.
+//! The lineup is where Fasti's two shapes show as two surfaces: a `TreeFile` of what is
+//! placed at a node, a `Calendar` of every occurrence on a month grid — **the calendar
+//! §8.4 calls derived, derived at render and stored nowhere** (I1) — a `Timeline` of
+//! every span as a bar, and an `EntityCard` whose strip is the one thing a span
+//! natively is, a period.
 //!
-//! P§3's `Calendar` and `Timeline` views are the nicer form of the middle two and do
-//! not exist yet; they are Porticus's to grow, not Fasti's, so this lineup is built
-//! from the shipped catalog exactly as Album's and Annales' are.
+//! This is P§3's own lineup for Fasti, plus the `EntityCard`: a lineup carries at most
+//! one detail view, and without it `Enter` on a row would be inert.
 
 use std::ffi::OsString;
 
@@ -16,8 +16,9 @@ use fasti::{Fasti, FastiRecord};
 use pantheon::{Code, EntityRef, Response, SeriesRef, Store};
 use porticus::action::{Invocation, Relayed};
 use porticus::view::Row;
-use porticus::views::Agenda;
-use porticus::views::{Card, CardSpan, Chart, Chip, EntityCard, Insights, Panel, TreeFile};
+use porticus::views::{
+    Calendar, Card, CardSpan, Chart, Chip, EntityCard, Insights, Panel, Timeline, TreeFile,
+};
 use porticus::{Action, App, Ident, RecordRef, Target, View, Writer};
 
 use crate::{Cli, with_default_verb};
@@ -50,7 +51,8 @@ impl App for FastiApp {
 
     fn lineup(&mut self) -> Vec<Box<dyn View>> {
         let for_rows = self.root.clone();
-        let for_agenda = self.root.clone();
+        let for_calendar = self.root.clone();
+        let for_timeline = self.root.clone();
         let for_card = self.root.clone();
         let for_insights = self.root.clone();
         vec![
@@ -66,13 +68,21 @@ impl App for FastiApp {
                     ])
                     .empty("nothing placed here"),
             ),
-            // The calendar §8.4 calls derived: every occurrence in the tree, by date,
-            // folded fresh each frame and stored nowhere (I1). Each row carries its own
-            // home, so it spans nodes without a cursor (P§3).
+            // The calendar §8.4 calls derived: every occurrence in the tree, on a month
+            // grid, folded fresh each frame and stored nowhere (I1). Each row carries
+            // its own home, so it spans nodes without a cursor (P§3), and `a` on a cell
+            // dates the add from the day you pointed at (§7.3, P§7).
             Box::new(
-                Agenda::of(move || agenda(&for_agenda))
-                    .offering(&[Action::Edit, Action::Remove])
-                    .empty("nothing on the timeline"),
+                Calendar::of(move || agenda(&for_calendar))
+                    .offering(&[Action::Add, Action::Edit, Action::Remove])
+                    .empty("nothing this day"),
+            ),
+            // Spans as bars. A period is exactly what a Timeline draws, and each bar
+            // carries its own home, so this is cross-node like the calendar (P§3).
+            Box::new(
+                Timeline::of(move || bars(&for_timeline))
+                    .offering(&[Action::Edit, Action::Rename])
+                    .empty("no periods yet"),
             ),
             // The span card — a period drawn as one (P§3).
             Box::new(
@@ -254,7 +264,30 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
     rows
 }
 
-/// The whole tree's occurrences, for the Agenda (P§3).
+/// The whole tree's spans as bars, for the Timeline (P§3).
+///
+/// Each bar carries its own home, so the view is cross-node without a cursor — a career
+/// at one node and a residence at another sit on one range (P§7).
+fn bars(root: &std::path::Path) -> Vec<CardSpan> {
+    let mut bars: Vec<CardSpan> = spans(root, None)
+        .into_iter()
+        .map(|(eref, span)| CardSpan {
+            label: eref.slug.clone(),
+            from: span.from,
+            to: span.to,
+            home: RecordRef {
+                home: eref.home,
+                key: eref.slug,
+            },
+        })
+        .collect();
+    // Earliest first, then by name — a stable order, so a refold does not shuffle bars
+    // under the cursor.
+    bars.sort_by(|a, b| a.from.cmp(&b.from).then_with(|| a.label.cmp(&b.label)));
+    bars
+}
+
+/// The whole tree's occurrences, for the Calendar (P§3).
 fn agenda(root: &std::path::Path) -> Vec<Row> {
     occurrences(root, None)
         .into_iter()
@@ -321,6 +354,10 @@ fn card_at(root: &std::path::Path, node: &Code, pinned: Option<&RecordRef>) -> O
             label: eref.slug.clone(),
             from: span.from,
             to: span.to,
+            home: RecordRef {
+                home: eref.home.clone(),
+                key: eref.slug.clone(),
+            },
         }],
     })
 }
