@@ -12,8 +12,9 @@
 //! before applying (§9.5). No daemon: it is woken by hooks and by a hand's own
 //! `aus run` (§9.4).
 //!
-//! This crate carries the **read half** so far: discovery and the header. Executing a
-//! rule is `plan`/`test`'s, and applying a proposal is `run`'s.
+//! This crate carries discovery, the header, and the **propose protocol** — running a
+//! rule and reporting what it proposed. Applying a proposal is `run`'s, and with it the
+//! capability check that is the whole guard (§9.5).
 //!
 //! ## Discovery never runs code
 //!
@@ -31,6 +32,7 @@ use pantheon::code::Code;
 use pantheon::tree::{Node, TreeRoot, build_tree};
 
 mod cli;
+mod rule;
 // The screen rides the `tui` feature; drop it and the rules browser is a CLI (§14).
 #[cfg(feature = "tui")]
 mod screen;

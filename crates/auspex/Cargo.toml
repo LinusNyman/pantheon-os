@@ -24,9 +24,9 @@ serde.workspace = true
 serde_json.workspace = true
 # tracing: Auspex's own diagnostics, **stderr only** — inherited when a hand runs
 # `aus`, discarded when a core spawns the hook detached (§13). Never a file: a log the
-# engine kept would be the rule state and the audit sink §18 forbids. Nothing emits yet
-# — the subscriber lands with rule execution, which is the first thing worth tracing.
+# engine kept would be the rule state and the audit sink §18 forbids.
 tracing.workspace = true
+tracing-subscriber.workspace = true
 porticus = { workspace = true, optional = true }
 
 [dev-dependencies]

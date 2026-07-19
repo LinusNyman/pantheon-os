@@ -124,8 +124,9 @@ have turned `edit -k` into a record transformation when §7.2 says it is a file 
 
 **Still scaffold** — a stub printing a not-implemented line: `speculum` and `studium` (9).
 **Step 8 is in progress**, in three parts against §16's own "`plan` before `run`" sequencing:
-the hook (landed, below), then Auspex's **read half** (landed: discovery, the header, `ls`,
-`version`, `help`, and the browser screen), then `plan`/`test`, then `run`.
+the hook (landed, below), Auspex's **read half** (landed: discovery, the header, `ls`, `version`,
+`help`, and the browser screen), the **propose protocol** (landed: `plan` and `test`), and then
+`run` — which is the capability check, the dedupe, and the applies (§9.5 steps 2–5).
 
 **`aus` is real enough for `pan doctor` to see it** — it emits `version -f json` with
 `format_version: 1`, so it has moved from `absent` to `installed`. `run`, `plan`, and `test` are
@@ -161,6 +162,37 @@ variant is `Rule`, not `Function`; `"function"` is the reserved *token*. No `Sto
 ever yield one, since a rule belongs to no core's token set, so it is built from `build_tree` +
 a per-node meta-dir `read_dir` + `classify`. **`pan new` does not mint meta dirs** — they appear
 on first write — so a fixture placing a rule must `create_dir_all` it.
+
+### Running a rule (§9.3) — what `plan` and `test` settled
+
+- **Three streams move at once, on their own threads.** A rule gets its context on stdin and
+  answers on stdout, and doing that in sequence deadlocks: a rule writing more than a pipe buffer
+  before reading would block on stdout while Auspex blocked on stdin. `std::thread::scope` in
+  `rule.rs` is what avoids it, and `a_rule_that_ignores_its_context_still_proposes` pins it with a
+  200 KB context against a rule that never reads.
+- **The child gets two variables and both are load-bearing.** `PANTHEON_RULE=1` is the enforcement
+  every core already honours. **`PANTHEON_ROOT` is the one easy to forget**: §9.3 has a rule read
+  the tree through the core CLIs, the context JSON carries no root, so without it a rule under
+  `aus -C /some/tree` reads whatever the ambient environment named — the relay bug again, one
+  layer down.
+- **A 30-second deadline, hardcoded.** The spec bounds a rule's runtime nowhere, and both extremes
+  are wrong: no limit lets a hung rule leave a detached process per write alive forever, a short
+  one kills the API-calling rule §9.3 explicitly permits. Not a knob (§18) — `evaluate` takes the
+  deadline as a parameter only so a test can reach the mechanism without waiting 30s.
+- **Four failure modes, all per-rule**: could not spawn (usually a missing exec bit — a rule is run
+  directly, so its shebang is the interpreter), exited non-zero, timed out, or emitted unparseable
+  JSON. Each is reported against its own rule and the others still run (§9.5).
+- **`plan` parses rather than echoing**, though §9.3 says "print stdout": `aus`'s own stdout is
+  contract JSON (I4) and a rule emitting garbage would corrupt it rather than being reported.
+- **The exit code folds worst-wins** — `0` all ran, `1` any errored — which is what `pan validate`
+  and `pan resolve` both do. §9.5's "others are unaffected" is about not aborting the batch, not
+  about claiming success.
+- **`tracing` is live and stderr-only**, off unless `RUST_LOG` asks, so stdout stays pure contract.
+  A rule's own stderr is captured (to quote on failure) and traced at debug, so a succeeding rule's
+  diagnostics are not simply lost.
+- **A test harness driving `aus` must set `.stdin(Stdio::null())`** — `aus test` reads a fixture
+  from stdin whenever stdin is not a terminal, so a child inheriting the runner's stdin waits on a
+  pipe that never closes. Both auspex test files do it and say why.
 
 **Step 8's hook half landed first, and it is the spine's, not each core's.** §16 step 8 says the
 `aus`-not-on-`PATH` no-op "is exercised" through steps 1–7 — it was not: no core spawned anything,

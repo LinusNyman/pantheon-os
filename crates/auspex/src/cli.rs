@@ -93,6 +93,7 @@ pub fn run_cli() -> ExitCode {
     // wake to a *core's* TUI. The twin of the `PANTHEON_NO_HOOKS` Auspex sets on the
     // cores it spawns: one says not this process, the other not that child.
     pantheon::hook::suppress();
+    init_tracing();
 
     let cli = Cli::parse();
     let as_json = contract::format_is_json(cli.format.map(|f| matches!(f, Format::Json)));
@@ -111,10 +112,33 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
             Err(refused_under_rule(verb_of(cmd)))
         }
         Cmd::Ls { scope } => cmd_ls(cli, scope.as_deref()),
+        Cmd::Plan { scope } => cmd_plan(cli, scope.as_deref()),
+        Cmd::Test { rule } => cmd_test(cli, rule),
         Cmd::Help => Ok(Response::Json(help_json())),
         Cmd::Version => Ok(Response::Json(version_json())),
-        Cmd::Run { .. } | Cmd::Plan { .. } | Cmd::Test { .. } => Err(not_implemented(cmd)),
+        Cmd::Run { .. } => Err(not_implemented(cmd)),
     }
+}
+
+/// Auspex's diagnostics, **stderr only** (§13).
+///
+/// Inherited when a hand runs `aus`, and discarded when a core spawns the hook
+/// detached — `hook::wake` nulls the child's streams, so this writes into the void
+/// there, which is the intent rather than an accident. Never a file: a log the engine
+/// kept would be the rule state and the audit sink §18 forbids.
+///
+/// Off unless `RUST_LOG` asks, so an ordinary run says nothing on stderr and a piped
+/// caller sees only the contract on stdout.
+fn init_tracing() {
+    use tracing_subscriber::{EnvFilter, fmt};
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    // `try_init` rather than `init`: a second call must not panic, and the in-process
+    // relay re-enters `run_cli`'s neighbours from the screen.
+    let _ = fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(filter)
+        .try_init();
 }
 
 fn verb_of(cmd: &Cmd) -> &'static str {
@@ -145,14 +169,17 @@ fn refused_under_rule(verb: &str) -> Error {
     ))
 }
 
-/// The three verbs that execute a rule, which land with the propose protocol (§9.3).
+/// `run` alone, now that `plan` and `test` evaluate rules.
 ///
+/// What `run` still lacks is not the running — that is `plan`'s, and shared — but the
+/// *applying*: the capability check, the dedupe, and the writes themselves (§9.5).
 /// Declared rather than hidden, so `--help` tells the truth about what `aus` will be
-/// and the refusal above has something to refuse.
+/// and the §9.3 refusal has something to refuse.
 fn not_implemented(cmd: &Cmd) -> Error {
     Error::runtime(format!(
-        "`aus {}` is not implemented yet — rule execution is the propose protocol's \
-         (§9.3), and `ls` is what reads the tree today",
+        "`aus {}` is not implemented yet — a rule already runs (`aus plan`), but \
+         applying what it proposes needs the capability check that stands between a \
+         rule and your records (§9.5)",
         verb_of(cmd)
     ))
 }
@@ -213,6 +240,151 @@ fn cmd_ls(cli: &Cli, scope: Option<&str>) -> Result<Response> {
         })
         .collect();
     Ok(Response::Json(Value::Array(rows)))
+}
+
+// ── the propose protocol (§9.3) ──────────────────────────────────────────────
+
+/// Evaluate every rule in scope and print what they propose, applying nothing (§9.6).
+///
+/// **Triggerless, always.** `aus plan` takes no `--trigger` (§9.6), so no single write
+/// authored this wake — which is exactly the case §9.3 says `watch=` cannot filter, so
+/// every rule in scope evaluates.
+fn cmd_plan(cli: &Cli, scope: Option<&str>) -> Result<Response> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let at = scope.map(Code::parse).transpose()?;
+    let rules = crate::discover(&root, at.as_ref())?;
+    let now = today()?;
+
+    let mut failed = false;
+    let mut rows = Vec::with_capacity(rules.len());
+    for rule in &rules {
+        let context = context_for(rule, &now, "manual");
+        let outcome = crate::rule::evaluate(
+            &rule.path,
+            &root,
+            &context.to_string(),
+            crate::rule::DEADLINE,
+        );
+        rows.push(row_for(rule, &outcome, &mut failed));
+    }
+    Ok(outcome_response(rows, failed))
+}
+
+/// Run one rule against a fixture and print its proposals (§9.6).
+///
+/// The fixture is `aus`'s own stdin, handed to the rule unchanged — the point is to
+/// drive a rule with a context you chose (a particular `now`, a particular trigger) and
+/// assert on what comes back. **At a terminal with nothing piped, the context `plan`
+/// would have built is synthesized instead** of blocking on a stdin that will never
+/// close: the same TTY rule that decides table-versus-JSON and opens an editor (§7.3,
+/// I8), and the same gate Tabella reads a document body behind.
+fn cmd_test(cli: &Cli, rule_name: &str) -> Result<Response> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let rules = crate::discover(&root, None)?;
+    let rule = one_named(&rules, rule_name)?;
+
+    let mut fixture = String::new();
+    if !contract::stdin_is_terminal() {
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut fixture)
+            .map_err(|e| Error::runtime(format!("could not read the fixture from stdin: {e}")))?;
+    }
+    // Blank counts as no fixture, not as an empty one — `aus test foo </dev/null` is a
+    // hand asking to run the rule, not asking to hand it nothing. Handing a rule an
+    // empty stdin would make it fail at parsing a context it was never given.
+    let context = if fixture.trim().is_empty() {
+        context_for(rule, &today()?, "manual").to_string()
+    } else {
+        fixture
+    };
+
+    let mut failed = false;
+    let outcome = crate::rule::evaluate(&rule.path, &root, &context, crate::rule::DEADLINE);
+    let row = row_for(rule, &outcome, &mut failed);
+    Ok(outcome_response(vec![row], failed))
+}
+
+/// Resolve a rule name to exactly one rule (§7.3's inference rule).
+///
+/// Zero is not found; more than one lists the candidates and stops rather than picking
+/// — a rule name is unique per node, not per tree, so two nodes may honestly hold a
+/// `weigh_in` and neither is the obvious one.
+fn one_named<'a>(rules: &'a [crate::Rule], name: &str) -> Result<&'a crate::Rule> {
+    let matches: Vec<&crate::Rule> = rules.iter().filter(|r| r.name == name).collect();
+    match matches.as_slice() {
+        [] => Err(Error::not_found(format!(
+            "no rule named {name:?} — `aus ls` shows what the tree has (§9.1)"
+        ))),
+        [only] => Ok(only),
+        many => {
+            let at: Vec<&str> = many.iter().map(|r| r.scope.as_str()).collect();
+            Err(Error::usage(format!(
+                "{name:?} is a rule at {} — name a scope to choose (§7.3)",
+                at.join(", ")
+            )))
+        }
+    }
+}
+
+/// The context handed to a rule on stdin (§9.3).
+///
+/// No `trigger` key: this PR's two verbs are both triggerless, and §9.3 says a trigger
+/// is **absent** where no single write authored the wake rather than being present and
+/// empty — a wake that is not a write stays silent instead of naming one that never
+/// happened.
+fn context_for(rule: &crate::Rule, now: &str, sign: &str) -> Value {
+    json!({
+        "sign": sign,
+        "rule": rule.name,
+        "scope": rule.scope.as_str(),
+        "now": now,
+    })
+}
+
+/// Today, as the `YYMMDD` a rule keys by.
+///
+/// **`now` is a date and stays one** (§9.3): that is what makes a rule idempotent, the
+/// same proposal on the same day being the same key to upsert rather than stack. A
+/// `now` carrying the wake's clock would mint a fresh key every hook and stack forever.
+///
+/// The spine's `today()` is private; `key_from_at(None)` is its one public door, and
+/// the same one Pensum uses for a bare `--done`.
+fn today() -> Result<String> {
+    Ok(contract::key_from_at(None)?.to_string())
+}
+
+/// One rule's outcome as a row, flipping `failed` if it did not run.
+fn row_for(rule: &crate::Rule, outcome: &crate::rule::Outcome, failed: &mut bool) -> Value {
+    let mut row = json!({
+        "rule": rule.name,
+        "scope": rule.scope.as_str(),
+    });
+    match outcome {
+        crate::rule::Outcome::Proposed(writes) => {
+            // An empty `writes` is a real result — most wakes find nothing to say — so
+            // it is present and empty rather than absent (§9.5 step 1).
+            row["writes"] = Value::Array(writes.clone());
+        }
+        crate::rule::Outcome::Failed(why) => {
+            *failed = true;
+            row["error"] = json!(why);
+        }
+    }
+    row
+}
+
+/// The rows, with the worst outcome folded into the exit code.
+///
+/// Every rule is reported either way — §9.5's "skipped and reported; others are
+/// unaffected" is about not aborting the batch. But a command that met a broken rule
+/// should not claim success, which is how `pan validate` and `pan resolve` both behave:
+/// the findings ride in the JSON and the exit code carries the worst of them.
+fn outcome_response(rows: Vec<Value>, failed: bool) -> Response {
+    let value = Value::Array(rows);
+    if failed {
+        Response::JsonExit(value, 1)
+    } else {
+        Response::Json(value)
+    }
 }
 
 /// A system tool's surface. No `kinds` and no `series` — Auspex owns no records — and

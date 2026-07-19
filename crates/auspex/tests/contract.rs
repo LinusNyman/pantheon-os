@@ -33,7 +33,12 @@ fn aus_env(root: &Path, args: &[&str], env: &[(&str, &str)]) -> (i32, Value) {
     cmd.arg("-C")
         .arg(root)
         .args(args)
-        .env_remove("PANTHEON_ROOT");
+        .env_remove("PANTHEON_ROOT")
+        // `aus test` reads its fixture from stdin when stdin is not a terminal (§9.6).
+        // Without this the child inherits the test runner's and waits on a pipe that
+        // never closes — a null stdin makes that an immediate EOF rather than a hang,
+        // which is why Tabella's contract test does the same for its body read.
+        .stdin(std::process::Stdio::null());
     for (key, value) in env {
         cmd.env(key, value);
     }
@@ -299,8 +304,12 @@ fn exit_codes() {
         ("every rule in the tree", &["ls"], &[]),
         ("a scope that is a real node", &["ls", "csa"], &[]),
         ("a scope naming no node", &["ls", "nosuch"], &[]),
-        ("rule execution is not built yet", &["run"], &[]),
-        ("nor is planning", &["plan"], &[]),
+        ("applying a proposal is not built yet", &["run"], &[]),
+        // This file's rules are written by hand and never chmod'd, which is exactly
+        // the case §9.1 leaves to the author: a rule is executed directly, so one
+        // without its exec bit cannot run. Every rule failing is still exit 1, not a
+        // crash — "skipped and reported; others are unaffected" (§9.5).
+        ("rules that cannot be executed", &["plan"], &[]),
         ("a rule may not re-enter the engine", &["run"], &rule),
         ("but it may read", &["ls"], &rule),
     ];

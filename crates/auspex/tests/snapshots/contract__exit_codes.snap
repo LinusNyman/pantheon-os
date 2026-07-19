@@ -12,11 +12,11 @@ aus ls nosuch
   # a scope naming no node
   => exit 4: no node with code "nosuch"
 aus run
-  # rule execution is not built yet
-  => exit 1: `aus run` is not implemented yet — rule execution is the propose protocol's (§9.3), and `ls` is what reads the tree today
+  # applying a proposal is not built yet
+  => exit 1: `aus run` is not implemented yet — a rule already runs (`aus plan`), but applying what it proposes needs the capability check that stands between a rule and your records (§9.5)
 aus plan
-  # nor is planning
-  => exit 1: `aus plan` is not implemented yet — rule execution is the propose protocol's (§9.3), and `ls` is what reads the tree today
+  # rules that cannot be executed
+  => exit 1: 4 rule(s)
 aus run (PANTHEON_RULE=1)
   # a rule may not re-enter the engine
   => exit 6: `run` re-enters the engine and PANTHEON_RULE=1 refuses it: a rule reads the tree through the core CLIs, never by calling `aus` — an `aus plan` inside a rule would re-evaluate that rule without bound (§9.3)
