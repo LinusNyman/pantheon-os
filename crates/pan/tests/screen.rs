@@ -66,34 +66,57 @@ fn the_validate_tab_reports_through_the_same_chrome() {
     assert!(text.contains("P A N T H E O N"), "{text}");
 }
 
-/// **The six structural mutators are dark, and the screen says so by doing nothing.**
+/// **`x` removes the selected node, through the spine, on disk (§10.1).**
 ///
-/// §10.1's node-level cascade is still stubbed — `mv`, `rm`, `rename`, `rename-prefix`,
-/// `rename-pattern` and `mv-file` all return not-implemented — so `on_action` returns
-/// `None` and Porticus greys the keys (P§7). A dark key is a **no-op**, never a key
-/// repurposed for something else, and never a relay that fails after the fact.
-///
-/// This is the assertion that would catch the cascade being wired up without its keys
-/// being reconsidered, or a key being quietly rebound while the verb is still a stub.
+/// The rail cursor opens on the first sphere; `<down>` lands on its child `ac`, `x` asks,
+/// `<enter>` confirms, and Porticus relays `pan rm ac -C <root> -y`. `ac` is an empty
+/// leaf, so it goes; its parent stays.
 #[test]
-fn the_stubbed_mutators_stay_dark() {
+fn x_removes_the_selected_node() {
+    let root = fresh_root();
+    assert!(root.join("a_actio/a_c_cura").is_dir(), "the leaf is there");
+
+    frame(&root, "<down>x<enter>");
+
+    assert!(
+        !root.join("a_actio/a_c_cura").exists(),
+        "`x` must reach the file, not just the frame"
+    );
+    assert!(root.join("a_actio").is_dir(), "the parent survives");
+}
+
+/// **`r` renames the selected node's label, on disk (§10.1).**
+///
+/// `<down>` selects `ac`, `r` opens Porticus's rename prompt; the typed label is appended
+/// to `pan rename ac --label …`. The first `<enter>` submits the prompt, the second
+/// confirms the computed change (a rename confirms, P§5). The code is unchanged (a label
+/// rename), so only the directory's label part moves.
+#[test]
+fn r_renames_the_selected_node_label() {
+    let root = fresh_root();
+
+    frame(&root, "<down>rkinship<enter><enter>");
+
+    assert!(
+        root.join("a_actio/a_c_kinship").is_dir(),
+        "`r` must rename the label on disk, not just the frame"
+    );
+    assert!(!root.join("a_actio/a_c_cura").exists());
+}
+
+/// **`m` (move) stays dark — a no-op, not a relay that fails.**
+///
+/// Porticus has no destination prompt for a node move yet, so `pan` does not offer the
+/// action; the key draws nothing and touches nothing (P§7).
+#[test]
+fn move_stays_dark() {
     let root = fresh_root();
     let before = frame(&root, "");
-
-    // Focus the content, then press every mutating key `pan` does not offer.
-    let after = frame(&root, "<tab>rmx");
+    let after = frame(&root, "<down>m");
     assert_eq!(
         before.lines().count(),
         after.lines().count(),
-        "a dark key draws no overlay and no prompt"
+        "a dark key draws no overlay: {after}"
     );
-    // The tree is untouched: nothing was renamed, moved, or removed.
-    assert!(
-        after.contains("a actio") && after.contains("ac cura"),
-        "{after}"
-    );
-    assert!(
-        root.join("a_actio").is_dir(),
-        "a dark key must not reach the filesystem"
-    );
+    assert!(root.join("a_actio/a_c_cura").is_dir(), "nothing moved");
 }

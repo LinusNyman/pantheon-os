@@ -7,13 +7,15 @@
 //! Two tabs, as §10 names them: the tree browser and the validate findings. Annotate is
 //! an action on the selected node (§10.3), not a third tab.
 //!
-//! # What is deliberately absent
+//! # Keys and what stays dark
 //!
-//! The six structural mutators of §10.1 — `mv`, `rm`, `rename`, `rename-prefix`,
-//! `rename-pattern`, `mv-file` — are still stubs waiting on the node-level path
-//! cascade. So `r`, `m` and `x` are **dark** here: `on_action` returns `None` and
-//! Porticus greys them (P§7's graceful degradation). A tree browser that offered a move
-//! it could not perform would be worse than one that says so.
+//! The node cascade (§10.1) is built, so `r` renames the selected node's label and `x`
+//! removes it (refused by the spine if it is not empty). `m` (move) stays **dark** —
+//! Porticus has no destination prompt for it yet, and a tree browser that offered a move
+//! it could not complete would be worse than one that says so (P§7's graceful
+//! degradation). `a` (add a child) is likewise not offered here; a child is minted with
+//! `pan new`. The bulk repairs (`rename-prefix`, `rename-pattern`, `mv-file`) are CLI
+//! verbs with no key of their own.
 
 use std::ffi::OsString;
 
@@ -100,10 +102,16 @@ impl App for PanApp {
             return None;
         };
         match action {
-            // `annotate` is the one node-level write that is built (§5.5, §10.3). The
-            // typed `key=value` is appended by Porticus after the prompt.
+            // `annotate` is a node-level write (§5.5, §10.3); the typed `key=value` is
+            // appended by Porticus after the prompt.
             Action::Edit => Some(Invocation::new("pan", ["annotate", node.as_str(), "--set"])),
-            // The rest wait on the node-level cascade (§10.1) — dark, not faked.
+            // `r` renames the node's label (Porticus appends the typed label after its
+            // rename prompt); a definition-prefix node needs `--def` and says so (§10.1).
+            Action::Rename => Some(Invocation::new("pan", ["rename", node.as_str(), "--label"])),
+            // `x` removes the node — refused by the spine if it is not empty (§10.1).
+            Action::Remove => Some(Invocation::new("pan", ["rm", node.as_str()])),
+            // `m` (move) needs a destination the chrome has no prompt for yet, so it
+            // stays dark rather than relay a `mv … --to` with no target (§10.1).
             _ => None,
         }
     }
@@ -171,11 +179,15 @@ impl View for TreeTab {
     }
 
     fn actions(&self) -> &[Action] {
-        &[Action::Edit]
+        // `e` annotates, `r` renames the label, `x` removes an empty node (§10.1, §10.3).
+        // `m` (move) and `a` (add a child) are not offered — the chrome has no
+        // destination/child prompt for them yet, so their keys stay dark.
+        &[Action::Edit, Action::Rename, Action::Remove]
     }
 
     fn prompts_for(&self, action: Action) -> Option<&'static str> {
-        // `pan annotate` says nothing until a `key=value` is typed (§5.5).
+        // `pan annotate` says nothing until a `key=value` is typed (§5.5). `rename` gets
+        // Porticus's own rename prompt, so it needs none here.
         (action == Action::Edit).then_some("annotate key=value")
     }
 
