@@ -213,8 +213,28 @@ fn draw(
     draw_status(frame, state, theme, bands[2]);
 
     if let Some(top) = state.overlays.last() {
-        draw_overlay(frame, top, theme, ident, area);
+        match top {
+            // The pick-a-home modal paints the tree itself, so it needs the app to ask
+            // each node its presence — a different render path from the line overlays.
+            Overlay::Tree { rail } => draw_tree_modal(frame, rail, app, theme, area),
+            other => draw_overlay(frame, other, theme, ident, area),
+        }
     }
+}
+
+/// The pick-a-home modal (P§4): a bordered box painting its own rail, so a quick add
+/// picks a node the same way the main tree is browsed.
+fn draw_tree_modal(frame: &mut Frame, rail: &Rail, app: &mut impl App, theme: Theme, area: Rect) {
+    let box_area = centred(area, 72, area.height.saturating_sub(2));
+    frame.render_widget(Clear, box_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.chrome())
+        .title("pick a node")
+        .style(theme.text());
+    let inner = block.inner(box_area);
+    block.render(box_area, frame.buffer_mut());
+    rail.draw(inner, frame.buffer_mut(), theme, true, &mut Asking(app));
 }
 
 fn draw_header(frame: &mut Frame, state: &State, theme: Theme, ident: &crate::Ident, area: Rect) {
@@ -555,6 +575,9 @@ fn draw_overlay(
             lines
         }
         Overlay::Form { fields, focus, .. } => form_lines(fields, *focus, theme),
+        // The tree modal is painted by `draw_tree_modal`, not through this line body — it
+        // never reaches here.
+        Overlay::Tree { .. } => Vec::new(),
     };
 
     let box_area = centred(area, 72, u16::try_from(body.len() + 2).unwrap_or(8));
@@ -878,11 +901,12 @@ fn begin(
         });
         return Ok(());
     }
+    // `A` opens the tree as a modal to pick a home at any node (P§4), then hands off to
+    // the same add form `a` opens — so a quick add differs only in how the home is
+    // chosen. Its own rail leaves the browsing cursor untouched.
     if action == Action::QuickAdd {
-        state.overlays.push(Overlay::Line {
-            prompt: Prompt::QuickAddCode,
-            label: "add at code".into(),
-            buffer: String::new(),
+        state.overlays.push(Overlay::Tree {
+            rail: Rail::new(&state.root)?,
         });
         return Ok(());
     }
@@ -892,16 +916,7 @@ fn begin(
     // relayed. Before this, `a` relayed a nameless `add` that the spine refused, so no
     // prompt appeared and nothing was minted.
     if action == Action::Add {
-        let fields = app
-            .add_form()
-            .into_iter()
-            .map(|spec| (spec, String::new()))
-            .collect();
-        state.overlays.push(Overlay::Form {
-            target,
-            fields,
-            focus: 0,
-        });
+        open_add_form(app, state, target);
         return Ok(());
     }
 
@@ -1177,6 +1192,12 @@ fn handle_overlay(
     if matches!(state.overlays.last(), Some(Overlay::Form { .. })) {
         return handle_form_key(screen, app, state, key);
     }
+    // The pick-a-home modal navigates its own tree (P§4). It only opens an overlay, so
+    // it needs no `screen` to relay through and cannot fail.
+    if matches!(state.overlays.last(), Some(Overlay::Tree { .. })) {
+        handle_tree_key(app, state, key);
+        return Ok(());
+    }
 
     match key.code {
         KeyCode::Esc => {
@@ -1327,6 +1348,63 @@ fn submit_form(
     commit_or_confirm(screen, app, state, Action::Add, invocation)
 }
 
+/// Open the add form for a home (§7.3, P§7): the fields the core declares, empty and
+/// focused on the first. Shared by `a` (the home is the tree cursor) and the pick-a-home
+/// modal (the home is the node selected there).
+fn open_add_form(app: &mut impl App, state: &mut State, target: Target) {
+    let fields = app
+        .add_form()
+        .into_iter()
+        .map(|spec| (spec, String::new()))
+        .collect();
+    state.overlays.push(Overlay::Form {
+        target,
+        fields,
+        focus: 0,
+    });
+}
+
+/// The pick-a-home modal's keys (P§4): arrows and `hjkl` walk its own tree, `Enter` opens
+/// the add form at the node under its cursor, `Esc` cancels.
+fn handle_tree_key(app: &mut impl App, state: &mut State, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            state.overlays.pop();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.down();
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.left();
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.right();
+            }
+        }
+        KeyCode::Enter => {
+            let node = match state.overlays.last() {
+                Some(Overlay::Tree { rail }) => rail.selected(),
+                _ => None,
+            };
+            state.overlays.pop();
+            if let Some(node) = node {
+                open_add_form(app, state, Target::Node { node, at: None });
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Search matches live (P§6) — and *whose* labels it matches follows focus.
 fn live_search(state: &mut State) {
     let Some(Overlay::Search { buffer }) = state.overlays.last() else {
@@ -1372,9 +1450,10 @@ fn submit(
             &snapshot,
         ),
         Overlay::Line { prompt, buffer, .. } => submit_line(screen, app, state, prompt, buffer),
-        // Title/Help have nothing to submit; the form owns its own submit through
-        // `handle_form_key`, so `Enter` never reaches here with it on top.
-        Overlay::Title | Overlay::Help | Overlay::Form { .. } => Ok(()),
+        // Title/Help have nothing to submit; the form and the tree modal own their own
+        // `Enter` (in `handle_form_key`/`handle_tree_key`), so it never reaches here with
+        // either on top.
+        Overlay::Title | Overlay::Help | Overlay::Form { .. } | Overlay::Tree { .. } => Ok(()),
     }
 }
 
@@ -1456,48 +1535,7 @@ fn submit_line(
             };
             let mut invocation = invocation;
             invocation.args.push(buffer);
-            commit_or_confirm(
-                screen.as_deref_mut(),
-                app,
-                state,
-                Action::Rename,
-                invocation,
-            )
-        }
-        Prompt::QuickAddCode => {
-            state.overlays.push(Overlay::Line {
-                prompt: Prompt::QuickAddContent(buffer),
-                label: "add what".into(),
-                buffer: String::new(),
-            });
-            Ok(())
-        }
-        Prompt::QuickAddContent(code) => {
-            let Ok(node) = Code::parse(code.trim()) else {
-                state.status = Status::Error(format!("no node with code {code}"));
-                return Ok(());
-            };
-            let target = Target::Node { node, at: None };
-            let Some(invocation) = app.on_action(Action::Add, &target) else {
-                state.status = Status::Notice("add does not apply here".into());
-                return Ok(());
-            };
-            let mut invocation = invocation;
-            invocation.args.push(buffer);
-            commit_or_confirm(screen.as_deref_mut(), app, state, Action::Add, invocation)
-        }
-        Prompt::PickHome => {
-            // A Full view's `a` has no tree cursor to resolve a home from (P§7).
-            let Ok(node) = Code::parse(buffer.trim()) else {
-                state.status = Status::Error(format!("no node with code {buffer}"));
-                return Ok(());
-            };
-            let target = Target::Node { node, at: None };
-            let Some(invocation) = app.on_action(Action::Add, &target) else {
-                state.status = Status::Notice("add does not apply here".into());
-                return Ok(());
-            };
-            commit_or_confirm(screen, app, state, Action::Add, invocation)
+            commit_or_confirm(screen, app, state, Action::Rename, invocation)
         }
     }
 }

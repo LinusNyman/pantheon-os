@@ -221,3 +221,32 @@ fn a_opens_the_add_form_and_mints_a_record() {
         "the coordinate the form collected is on disk: {text}"
     );
 }
+
+/// **`A` (quick add) picks a home in the tree modal, then mints through the add form.**
+///
+/// The tree-as-modal replaces the old type-a-code line prompt (P§4): `A` opens its own
+/// rail, the hand navigates to a node and `<enter>` selects it, and the add form opens
+/// there exactly as `a` does — so a quick add differs only in how the home is chosen.
+#[test]
+fn quick_add_picks_a_home_in_the_modal_then_mints() {
+    let root = fresh_root();
+    assert!(listed(&root).is_empty(), "clu starts empty");
+
+    // `A` raises the modal (its rail opens on the sphere); descend to `clu`, `<enter>`
+    // selects it and opens the form; type the name and `<enter>` submits.
+    porticus::drive(
+        &mut MappaApp::new(&root),
+        &root,
+        &porticus::keys("A<down><right><down><enter>torghandel<enter>"),
+        90,
+        20,
+    )
+    .unwrap();
+
+    assert_eq!(
+        listed(&root),
+        ["torghandel"],
+        "the quick add reached the file at the picked home: {:?}",
+        listed(&root)
+    );
+}

@@ -198,6 +198,38 @@ fn a_opens_the_default_add_form() {
     );
 }
 
+/// `A` (quick add) opens the tree as a modal to pick a home (P§4) — replacing the old
+/// type-a-code line prompt — and its box is headed so.
+#[test]
+fn quick_add_opens_the_tree_modal() {
+    struct QuickAdder;
+    impl App for QuickAdder {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(
+                TreeFile::of(|_: &Code| Vec::new()).offering(&[Action::QuickAdd]),
+            )]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let frame = porticus::drive(&mut QuickAdder, &root, &porticus::keys("A"), 72, 14).unwrap();
+    assert!(
+        frame.contains("pick a node"),
+        "the tree modal opened: {frame}"
+    );
+}
+
 /// A lineup must have a `[0]` to open on, and no more than nine views to switch
 /// between (P§3). Both are rejected at `run`, before a terminal is taken.
 #[test]

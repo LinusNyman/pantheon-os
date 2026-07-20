@@ -6,6 +6,7 @@
 //! inert and `Esc` dismisses; only at the bare base does it quit.
 
 use crate::action::{Action, FieldSpec, Invocation, Target};
+use crate::rail::Rail;
 
 /// Why a line prompt is open — what its answer will be used for.
 #[derive(Clone, Debug)]
@@ -15,15 +16,6 @@ pub enum Prompt {
     /// An action a view asked for a line first (`View::prompts_for`) — the typed line
     /// is appended to the invocation and the confirm policy runs as usual.
     Field(Action, Target),
-    /// `A` — quick add by code: the node, then the content.
-    QuickAddCode,
-    /// `A`, second leg — the content, at the code just given.
-    QuickAddContent(String),
-    /// A Full view's `a`, which has no tree cursor to resolve a home from (P§7).
-    ///
-    /// P§4 wants the tree itself as a modal here; this is the line-entry form of the
-    /// same question, resolving a home by code.
-    PickHome,
 }
 
 /// One overlay.
@@ -70,6 +62,10 @@ pub enum Overlay {
         fields: Vec<(FieldSpec, String)>,
         focus: usize,
     },
+    /// `A` — the tree as a modal, to pick a home for a quick add at any node (P§4). It
+    /// holds its own [`Rail`] so navigating it leaves the browsing cursor where it was;
+    /// selecting a node hands off to the add [`Form`](Overlay::Form).
+    Tree { rail: Rail },
 }
 
 /// One write awaiting acknowledgement.
@@ -129,6 +125,7 @@ impl Overlay {
             Overlay::Line { label, .. } => label.clone(),
             Overlay::Confirm { action, .. } => format!("confirm — {}", action.label()),
             Overlay::Form { .. } => "add".into(),
+            Overlay::Tree { .. } => "pick a node".into(),
         }
     }
 }
