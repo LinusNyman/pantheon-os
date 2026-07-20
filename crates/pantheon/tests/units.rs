@@ -10,7 +10,8 @@ use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
     Severity, Shape, build_tree, normalize, plan_mv, plan_mv_file, plan_new, plan_rename,
-    plan_rename_def, plan_rm, resolve_all, resolve_code, validate, with_record_lock,
+    plan_rename_def, plan_rename_prefix, plan_rm, resolve_all, resolve_code, validate,
+    with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -250,6 +251,35 @@ fn rename_def_reslugs_the_entity_and_cascades_its_refs() {
     .unwrap();
     assert!(mara.contains("album:john_smith"), "{mara}");
     assert!(!mara.contains("john_appleseed"), "{mara}");
+}
+
+#[test]
+fn rename_prefix_repairs_a_drifted_code_prefix() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("o", "officium"));
+    // A `csa`-prefixed file stranded in `cso`'s meta dir — what a crashed rename leaves.
+    write_record(
+        &root,
+        "cso",
+        "csa__person__x.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let (plan, _) =
+        plan_rename_prefix(&root, "csa", "cso", Some(&Code::parse("cso").unwrap())).unwrap();
+    plan.apply(&root).unwrap();
+
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_o_officium/cso__/cso__person__x.json")
+            .is_file()
+    );
+    assert!(
+        !root
+            .join("c_contextus/c_s_societas/cs_o_officium/cso__/csa__person__x.json")
+            .exists()
+    );
 }
 
 #[test]

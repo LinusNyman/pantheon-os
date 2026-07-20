@@ -392,6 +392,77 @@ pub fn plan_mv_file(root: &Path, file: &Path, to_code: &Code) -> Result<(Plan, V
     Ok((plan, record))
 }
 
+/// `pan rename-prefix <old> <new> [code]` (§10.1, §10.2) — rewrite a code prefix over a
+/// subtree. A **repair**: where a crashed rename or a hand's `mkdir` left files carrying
+/// the wrong `[code]` prefix (a `csa__`-named file stranded inside a `cso__/` meta dir),
+/// this rewrites every directory and file name under the scope whose code prefix is `old`
+/// to `new`. Unlike `rename`, it does *not* touch the scope node's own directory — it
+/// fixes contents, not identity. Scope defaults to the whole tree.
+///
+/// A code-prefix hit would also cascade the rule headers naming it (§9.2); that is
+/// deferred with Auspex (no header parser exists yet). Codes are not refs, so no
+/// `core:slug` cascade — that is `rename-pattern`'s, for a *slug* hit.
+pub fn plan_rename_prefix(
+    root: &Path,
+    old: &str,
+    new: &str,
+    scope: Option<&Code>,
+) -> Result<(Plan, Value)> {
+    if old == new {
+        return Err(Error::usage(
+            "rename-prefix: old and new prefixes are the same",
+        ));
+    }
+    // Both must be legal codes — a prefix is a code (§5.1).
+    Code::parse(old)?;
+    Code::parse(new)?;
+
+    let scope_path = match scope {
+        Some(code) => resolve_node(root, code)?.1,
+        None => root.to_path_buf(),
+    };
+    let scope_rel = rel_path(root, &scope_path);
+    let mut changes = Vec::new();
+    walk_prefix(&scope_path, &scope_rel, old, new, &mut changes)?;
+
+    if changes.is_empty() {
+        return Err(Error::not_found(format!(
+            "no name under the scope carries the code prefix {old:?}"
+        )));
+    }
+    let count = changes.len();
+    let plan = Plan::new("rename-prefix", changes);
+    let record = json!({ "old": old, "new": new, "renamed": count });
+    Ok((plan, record))
+}
+
+/// Recursively rename every directory and file under `dir` whose name carries `old` as a
+/// code prefix. Top-down, so a renamed directory's children use the new path (like
+/// [`plan_recode`]). `dir_abs` is read for enumeration; `dir_rel` is where it lives after
+/// any ancestor rename, for the `Change` from-paths.
+fn walk_prefix(
+    dir_abs: &Path,
+    dir_rel: &Path,
+    old: &str,
+    new: &str,
+    changes: &mut Vec<Change>,
+) -> Result<()> {
+    for entry in std::fs::read_dir(dir_abs)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_dir = entry.file_type()?.is_dir();
+        let renamed = swap_code_prefix(&name, old, new);
+        let child_rel = dir_rel.join(&renamed);
+        if renamed != name {
+            push_rename(changes, dir_rel.join(&name), child_rel.clone());
+        }
+        if is_dir {
+            walk_prefix(&entry.path(), &child_rel, old, new, changes)?;
+        }
+    }
+    Ok(())
+}
+
 /// Walk the branch rooted at `old_code` and emit a [`Change::Rename`] for every directory
 /// and file whose name carries a code in the branch (§10.1). The renamed node's own dir
 /// moves to `new_top_rel`; every descendant then follows mechanically — its code's

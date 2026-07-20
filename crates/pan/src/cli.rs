@@ -18,8 +18,8 @@ use serde_json::{Value, json};
 use pantheon::mint::NewSpec;
 use pantheon::{
     Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_mv_file,
-    plan_new, plan_rename, plan_rename_def, plan_rm, read_annotations, resolve_all, resolve_code,
-    resolve_root, set_annotations, validate,
+    plan_new, plan_rename, plan_rename_def, plan_rename_prefix, plan_rm, read_annotations,
+    resolve_all, resolve_code, resolve_root, set_annotations, validate,
 };
 
 // The screen rides the `tui` feature; drop it and the structural CLI stands alone (§14).
@@ -320,7 +320,7 @@ pub(crate) fn run(cli: &Cli) -> Result<RunOk> {
             label,
             def,
         } => cmd_rename(cli, code, ch.as_deref(), label.as_deref(), def.as_deref()),
-        Cmd::RenamePrefix { .. } => Err(not_implemented("rename-prefix", NODE_CASCADE)),
+        Cmd::RenamePrefix { old, new, code } => cmd_rename_prefix(cli, old, new, code.as_deref()),
         Cmd::RenamePattern { .. } => Err(not_implemented("rename-pattern", NODE_CASCADE)),
     }
 }
@@ -410,6 +410,15 @@ fn cmd_mv_file(cli: &Cli, file: &std::path::Path, to: &str) -> Result<RunOk> {
     let to = Code::parse(to)?;
     let (plan, record) = plan_mv_file(&root, file, &to)?;
     run_plan(cli, &root, &plan, json!({ "moved": [record] }))
+}
+
+/// `pan rename-prefix <old> <new> [code]` — repair a drifted code prefix over a subtree
+/// (§10.1, §10.2).
+fn cmd_rename_prefix(cli: &Cli, old: &str, new: &str, code: Option<&str>) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let scope = code.map(Code::parse).transpose()?;
+    let (plan, record) = plan_rename_prefix(&root, old, new, scope.as_ref())?;
+    run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
 }
 
 fn cmd_tree(cli: &Cli, code: Option<&str>) -> Result<RunOk> {
