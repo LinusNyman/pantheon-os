@@ -58,14 +58,17 @@ pub(crate) enum Outcome {
 pub(crate) fn evaluate(path: &Path, root: &Path, context: &str, deadline: Duration) -> Outcome {
     tracing::debug!(rule = %path.display(), "running");
 
-    let mut child = match Command::new(path)
-        .env("PANTHEON_RULE", "1")
+    let mut cmd = Command::new(path);
+    cmd.env("PANTHEON_RULE", "1")
         .env("PANTHEON_ROOT", root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    // Its own process group, so a timeout can signal the whole tree the rule spawns and
+    // not just the shell `child.kill()` reaches (see `kill_tree`) — and, as `hook::detach`
+    // does for the wake, so a Ctrl-C at Auspex's terminal cannot kill a slow rule under it.
+    own_group(&mut cmd);
+    let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(e) => {
             // The common cause is a missing exec bit, which is worth naming: a rule is
@@ -190,14 +193,59 @@ fn wait_until(child: &mut Child, deadline: Duration) -> Waited {
             Err(e) => return Waited::Failed(e.to_string()),
         }
         if start.elapsed() >= deadline {
-            let _ = child.kill();
-            // Reap it, so killing does not leave a zombie behind — and so the stdout
-            // and stderr readers see EOF and their threads can join.
-            let _ = child.wait();
+            kill_tree(child);
             return Waited::TimedOut;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Run the rule as its own process-group leader.
+///
+/// Mirrors `hook::detach`: `process_group(0)` makes the child a group leader — its pgid
+/// is its pid — which is what lets [`kill_tree`] signal every process it forks, and keeps
+/// a `Ctrl-C` at Auspex's terminal from killing a legitimate slow rule out from under it.
+#[cfg(unix)]
+fn own_group(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn own_group(_cmd: &mut Command) {}
+
+/// Kill a timed-out rule and everything it spawned, then reap the leader.
+///
+/// `child.kill()` reaches only the direct child — the shell. A shell that *forks* its
+/// command (dash does; one that `exec`s the final command does not, which is why the
+/// wedge shows on Linux but not macOS) leaves the grandchild holding the stdout pipe, so
+/// the reader thread blocks until *it* exits rather than until the deadline. The rule
+/// leads its own process group ([`own_group`]), so signalling `-pgid` reaches the tree.
+#[cfg(unix)]
+fn kill_tree(child: &mut Child) {
+    // `child.id()` is the leader's pid, which is its process-group id — a `pid_t` that
+    // std widened to `u32`, so it round-trips. Guard the impossible non-fit rather than
+    // risk `kill` on group 0, which is Auspex's own.
+    let Ok(pgid) = libc::pid_t::try_from(child.id()) else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+    };
+    // SAFETY: `kill(2)` reads no memory; a negative pid signals the process group. The
+    // pgid is this child's own group, and a group that already exited yields a harmless
+    // `ESRCH`.
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
+    // Reap the leader so killing leaves no zombie, and so the stdout/stderr readers see
+    // EOF and their threads can join.
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+fn kill_tree(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(all(test, unix))]

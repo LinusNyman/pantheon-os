@@ -38,6 +38,10 @@ shell-words   = "1"      # splits $VISUAL/$EDITOR into argv (§7.3)
 sha2          = "0.11"   # plan tokens (§7.3)
 thiserror     = "2"
 anyhow        = "1"
+# libc: only to signal a timed-out rule's whole process group (Auspex, unix). std wraps
+# `process_group(0)` but not the `kill(2)` that clears it, and `child.kill()` reaches only
+# the shell, not a command it forked. A target-`cfg(unix)` dep, so Windows never pulls it.
+libc          = "0.2"
 tracing       = "0.1"
 # Auspex's diagnostics reach a terminal only through a subscriber — `tracing` alone
 # compiles its macros to no-ops. §13 fixes the sink: **stderr only**, inherited when a
