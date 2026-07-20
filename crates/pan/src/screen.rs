@@ -27,7 +27,7 @@ use pantheon::{
 };
 use porticus::action::{Invocation, Relayed};
 use porticus::view::{Layout, Row, View, ViewId};
-use porticus::{Action, App, Handled, Ident, Nav, Target, Theme, Writer};
+use porticus::{Action, App, Handled, Ident, Nav, RecordRef, Target, Theme, Writer};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -97,21 +97,32 @@ impl App for PanApp {
     }
 
     fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {
-        let Target::Node { node, .. } = target else {
-            // `pan` acts on nodes, never on records — a record is a core's (§10).
-            return None;
-        };
-        match action {
+        match (action, target) {
+            // ── the tree tab: actions on the selected node ──
             // `annotate` is a node-level write (§5.5, §10.3); the typed `key=value` is
             // appended by Porticus after the prompt.
-            Action::Edit => Some(Invocation::new("pan", ["annotate", node.as_str(), "--set"])),
+            (Action::Edit, Target::Node { node, .. }) => {
+                Some(Invocation::new("pan", ["annotate", node.as_str(), "--set"]))
+            }
             // `r` renames the node's label (Porticus appends the typed label after its
             // rename prompt); a definition-prefix node needs `--def` and says so (§10.1).
-            Action::Rename => Some(Invocation::new("pan", ["rename", node.as_str(), "--label"])),
+            (Action::Rename, Target::Node { node, .. }) => {
+                Some(Invocation::new("pan", ["rename", node.as_str(), "--label"]))
+            }
             // `x` removes the node — refused by the spine if it is not empty (§10.1).
-            Action::Remove => Some(Invocation::new("pan", ["rm", node.as_str()])),
-            // `m` (move) needs a destination the chrome has no prompt for yet, so it
-            // stays dark rather than relay a `mv … --to` with no target (§10.1).
+            (Action::Remove, Target::Node { node, .. }) => {
+                Some(Invocation::new("pan", ["rm", node.as_str()]))
+            }
+            // ── the validate tab: `d` applies a finding's fix ──
+            // The finding's fix rides in the row target as (code, normalized-label), so
+            // this relays it verbatim (§10.2). A finding with no fix carries a node
+            // target this arm does not match, so `d` there is a no-op.
+            (Action::Done, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+                "pan",
+                ["rename", home.as_str(), "--label", key.as_str()],
+            )),
+            // `m` (move) has no destination prompt yet, and every other key is unoffered
+            // by the active view — dark, not faked (§10.1, P§7).
             _ => None,
         }
     }
@@ -271,13 +282,14 @@ impl View for TreeTab {
 
 // ── the validate tab (§10.2) ─────────────────────────────────────────────────
 
-/// `pan validate`'s findings, browsable (§10.2).
+/// `pan validate`'s findings, browsable — and now **applicable** (§10.2).
 ///
-/// **Surfaces the fix, does not apply it yet.** §10.2 asks `pan` to show a finding's
-/// correction and, where it is unique, to *apply* it. A [`Finding`] now carries its
-/// single legal correction as a `pan` command ([`Finding::fix`]), which this tab shows
-/// for a hand to run. Applying it from the screen still waits on `pan`'s structural
-/// mutators (§10.1), which are stubbed — so a genuine choice's candidates land with them.
+/// A [`Finding`] carries its single legal correction as a `pan` command
+/// ([`Finding::fix`]); this tab shows it in the row and, where a finding *has* one,
+/// `d` applies it. The fix's `(code, normalized-label)` rides in the row's target, so
+/// `on_action` relays it verbatim (`pan rename <code> --label <norm>`). A finding with no
+/// single correction — a genuine choice — stays inert: its candidates are shown, never
+/// picked (§10.2). The shown command is the preview a hand reads before pressing `d`.
 struct ValidateTab {
     root: std::path::PathBuf,
 }
@@ -300,6 +312,12 @@ impl View for ValidateTab {
         Some(findings.iter().map(row_of).collect())
     }
 
+    fn actions(&self) -> &[Action] {
+        // `d` applies a finding's single legal correction (§10.2). Distinct from the tree
+        // tab's keys, so `on_action` can tell the two apart.
+        &[Action::Done]
+    }
+
     fn navigate(&mut self, _nav: Nav) -> Handled {
         Handled::No
     }
@@ -314,27 +332,51 @@ impl View for ValidateTab {
     }
 }
 
-/// One finding as a row. Its target is the *node* it was found at where the path names
-/// one — `pan` acts on nodes (§10) — and the tree root otherwise.
+/// One finding as a row. Where it carries a single legal fix, its target holds the fix's
+/// `(code, normalized-label)` so `d` can relay it (§10.2); otherwise it targets a bare
+/// node the apply arm does not match, leaving `d` a no-op there.
 fn row_of(finding: &Finding) -> Row {
     let mark = match finding.severity {
         Severity::Error => "error  ",
         Severity::Warning => "warning",
     };
     let base = format!("{mark}  {}  {}", finding.rel_path.display(), finding.msg);
-    // Where the correction is unambiguous, show the command a hand can copy and run
-    // (§10.2). Applying it from here waits on the node cascade (§10.1).
+    // Where the correction is unambiguous, show the command a hand reads before pressing
+    // `d` to apply it (§10.2).
     let label = match &finding.fix {
         Some(fix) => format!("{base}  →  {fix}"),
         None => base,
     };
     Row {
         label,
-        target: Target::Node {
-            node: Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")),
-            at: None,
-        },
+        target: fix_target(finding),
         when: None,
+    }
+}
+
+/// The row target for a finding: for the one auto-fix shape `pan validate` emits today —
+/// `pan rename <code> --label <normalized>` (a non-normalized node label, §10.2) — a
+/// `Target::Row` carrying `(code, normalized-label)` so `d` relays it. Anything else (no
+/// fix, or a shape this does not recognise) targets a bare node the apply arm ignores.
+fn fix_target(finding: &Finding) -> Target {
+    let placeholder = Target::Node {
+        node: Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")),
+        at: None,
+    };
+    let Some(fix) = &finding.fix else {
+        return placeholder;
+    };
+    // Match exactly `pan rename <code> --label <normalized>`; a future fix shape stays
+    // display-only until it is taught here.
+    match fix.split_whitespace().collect::<Vec<_>>().as_slice() {
+        ["pan", "rename", code, "--label", label] => match Code::parse(code) {
+            Ok(home) => Target::Row(RecordRef {
+                home,
+                key: (*label).to_owned(),
+            }),
+            Err(_) => placeholder,
+        },
+        _ => placeholder,
     }
 }
 

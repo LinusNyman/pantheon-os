@@ -104,6 +104,28 @@ fn r_renames_the_selected_node_label() {
     assert!(!root.join("a_actio/a_c_cura").exists());
 }
 
+/// **`d` on the validate tab applies a finding's fix, on disk (§10.2).**
+///
+/// A non-normalized node label is a finding whose single legal correction is `pan rename
+/// <code> --label <normalized>`. `2` opens the tab, `<tab>` focuses the findings, `d`
+/// relays the fix and the label is normalized on disk — step 9's 2b, unblocked now that
+/// `pan rename --label` exists.
+#[test]
+fn d_on_the_validate_tab_applies_a_finding_fix() {
+    let root = fresh_root();
+    // Minting normalizes (§5.1), so a non-normal label is written by hand. A hyphen (not
+    // case) so the before/after paths differ on a case-insensitive filesystem too.
+    std::fs::create_dir_all(root.join("a_actio/a_x_bad-label")).unwrap();
+
+    frame(&root, "2<tab>d");
+
+    assert!(
+        root.join("a_actio/a_x_bad_label").is_dir(),
+        "`d` applied the normalizing fix on disk"
+    );
+    assert!(!root.join("a_actio/a_x_bad-label").exists());
+}
+
 /// **`m` (move) stays dark — a no-op, not a relay that fails.**
 ///
 /// Porticus has no destination prompt for a node move yet, so `pan` does not offer the
