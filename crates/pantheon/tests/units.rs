@@ -10,8 +10,8 @@ use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
     Severity, Shape, build_tree, normalize, plan_mv, plan_mv_file, plan_new, plan_rename,
-    plan_rename_def, plan_rename_prefix, plan_rm, resolve_all, resolve_code, validate,
-    with_record_lock,
+    plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm, resolve_all, resolve_code,
+    validate, with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -279,6 +279,51 @@ fn rename_prefix_repairs_a_drifted_code_prefix() {
         !root
             .join("c_contextus/c_s_societas/cs_o_officium/cso__/csa__person__x.json")
             .exists()
+    );
+}
+
+#[test]
+fn rename_pattern_reslugs_records_and_cascades_refs() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("b", "beata"));
+    // A person with a typo'd slug, and a record elsewhere referencing it.
+    write_record(
+        &root,
+        "csa",
+        "csa__person__johnn.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    write_record(
+        &root,
+        "csb",
+        "csb__person__mara.json",
+        r#"{"refs":["album:johnn"],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_rename_pattern(&root, "johnn", "john", None, &album_registry()).unwrap();
+    plan.apply(&root).unwrap();
+
+    // The slug'd file was renamed.
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__john.json")
+            .is_file()
+    );
+    assert!(
+        !root
+            .join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__johnn.json")
+            .exists()
+    );
+    // The ref followed the re-slug.
+    let mara = std::fs::read_to_string(
+        root.join("c_contextus/c_s_societas/cs_b_beata/csb__/csb__person__mara.json"),
+    )
+    .unwrap();
+    assert!(
+        mara.contains("album:john") && !mara.contains("johnn"),
+        "{mara}"
     );
 }
 

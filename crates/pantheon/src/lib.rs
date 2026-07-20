@@ -64,7 +64,8 @@ pub use meta::{Annotations, read_annotations, set_annotations};
 pub use mint::{NewSpec, plan_new};
 pub use name::normalize;
 pub use node_ops::{
-    plan_mv, plan_mv_file, plan_rename, plan_rename_def, plan_rename_prefix, plan_rm,
+    plan_mv, plan_mv_file, plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix,
+    plan_rm,
 };
 pub use plan::{Change, Outcome, Plan};
 pub use resolve::{RefOutcome, Resolution, resolve_all};

@@ -1,7 +1,7 @@
-//! Node-level structural operations (§10.1): `rm`, `rename`, `mv`, `mv-file`, and the
-//! bulk `rename-prefix`. (`rename-pattern` — a literal substitution across labels, slugs,
-//! and series names, each slug hit cascading its refs — is the one verb still to land.)
-//! Each builds a [`Plan`](crate::plan::Plan) of
+//! Node-level structural operations (§10.1): `rm`, `rename`, `mv`, `mv-file`, and the bulk
+//! `rename-prefix` (a code-prefix repair) and `rename-pattern` (a literal substitution
+//! across record slugs and series names, each hit cascading its refs). Each builds a
+//! [`Plan`](crate::plan::Plan) of
 //! directory and file renames — a node's code *is* its path (§5.2), so changing a code
 //! rewrites every descendant directory name and `[code]` filename prefix under the
 //! branch. The plans are dry-run-first and non-atomic (§10.1): a crash is diagnosed from
@@ -11,6 +11,7 @@
 //! existing tree. The record-level *ref* cascade a definition-prefix node rename triggers
 //! is [`cascade`](crate::cascade)'s, reused here.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -461,6 +462,168 @@ fn walk_prefix(
         if is_dir {
             walk_prefix(&entry.path(), &child_rel, old, new, changes)?;
         }
+    }
+    Ok(())
+}
+
+/// `pan rename-pattern <from> <to> [code]` (§10.1, §5.4) — a literal substitution across
+/// **record slugs and hand-named series names** in a scope, each hit cascading its
+/// `core:slug` refs. The bulk typo fix: `rename-pattern johnn john` re-slugs every
+/// `…__johnn.json` (and its refs) at once.
+///
+/// Scope is a record-identity substitution, so it touches files in meta dirs only — never
+/// a node's own directory. A **node's** identity (a label, or a definition-prefix node's
+/// definition, which *is* a slug) is one node's to rename: use `rename` / `rename --def`.
+/// A code prefix is `rename-prefix`'s. Defaults to the whole tree.
+pub fn plan_rename_pattern(
+    root: &Path,
+    from: &str,
+    to: &str,
+    scope: Option<&Code>,
+    registry: &CoreRegistry,
+) -> Result<(Plan, Value)> {
+    if from.is_empty() {
+        return Err(Error::usage("rename-pattern: the `from` literal is empty"));
+    }
+    if from == to {
+        return Err(Error::usage("rename-pattern: `from` and `to` are the same"));
+    }
+
+    let nodes = match build_tree(root, scope)? {
+        TreeRoot::Forest(nodes) => nodes,
+        TreeRoot::Subtree(node) => vec![node],
+    };
+
+    // 1. Collect the record files whose slug/name carries the literal: the file rename,
+    //    and (where the kind has an installed core) the identity ref to cascade.
+    let mut hits: Vec<PatternHit> = Vec::new();
+    for node in &nodes {
+        collect_pattern_hits(root, node, from, to, registry, &mut hits)?;
+    }
+    if hits.is_empty() {
+        return Err(Error::not_found(format!(
+            "no record slug or series name under the scope carries {from:?}"
+        )));
+    }
+
+    // 2. Refuse two hits colliding on one target file.
+    for i in 0..hits.len() {
+        for j in (i + 1)..hits.len() {
+            if hits[i].new_rel == hits[j].new_rel {
+                return Err(Error::validation(format!(
+                    "rename-pattern would rename two records onto {} (§5.4)",
+                    hits[i].new_rel.display()
+                )));
+            }
+        }
+    }
+
+    // 3. File renames first; a map so a ref rewrite lands on a file this op also moved.
+    let mut changes = Vec::new();
+    let mut moved: HashMap<PathBuf, PathBuf> = HashMap::new();
+    for hit in &hits {
+        changes.push(Change::Rename {
+            from: hit.old_rel.clone(),
+            to: hit.new_rel.clone(),
+        });
+        moved.insert(hit.old_rel.clone(), hit.new_rel.clone());
+    }
+
+    // 4. One ref cascade per distinct (core, old-ident) — refs point at an identity, not a
+    //    file, so identical (core, ident) hits share a walk. Remap a rewrite whose record
+    //    this op also renamed to its new path.
+    let mut done: Vec<(String, String)> = Vec::new();
+    let mut ref_count = 0usize;
+    for hit in &hits {
+        let Some(core) = &hit.core else { continue };
+        let key = (core.clone(), hit.old_ident.clone());
+        if done.contains(&key) {
+            continue;
+        }
+        done.push(key);
+
+        let (Ok(from_ref), Ok(to_ref)) = (
+            Ref::parse(&format!("{core}:{}", hit.old_ident)),
+            Ref::parse(&format!("{core}:{}", hit.new_ident)),
+        ) else {
+            continue;
+        };
+        let own_kinds: Vec<&str> = registry
+            .kinds_of(core)
+            .unwrap_or(&[])
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect();
+        let cascade = plan_cascade(root, &own_kinds, &from_ref, &to_ref)?;
+        for rewrite in &cascade.rewrites {
+            let rel = moved
+                .get(&rewrite.rel_path)
+                .cloned()
+                .unwrap_or_else(|| rewrite.rel_path.clone());
+            ref_count += rewrite.refs;
+            changes.push(Change::RewriteRefs {
+                rel_path: rel,
+                is_series: rewrite.is_series,
+                from: from_ref.to_token(),
+                to: to_ref.to_token(),
+            });
+        }
+    }
+
+    let record = json!({ "from": from, "to": to, "renamed": hits.len(), "refs": ref_count });
+    Ok((Plan::new("rename-pattern", changes), record))
+}
+
+/// One record whose slug or series name carries the pattern literal.
+struct PatternHit {
+    old_rel: PathBuf,
+    new_rel: PathBuf,
+    /// The owning core's name, where a kind maps to one — `None` means no installed core,
+    /// so the file is renamed but nothing references it to cascade (§5.5).
+    core: Option<String>,
+    old_ident: String,
+    new_ident: String,
+}
+
+/// Gather the pattern hits in one node's meta dir, then recurse its children. Only a
+/// partitioned entity's slug and a hand-named series' name are record identities carried
+/// in the filename (§5.2); an entity-as-node's slug is its *node's* definition and a
+/// determined series has no name of its own, so neither is a pattern hit here.
+fn collect_pattern_hits(
+    root: &Path,
+    node: &Node,
+    from: &str,
+    to: &str,
+    registry: &CoreRegistry,
+    hits: &mut Vec<PatternHit>,
+) -> Result<()> {
+    let meta = node.path.join(format!("{}__", node.code.as_str()));
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(&meta)? {
+            let fname = entry?.file_name().to_string_lossy().into_owned();
+            let (kind, ident, is_series) = match classify(&fname, false, &node.code) {
+                FileClass::Partitioned { kind, slug, .. } => (kind, slug, false),
+                FileClass::NamedSeries { kind, name, .. } => (kind, name, true),
+                _ => continue,
+            };
+            if !ident.contains(from) {
+                continue;
+            }
+            let new_ident = ident.replace(from, to);
+            let ext = if is_series { "jsonl" } else { "json" };
+            let new_fname = format!("{}__{kind}__{new_ident}.{ext}", node.code.as_str());
+            let core = registry.core_of_kind(&kind).map(|c| c.name.clone());
+            hits.push(PatternHit {
+                old_rel: rel_path(root, &meta.join(&fname)),
+                new_rel: rel_path(root, &meta.join(&new_fname)),
+                core,
+                old_ident: ident,
+                new_ident,
+            });
+        }
+    }
+    for child in &node.children {
+        collect_pattern_hits(root, child, from, to, registry, hits)?;
     }
     Ok(())
 }

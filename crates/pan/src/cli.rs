@@ -18,8 +18,8 @@ use serde_json::{Value, json};
 use pantheon::mint::NewSpec;
 use pantheon::{
     Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_mv_file,
-    plan_new, plan_rename, plan_rename_def, plan_rename_prefix, plan_rm, read_annotations,
-    resolve_all, resolve_code, resolve_root, set_annotations, validate,
+    plan_new, plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm,
+    read_annotations, resolve_all, resolve_code, resolve_root, set_annotations, validate,
 };
 
 // The screen rides the `tui` feature; drop it and the structural CLI stands alone (§14).
@@ -321,14 +321,7 @@ pub(crate) fn run(cli: &Cli) -> Result<RunOk> {
             def,
         } => cmd_rename(cli, code, ch.as_deref(), label.as_deref(), def.as_deref()),
         Cmd::RenamePrefix { old, new, code } => cmd_rename_prefix(cli, old, new, code.as_deref()),
-        // The rest of §10.1's node cascade is built (rm/rename/mv/mv-file/rename-prefix);
-        // `rename-pattern` alone remains — a literal substitution across labels, slugs, and
-        // series names, each slug hit cascading its refs (§5.4). For one node use `rename`;
-        // for a code prefix, `rename-prefix`.
-        Cmd::RenamePattern { .. } => Err(not_implemented(
-            "rename-pattern",
-            "the literal-substitution-with-ref-cascade verb, the last of §10.1",
-        )),
+        Cmd::RenamePattern { from, to, code } => cmd_rename_pattern(cli, from, to, code.as_deref()),
     }
 }
 
@@ -425,6 +418,17 @@ fn cmd_rename_prefix(cli: &Cli, old: &str, new: &str, code: Option<&str>) -> Res
     let root = resolve_root(cli.root.as_deref())?;
     let scope = code.map(Code::parse).transpose()?;
     let (plan, record) = plan_rename_prefix(&root, old, new, scope.as_ref())?;
+    run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
+}
+
+/// `pan rename-pattern <from> <to> [code]` — substitute a literal across record slugs and
+/// series names in a scope, cascading refs (§10.1, §5.4). Needs the registry to map a
+/// record's kind → core for the cascade.
+fn cmd_rename_pattern(cli: &Cli, from: &str, to: &str, code: Option<&str>) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let scope = code.map(Code::parse).transpose()?;
+    let (plan, record) =
+        plan_rename_pattern(&root, from, to, scope.as_ref(), &CoreRegistry::discover())?;
     run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
 }
 
