@@ -18,8 +18,8 @@ use serde_json::{Value, json};
 use pantheon::mint::NewSpec;
 use pantheon::{
     Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_mv_file,
-    plan_new, plan_rename, plan_rm, read_annotations, resolve_all, resolve_code, resolve_root,
-    set_annotations, validate,
+    plan_new, plan_rename, plan_rename_def, plan_rm, read_annotations, resolve_all, resolve_code,
+    resolve_root, set_annotations, validate,
 };
 
 // The screen rides the `tui` feature; drop it and the structural CLI stands alone (§14).
@@ -387,7 +387,12 @@ fn cmd_rename(
 ) -> Result<RunOk> {
     let root = resolve_root(cli.root.as_deref())?;
     let code = Code::parse(code)?;
-    let (plan, record) = plan_rename(&root, &code, ch, label, def)?;
+    // `--def` re-slugs a definition-prefix node's entity, so it needs the registry to map
+    // the entity's kind → core for the ref cascade (§10.1). A triple rename does not.
+    let (plan, record) = match def {
+        Some(new_def) => plan_rename_def(&root, &code, new_def, &CoreRegistry::discover())?,
+        None => plan_rename(&root, &code, ch, label, def)?,
+    };
     run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
 }
 

@@ -9,8 +9,8 @@ use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
-    Severity, Shape, build_tree, normalize, plan_mv, plan_mv_file, plan_new, plan_rename, plan_rm,
-    resolve_all, resolve_code, validate, with_record_lock,
+    Severity, Shape, build_tree, normalize, plan_mv, plan_mv_file, plan_new, plan_rename,
+    plan_rename_def, plan_rm, resolve_all, resolve_code, validate, with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -195,6 +195,61 @@ fn mv_file_rehomes_a_misfiled_record() {
             .join("c_contextus/c_s_societas/cs__/csa__person__mara.json")
             .exists()
     );
+}
+
+#[test]
+fn rename_def_reslugs_the_entity_and_cascades_its_refs() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("b", "beata"));
+    // A definition-prefix node under csa with an album person promoted to it.
+    mint(
+        &root,
+        "csa",
+        NewSpec::Def {
+            definition: "john_appleseed",
+        },
+    );
+    write_record(
+        &root,
+        "csa_john_appleseed",
+        "csa_john_appleseed__person.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    // A record elsewhere in the tree that references album:john_appleseed.
+    write_record(
+        &root,
+        "csb",
+        "csb__person__mara.json",
+        r#"{"refs":["album:john_appleseed"],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_rename_def(
+        &root,
+        &Code::parse("csa_john_appleseed").unwrap(),
+        "john_smith",
+        &album_registry(),
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    // The node dir, meta dir, and entity file followed the new definition.
+    assert!(
+        root.join(
+            "c_contextus/c_s_societas/cs_a_amicitia/csa_john_smith_/csa_john_smith__/\
+             csa_john_smith__person.json"
+        )
+        .is_file()
+    );
+    // The external ref was rewritten to the new slug.
+    let mara = std::fs::read_to_string(
+        root.join("c_contextus/c_s_societas/cs_b_beata/csb__/csb__person__mara.json"),
+    )
+    .unwrap();
+    assert!(mara.contains("album:john_smith"), "{mara}");
+    assert!(!mara.contains("john_appleseed"), "{mara}");
 }
 
 #[test]

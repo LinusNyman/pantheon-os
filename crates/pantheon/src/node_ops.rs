@@ -13,7 +13,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
+use crate::cascade::plan_cascade;
+use crate::classify::{FileClass, classify};
 use crate::code::{CharToken, Code};
+use crate::core::CoreRegistry;
+use crate::envelope::Ref;
 use crate::mint::{normalize_char, prefix_shadows};
 use crate::plan::{Change, Plan};
 use crate::tree::{Node, TreeRoot, build_tree, child_node_names, resolve_node};
@@ -102,9 +106,10 @@ pub fn plan_rename(
     let (nn, path) = resolve_node(root, code)?;
 
     if def.is_some() {
+        // `--def` re-slugs the entity and cascades refs, which needs the registry to map
+        // kind → core — so it is `plan_rename_def`'s, reached through `cmd_rename` (§10.1).
         return Err(Error::usage(
-            "renaming a definition-prefix node's definition (`--def`) re-slugs its entity and \
-             cascades refs — not yet built (§10.1)",
+            "a definition-prefix rename (`--def`) goes through the registry-aware path (§10.1)",
         ));
     }
     let Some(current_ch) = nn.ch.clone() else {
@@ -150,6 +155,120 @@ pub fn plan_rename(
     let plan = Plan::new("rename", changes);
     let record = json!({ "from": code.as_str(), "to": new_code.as_str() });
     Ok((plan, record))
+}
+
+/// `pan rename <code> --def <definition>` (§10.1, §5.4) — rename a **definition-prefix**
+/// node's definition. The definition doubles as the entity's slug, so this both recodes
+/// the branch (like any rename) *and* cascades every `core:slug` ref pointing at the
+/// entity(ies) promoted here — the one node rename that touches refs.
+///
+/// The ref cascade covers records **outside** the renamed subtree, which is where a ref
+/// to a person overwhelmingly comes from. A rare self-reference from within the subtree
+/// (a sub-record pointing at its own ancestor entity) is left for `pan validate` to
+/// report as a dangling ref — its path shifts under the recode, the same inconsistency a
+/// crash mid-cascade leaves and that §10.1 diagnoses from the tree.
+pub fn plan_rename_def(
+    root: &Path,
+    code: &Code,
+    new_def: &str,
+    registry: &CoreRegistry,
+) -> Result<(Plan, Value)> {
+    let (nn, path) = resolve_node(root, code)?;
+    if nn.ch.is_some() {
+        return Err(Error::usage(format!(
+            "node {} is a triple node; rename it with --char/--label, not --def (§5.1)",
+            code.as_str()
+        )));
+    }
+    let old_def = nn.label.clone();
+    let new_def = name::normalize_token(new_def, "definition")?;
+    if new_def == old_def {
+        return Err(Error::validation(format!(
+            "rename is a no-op: {} already has that definition",
+            code.as_str()
+        )));
+    }
+
+    // The parent code is the old code minus its `_{old_def}` suffix (the def may itself
+    // carry `_`, so this is the only sound split).
+    let parent_code = code
+        .as_str()
+        .strip_suffix(&format!("_{old_def}"))
+        .filter(|p| !p.is_empty())
+        .map(Code::parse)
+        .transpose()?;
+    let new_code = match &parent_code {
+        Some(p) => Code::parse(&format!("{}_{new_def}", p.as_str()))?,
+        None => Code::parse(&new_def)?,
+    };
+
+    let parent_path = path.parent().unwrap_or(root).to_path_buf();
+    refuse_collision(&parent_path, parent_code.as_ref(), &new_code, code)?;
+
+    // 1. Recode the branch (dirs and files), exactly like any rename.
+    let new_dirname = def_dirname(parent_code.as_ref(), &new_def);
+    let new_top_rel = rel_path(root, &parent_path).join(&new_dirname);
+    let mut changes = plan_recode(root, code, &new_code, &new_top_rel)?;
+
+    // 2. Cascade the entity's refs — one cascade per distinct core hosting an
+    //    entity-as-node file here (its slug is this node's definition, §5.2).
+    let old_branch = rel_path(root, &path);
+    let meta = path.join(format!("{}__", code.as_str()));
+    for core_name in cores_hosting_entities(&meta, code, registry)? {
+        let (Ok(from), Ok(to)) = (
+            Ref::parse(&format!("{core_name}:{old_def}")),
+            Ref::parse(&format!("{core_name}:{new_def}")),
+        ) else {
+            continue;
+        };
+        let own_kinds: Vec<&str> = registry
+            .kinds_of(&core_name)
+            .unwrap_or(&[])
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect();
+        let cascade = plan_cascade(root, &own_kinds, &from, &to)?;
+        for rewrite in &cascade.rewrites {
+            // A within-branch record's path shifts under the recode; leave it to
+            // `pan validate` rather than chase a moving target.
+            if rewrite.rel_path.starts_with(&old_branch) {
+                continue;
+            }
+            changes.push(Change::RewriteRefs {
+                rel_path: rewrite.rel_path.clone(),
+                is_series: rewrite.is_series,
+                from: from.to_token(),
+                to: to.to_token(),
+            });
+        }
+    }
+
+    let plan = Plan::new("rename", changes);
+    let record = json!({ "from": code.as_str(), "to": new_code.as_str() });
+    Ok((plan, record))
+}
+
+/// The distinct core names hosting an entity-as-node file (`[code]__[kind].json`) in a
+/// definition-prefix node's meta dir — whose refs a `--def` rename must cascade.
+fn cores_hosting_entities(
+    meta: &Path,
+    code: &Code,
+    registry: &CoreRegistry,
+) -> Result<Vec<String>> {
+    let mut cores: Vec<String> = Vec::new();
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(meta)? {
+            let fname = entry?.file_name().to_string_lossy().into_owned();
+            if let FileClass::EntityNode { kind, .. } = classify(&fname, false, code) {
+                if let Some(core) = registry.core_of_kind(&kind) {
+                    if !cores.contains(&core.name) {
+                        cores.push(core.name.clone());
+                    }
+                }
+            }
+        }
+    }
+    Ok(cores)
 }
 
 /// `pan mv <code> --to <parent>` (§10.1) — re-home a node under a new parent. The node's
