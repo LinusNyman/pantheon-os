@@ -13,7 +13,7 @@ use crate::classify::{FileClass, classify};
 use crate::code::{Code, NodeName, parse_node_dirname};
 use crate::core::CoreRegistry;
 use crate::envelope::{KeyShape, RawEntity, RawLine, Ref};
-use crate::name::is_normalized;
+use crate::name::{is_normalized, normalize};
 
 /// A validation finding, reported by path (§10.2).
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -22,6 +22,15 @@ pub struct Finding {
     pub severity: Severity,
     pub rel_path: PathBuf,
     pub msg: String,
+    /// The single legal correction, as the `pan` command that applies it — surfaced for
+    /// a hand to review and run (§10.2). `Some` only where the fix is unambiguous (a name
+    /// out of normal form has exactly one answer, §5.1); a finding with a genuine choice,
+    /// or none, carries `None`.
+    ///
+    /// This is **display only** for now: `pan validate` shows the command, but *applying*
+    /// it from the screen needs `pan`'s structural mutators (§10.1), which are still
+    /// stubbed. Genuine-choice candidates land with them.
+    pub fix: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -81,12 +90,18 @@ impl FindingCode {
 impl Finding {
     #[must_use]
     pub fn to_json(&self) -> serde_json::Value {
-        json!({
+        let mut value = json!({
             "code": self.code.as_str(),
             "severity": self.severity.as_str(),
             "path": self.rel_path.to_string_lossy(),
             "msg": self.msg,
-        })
+        });
+        // A string, not a nested object, so a finding stays a flat row the table can
+        // render (§7.3); absent where there is no fix, so a clean finding is uncluttered.
+        if let Some(fix) = &self.fix {
+            value["fix"] = json!(fix);
+        }
+        value
     }
 }
 
@@ -127,6 +142,9 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
                      rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
                     duplicate.reference.to_token()
                 ),
+                // A genuine choice — which record takes the fuller name is the hand's, so
+                // there is no single legal correction to offer (§10.2).
+                fix: None,
             });
         }
     }
@@ -176,13 +194,19 @@ fn walk_node(
     findings: &mut Vec<Finding>,
 ) -> Result<()> {
     if !is_normalized(node_label) {
-        push(
+        // The normal form is a single, deterministic answer (§5.1), so the fix is one
+        // command — `pan rename <code> --label <normalized>`. Shown for a hand to run;
+        // applying it from the screen waits on the node cascade (§10.1).
+        let fix = normalize(node_label)
+            .map(|norm| format!("pan rename {} --label {norm}", node_code.as_str()));
+        push_fix(
             findings,
             FindingCode::NonNormalizedName,
             Severity::Warning,
             root,
             node_path,
             format!("label {node_label:?} is not in normal form (§5.1)"),
+            fix,
         );
     }
 
@@ -397,11 +421,25 @@ fn push(
     path: &Path,
     msg: impl Into<String>,
 ) {
+    push_fix(findings, code, severity, root, path, msg, None);
+}
+
+/// A finding that also carries its single legal correction (§10.2).
+fn push_fix(
+    findings: &mut Vec<Finding>,
+    code: FindingCode,
+    severity: Severity,
+    root: &Path,
+    path: &Path,
+    msg: impl Into<String>,
+    fix: Option<String>,
+) {
     let rel_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
     findings.push(Finding {
         code,
         severity,
         rel_path,
         msg: msg.into(),
+        fix,
     });
 }
