@@ -886,6 +886,9 @@ fn warn_duplicates(ctx: &Ctx, written: &EntityRef) -> Result<()> {
                 written.slug,
                 other.home.as_str()
             ),
+            // A cross-node duplicate is a genuine choice — which record takes the
+            // fuller name is the hand's — so there is no single legal correction (§10.2).
+            fix: None,
         })
         .collect();
     eprintln!("{}", findings_json(&findings));

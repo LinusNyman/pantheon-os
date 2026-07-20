@@ -261,11 +261,11 @@ impl View for TreeTab {
 
 /// `pan validate`'s findings, browsable (§10.2).
 ///
-/// **Read-only for now.** §10.2 also asks `pan` to *apply* a finding whose correction
-/// is unique, and to surface candidate commands where the choice is genuine. Neither is
-/// built: a [`Finding`] carries a code, a severity, a path and a message, and no
-/// candidates — so there is nothing yet for the screen to offer or apply. Showing the
-/// findings is the honest half, and it is the half that needs no new spine surface.
+/// **Surfaces the fix, does not apply it yet.** §10.2 asks `pan` to show a finding's
+/// correction and, where it is unique, to *apply* it. A [`Finding`] now carries its
+/// single legal correction as a `pan` command ([`Finding::fix`]), which this tab shows
+/// for a hand to run. Applying it from the screen still waits on `pan`'s structural
+/// mutators (§10.1), which are stubbed — so a genuine choice's candidates land with them.
 struct ValidateTab {
     root: std::path::PathBuf,
 }
@@ -309,8 +309,15 @@ fn row_of(finding: &Finding) -> Row {
         Severity::Error => "error  ",
         Severity::Warning => "warning",
     };
+    let base = format!("{mark}  {}  {}", finding.rel_path.display(), finding.msg);
+    // Where the correction is unambiguous, show the command a hand can copy and run
+    // (§10.2). Applying it from here waits on the node cascade (§10.1).
+    let label = match &finding.fix {
+        Some(fix) => format!("{base}  →  {fix}"),
+        None => base,
+    };
     Row {
-        label: format!("{mark}  {}  {}", finding.rel_path.display(), finding.msg),
+        label,
         target: Target::Node {
             node: Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")),
             at: None,

@@ -269,8 +269,13 @@ fn indent(block: &str) -> String {
 ///
 /// `null` renders **blank**, not `"null"`: an absent `type` on a document (§7.2) is
 /// nothing to read, and the word would be louder than the value. An array of scalars
-/// joins on `, ` — that is what `refs` and `tags` are — and anything still nested
-/// falls back to compact JSON rather than being flattened into a guess.
+/// joins on `, ` — that is what `refs` and `tags` are. A **flat object** — every value a
+/// scalar, which is what Mappa's `coordinates` (`{"lat":…,"lon":…}`) is — reads as its
+/// `key: value` pairs rather than raw JSON, so the cell keeps the table while dropping
+/// the punctuation a reader came to avoid. Anything **deeper** is a nesting that would be
+/// a guess to flatten, so it falls back to compact JSON — the honest rendering of a
+/// structure the table cannot honestly flatten (§7.3, the flatness test stays
+/// [non-recursive](is_flat_record)).
 fn scalar(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
@@ -280,6 +285,11 @@ fn scalar(value: &Value) -> String {
         Value::Array(items) if items.iter().all(|i| !i.is_object() && !i.is_array()) => {
             items.iter().map(scalar).collect::<Vec<_>>().join(", ")
         }
+        Value::Object(fields) if fields.values().all(|v| !v.is_object() && !v.is_array()) => fields
+            .iter()
+            .map(|(key, value)| format!("{key}: {}", scalar(value)))
+            .collect::<Vec<_>>()
+            .join(", "),
         other => other.to_string(),
     }
 }
@@ -328,4 +338,35 @@ fn width(cell: &str) -> usize {
 
 fn pretty(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+    use serde_json::json;
+
+    #[test]
+    fn a_flat_nested_object_renders_as_key_value_pairs() {
+        // Mappa's coordinates: a nested object whose values are scalars keeps the table,
+        // shown as `key: value` rather than raw JSON (§7.3).
+        let value = json!([{
+            "slug": "kafe",
+            "data": { "coordinates": { "lat": 59.33, "lon": 18.06 } }
+        }]);
+        let out = render(&value);
+        assert!(out.contains("lat: 59.33, lon: 18.06"), "{out}");
+        assert!(!out.contains("{\"lat\""), "no raw JSON in the cell: {out}");
+    }
+
+    #[test]
+    fn a_deeper_nesting_still_falls_back_to_compact_json() {
+        // Two levels down is a structure, not a cell — flattening it would be a guess, so
+        // it stays compact JSON (the flatness test is not recursive).
+        let value = json!([{ "slug": "x", "data": { "box": { "corner": { "lat": 1 } } } }]);
+        let out = render(&value);
+        assert!(
+            out.contains("{\"corner\""),
+            "deeper nesting stays JSON: {out}"
+        );
+    }
 }

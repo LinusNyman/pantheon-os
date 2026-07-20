@@ -386,6 +386,28 @@ fn validate_reports_a_cross_node_duplicate_softly() {
 }
 
 #[test]
+fn a_non_normalized_label_carries_its_normalizing_fix() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    // A child node whose label is not in normal form. Minting normalizes (§5.1), so this
+    // is written by hand — the way a stray `mkdir` would leave it (I8).
+    std::fs::create_dir_all(root.join("c_contextus").join("c_x_Bad_Label")).unwrap();
+
+    let findings = validate(&root, &album_registry()).unwrap();
+    let finding = findings
+        .iter()
+        .find(|f| f.code == FindingCode::NonNormalizedName)
+        .expect("the non-normalized label is reported");
+    // §10.2: the single legal correction, surfaced as the command that applies it — the
+    // normal form of the label, at the node's own code.
+    assert_eq!(
+        finding.fix.as_deref(),
+        Some("pan rename cx --label bad_label"),
+        "{finding:?}"
+    );
+}
+
+#[test]
 fn a_change_body_names_a_series_only_when_there_is_one() {
     let base = pantheon::RecordChange {
         verb: "add",
