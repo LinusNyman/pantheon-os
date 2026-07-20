@@ -9,7 +9,7 @@ use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
-    Severity, Shape, build_tree, normalize, plan_new, resolve_all, resolve_code, validate,
+    Severity, Shape, build_tree, normalize, plan_new, plan_rm, resolve_all, resolve_code, validate,
     with_record_lock,
 };
 
@@ -46,6 +46,37 @@ fn album_registry() -> CoreRegistry {
         kinds: vec![("person".to_string(), Shape::Partitioned)],
         format_version: 1,
     }])
+}
+
+#[test]
+fn rm_removes_an_empty_node_and_refuses_a_full_one() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+
+    // A node with a child is refused (§10.1, exit 3).
+    let err = plan_rm(&root, &Code::parse("cs").unwrap()).unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+
+    // A node holding a record is refused too.
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    assert!(plan_rm(&root, &Code::parse("csa").unwrap()).is_err());
+
+    // Emptied, the leaf removes — meta scaffold and all — and the parent survives.
+    std::fs::remove_file(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__mara.json"),
+    )
+    .unwrap();
+    let (plan, _) = plan_rm(&root, &Code::parse("csa").unwrap()).unwrap();
+    plan.apply(&root).unwrap();
+    assert!(!root.join("c_contextus/c_s_societas/cs_a_amicitia").exists());
+    assert!(root.join("c_contextus/c_s_societas").is_dir());
 }
 
 #[test]
