@@ -66,8 +66,15 @@ pub fn emit(value: &Value, as_json: bool) {
 /// The whole tail of a core's `main`: render what the verb produced and return the
 /// process exit code, printing the `{"error":{…}}` envelope to stderr on a failure
 /// (§7.3). Every core ends identically.
+///
+/// This is also where a write's Auspex wake fires (§9.4). The [`Store`] mutators
+/// *note* what they wrote; the wake goes out once here, at the end of the process,
+/// so a verb writing three lines wakes Auspex once rather than three times. It fires
+/// after the output is rendered — the child is detached and inherits no stdio, but
+/// waking before printing would still put a subprocess spawn in front of the hand's
+/// answer for no reason.
 pub fn dispatch(outcome: Result<Response>, as_json: bool) -> std::process::ExitCode {
-    match outcome {
+    let code = match outcome {
         Ok(Response::Json(value)) => {
             emit(&value, as_json);
             std::process::ExitCode::from(0)
@@ -84,7 +91,9 @@ pub fn dispatch(outcome: Result<Response>, as_json: bool) -> std::process::ExitC
             eprintln!("{}", e.to_error_json());
             std::process::ExitCode::from(e.exit_code().as_u8())
         }
-    }
+    };
+    crate::hook::wake_if_noted();
+    code
 }
 
 // ── confirming a mutation (§7.3) ─────────────────────────────────────────────

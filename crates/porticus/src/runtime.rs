@@ -72,6 +72,13 @@ pub fn run(app: &mut impl App, root: &std::path::Path) -> anyhow::Result<()> {
     let views = app.lineup();
     check_lineup(&views)?;
 
+    // A screen opening wakes Auspex with a **bare** `aus run` (§9.4): a wake no single
+    // write authored has no write to name as its trigger (§9.3). Here rather than in
+    // each instrument's `open`, because every screen in the suite comes through this
+    // function — and deliberately *not* in `drive`, which takes no terminal and is the
+    // test harness, so a driven screen stays quiet.
+    pantheon::hook::wake(None);
+
     // Porticus knows which core a `Writer` targets, so it **probes `PATH` and dims the
     // action** before the key is pressed (P§7, §12). Only a lens needs this: a core's
     // own TUI writes in-process and cannot be missing from its own binary.

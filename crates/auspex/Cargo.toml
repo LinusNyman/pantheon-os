@@ -22,9 +22,18 @@ clap.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-sha2.workspace = true
+# tracing: Auspex's own diagnostics, **stderr only** — inherited when a hand runs
+# `aus`, discarded when a core spawns the hook detached (§13). Never a file: a log the
+# engine kept would be the rule state and the audit sink §18 forbids.
 tracing.workspace = true
+tracing-subscriber.workspace = true
 porticus = { workspace = true, optional = true }
+
+# Killing a timed-out rule means signalling its whole process group, not just the shell
+# `child.kill()` reaches — a shell that forks its command leaves the grandchild holding
+# the stdout pipe, and the reader thread then blocks past the deadline (see `rule.rs`).
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

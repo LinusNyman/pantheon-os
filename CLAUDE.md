@@ -98,7 +98,9 @@ Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `
 ## Status — build order steps 1–7 are done (§16); all seven cores exist
 
 **Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4),
-`tabella` (5), `porticus` + `tessera` + `atrium` (6), `mappa` + `rationes` + `fasti` (7).
+`tabella` (5), `porticus` + `tessera` + `atrium` (6), `mappa` + `rationes` + `fasti` (7),
+`auspex` (8) — the reactive loop now closes: a write wakes it, a rule proposes, and Auspex
+applies through the core CLIs.
 **All three storage shapes exist** — Partitioned, Series in *both* its hand-named and nameless
 forms, and Document — plus the `core:slug` resolver, the record-level rename cascade, and the
 record lock under contention.
@@ -122,14 +124,140 @@ variants — a *dispatch type, not a disk format*, since the filename already na
 `location`/`region` are one storage shape, so it keeps one flat struct, and an enum there would
 have turned `edit -k` into a record transformation when §7.2 says it is a file rename.
 
-**Still scaffold** — a stub printing a not-implemented line: `auspex` (8), `speculum` and
-`studium` (10). **Next real work is step 8** — Auspex, the one reactive writer (I2, §9).
-Step 9 is now a **cleanups** pass — the deferrals steps 1–8 left (pan's node cascade §10.1,
-`pan migrate`, validate's candidate fixes §10.2, the figlet banner, `Pick` as tree-as-modal,
-nested `data` render) plus the chrome debts hands-on use surfaced (**no add form** — `a`
-relays a nameless `add` with no field prompt; responsive top/bottom split and a narrower
-rail; passive overlays yielding to a nav key; header showing the node not the whole trail).
-Lenses and releases shift to 10 and 11.
+**Still scaffold** — a stub printing a not-implemented line: `speculum` and `studium` (10).
+**Step 8 (`auspex`) is done**, landed in four parts against §16's own "`plan` before `run`"
+sequencing: the hook (below), the **read half** (discovery, the header, `ls`/`version`/`help`,
+the browser screen), the **propose protocol** (`plan`/`test`), and **apply** (`run` — the
+capability check, the dedupe, and the writes, §9.5). Step 9 is the **cleanups** pass — pan's
+node cascade (§10.1) landed on `main` already; the lenses and releases are steps 10 and 11.
+
+**`aus` is `pan`-shaped and `pan doctor` sees it** — it emits `version -f json` with
+`format_version: 1`, so it reads as installed. Three things about its shape a later change must not
+undo:
+
+- **`aus` is `pan`-shaped, not a core's shape**: its own structural verbs, **no `schema`** (it
+  owns no records, and `pantheon::schema::<C>` is bounded on `Core` so it is not even callable),
+  and **no `Ctx`** — a core's `Ctx` exists to hold a `Store`, and Auspex holds none. It must also
+  stay out of `KNOWN_CORE_SHORTS`, which is the file→core token map.
+- **No argv pre-pass.** §13: "`pan`, `aus`, and the lenses have no implicit verb and need no
+  pre-pass". A bare short is `cmd: None`, and Atrium — not `pan`, which has a hidden `lookup`
+  default — is the model.
+- **The §9.3 refusal is Auspex's own, not `contract::refused_under_rule`.** A core refuses a
+  write because a rule may not borrow a hand's authority; `aus` refuses `run`/`plan`/`test`
+  because they would **re-enter the engine and recurse without bound**. Same exit `6`, different
+  danger — and the spine's wording points at `get` and `where`, which `aus` does not have.
+
+**The header grammar has one rule the spec does not state: `desc=` takes the rest of the line and
+must come last.** §9.2 calls it "one-line", which a whitespace-separated field cannot hold; the
+alternative was quoting, and a header a hand must escape to write is worse than one with an
+ordering rule. `watch` and `writes` are single tokens by construction (comma- and
+semicolon-separated), so nothing else wants the space.
+
+**A rule whose header will not parse stays default-deny and is reported** — never dropped from
+the listing. `writes` is the whole guard (§9.2, §9.5), so the unreadable case must fail closed.
+The same holds for a filename whose code disagrees with the meta dir holding it: **the meta dir
+wins** (§9.1 — where the file sits is the whole of its scope) and the disagreement is reported as
+`misfiled_as`, never honoured as a scope.
+
+**Rule discovery is the only walk in the workspace that looks for `FileClass::Rule`** — note the
+variant is `Rule`, not `Function`; `"function"` is the reserved *token*. No `Store` walk could
+ever yield one, since a rule belongs to no core's token set, so it is built from `build_tree` +
+a per-node meta-dir `read_dir` + `classify`. **`pan new` does not mint meta dirs** — they appear
+on first write — so a fixture placing a rule must `create_dir_all` it.
+
+### Running a rule (§9.3) — what `plan` and `test` settled
+
+- **Three streams move at once, on their own threads.** A rule gets its context on stdin and
+  answers on stdout, and doing that in sequence deadlocks: a rule writing more than a pipe buffer
+  before reading would block on stdout while Auspex blocked on stdin. `std::thread::scope` in
+  `rule.rs` is what avoids it, and `a_rule_that_ignores_its_context_still_proposes` pins it with a
+  200 KB context against a rule that never reads.
+- **The child gets two variables and both are load-bearing.** `PANTHEON_RULE=1` is the enforcement
+  every core already honours. **`PANTHEON_ROOT` is the one easy to forget**: §9.3 has a rule read
+  the tree through the core CLIs, the context JSON carries no root, so without it a rule under
+  `aus -C /some/tree` reads whatever the ambient environment named — the relay bug again, one
+  layer down.
+- **A 30-second deadline, hardcoded.** The spec bounds a rule's runtime nowhere, and both extremes
+  are wrong: no limit lets a hung rule leave a detached process per write alive forever, a short
+  one kills the API-calling rule §9.3 explicitly permits. Not a knob (§18) — `evaluate` takes the
+  deadline as a parameter only so a test can reach the mechanism without waiting 30s.
+- **Four failure modes, all per-rule**: could not spawn (usually a missing exec bit — a rule is run
+  directly, so its shebang is the interpreter), exited non-zero, timed out, or emitted unparseable
+  JSON. Each is reported against its own rule and the others still run (§9.5).
+- **`plan` parses rather than echoing**, though §9.3 says "print stdout": `aus`'s own stdout is
+  contract JSON (I4) and a rule emitting garbage would corrupt it rather than being reported.
+- **The exit code folds worst-wins** — `0` all ran, `1` any errored — which is what `pan validate`
+  and `pan resolve` both do. §9.5's "others are unaffected" is about not aborting the batch, not
+  about claiming success.
+- **`tracing` is live and stderr-only**, off unless `RUST_LOG` asks, so stdout stays pure contract.
+  A rule's own stderr is captured (to quote on failure) and traced at debug, so a succeeding rule's
+  diagnostics are not simply lost.
+- **A test harness driving `aus` must set `.stdin(Stdio::null())`** — `aus test` reads a fixture
+  from stdin whenever stdin is not a terminal, so a child inheriting the runner's stdin waits on a
+  pipe that never closes. Both auspex test files do it and say why.
+
+### Applying a proposal (§9.5) — what `run` settled
+
+- **The grant is the whole guard, so it fails closed and rejects by the batch.** `grant.rs` parses
+  `writes=` into capabilities; a grant it cannot parse rejects the rule rather than reading as an
+  empty (deny-all) one that would hide the typo. A single unauthorized proposal — or a malformed
+  one, or two colliding on one derived key — rejects the *entire* rule's batch (§9.5), so the
+  granted proposal beside a forbidden one does not land either. Pinned by
+  `one_ungranted_proposal_rejects_the_whole_batch`.
+- **Auspex applies by spawning the core CLI a hand would type**, with `-y` (its authorization is
+  the grant, not a prompt) and `PANTHEON_NO_HOOKS=1` (so the write does not wake `aus` again —
+  `an_applied_write_does_not_wake_auspex_again` proves it with a fake `aus` on the child's PATH).
+  It maps a proposal's **universal fields only** — name/key/series/refs, `--at now` for a date-keyed
+  line — via `apply.rs`.
+- **The `data` wall is real and refused loudly (I5).** §9.3 shows proposals carrying a `data`
+  object, but **no core's CLI can ingest an arbitrary record** — every `add` builds from typed
+  positionals/flags, and Auspex links no core. So a `data`-bearing proposal is *refused, never
+  mis-stored*: `aus run` applies only what a hand could type. This is a genuine gap between §9.3's
+  proposal format and the cores, and closing it means giving cores a `--data`/JSON-record path
+  first (none exists). The `/series` grant slot's mint-licensing half waits on the same, since every
+  minting proposal (a reading) carries data and is refused before it gets there.
+- **`sign` is `manual` unless `--trigger` is present, and that is honest** — §9.4 has a TUI-open
+  spawn a *bare* `aus run`, indistinguishable from a hand's, so only a triggered run can claim
+  `hook`. The `watch=` filter applies only when a trigger names a core; a bare run evaluates every
+  rule (§9.3).
+- **Idempotence is the core's overwrite, not Auspex's bookkeeping.** A fresh add and an overwrite
+  are the same `add` verb; `-y` lands the overwrite. So a rule run twice keeps one record, and
+  Auspex needs no "upsert" path of its own (§9.5 step 5).
+- **`aus run` maps `core`→`short` via `CoreRegistry::discover()`** (once per run, not per proposal),
+  so it needs the cores on PATH — which is why `tests/apply.rs` sets PATH on each child, the
+  `hook.rs` move, and stays parallel-safe without `unsafe set_var`.
+
+**Step 8's hook half landed first, and it is the spine's, not each core's.** §16 step 8 says the
+`aus`-not-on-`PATH` no-op "is exercised" through steps 1–7 — it was not: no core spawned anything,
+and `PANTHEON_NO_HOOKS` was read nowhere. It is real now, in `pantheon::hook`, and the shape is
+worth knowing before touching it. **The `Store` mutators *note* a write, `contract::dispatch`
+*fires* once at process end** — so a verb writing three lines wakes Auspex once, not three times,
+and no core crate carries a line of it (`Store` is generic over `Core`, so `C::NAME` is the trigger
+the spine forwards without naming a core, I5). Two consequences a later step must not trip on:
+
+- **Two notes that disagree collapse to a triggerless wake**, which is §9.3's own rule — a trigger
+  names a write, and a `move` between homes or a rename cascade (`Cascade::apply`, which *notes*
+  rather than fires, for exactly this reason) has no one write to name. Do not "fix" this into
+  naming the last writer.
+- **`pan` is not covered and does not need to be.** It hand-rolls its own tail instead of calling
+  `dispatch`, and holds no `Store`. When §10.1's node-level cascade lands, `pan`'s tail owes
+  `hook::wake_if_noted()` a call — nothing else will make it.
+
+A screen opening wakes bare and triggerless from `porticus::run`, one site for all nine
+instruments — and deliberately **not** from `porticus::drive`, so a driven screen in a test stays
+quiet. `pensum/tests/hook.rs` pins all of it against a fake `aus` on the child's `PATH`; it needs
+no `unsafe set_var` because the env is set on the child, not this process.
+
+Two further things the spawn needs, both easy to leave out and neither caught by a test:
+
+- **Nulled stdio and an un-awaited child are not detachment.** §13 names the mechanism —
+  `process_group(0)` on Unix, the `DETACHED_PROCESS` creation flag on Windows — and without it the
+  child stays in the caller's process group, so a `Ctrl-C` at the terminal can kill a rule
+  mid-write.
+- **`hook::suppress()` is how a process opts out of waking**, and Auspex calls it at startup.
+  Without it `aus`'s own rules browser spawns `aus run` on open, since `porticus::run` wakes for
+  every instrument. It is the twin of the `PANTHEON_NO_HOOKS` Auspex sets on the cores it spawns:
+  one says *not this process*, the other *not that child*, and neither substitutes for the other.
 
 ### What step 6 deliberately left
 

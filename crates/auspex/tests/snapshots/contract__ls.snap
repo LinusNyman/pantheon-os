@@ -1,0 +1,48 @@
+---
+source: crates/auspex/tests/contract.rs
+expression: pretty(&rules)
+---
+[
+  {
+    "file": "ac__function__weigh__in.sh",
+    "name": "weigh__in",
+    "scope": "ac",
+    "watch": [
+      "annales"
+    ],
+    "writes": [
+      "pensum@ac:add"
+    ]
+  },
+  {
+    "file": "csa__function__js_style.js",
+    "name": "js_style",
+    "scope": "csa",
+    "watch": [
+      "pensum"
+    ],
+    "writes": [
+      "annales@csa:add"
+    ]
+  },
+  {
+    "file": "csa__function__silent",
+    "name": "silent",
+    "scope": "csa",
+    "watch": [],
+    "writes": []
+  },
+  {
+    "desc": "nudge me about quiet friends",
+    "file": "csa__function__stale_contact.py",
+    "name": "stale_contact",
+    "scope": "csa",
+    "watch": [
+      "annales"
+    ],
+    "writes": [
+      "pensum@acm:add",
+      "annales@csa/stale_contact:add"
+    ]
+  }
+]

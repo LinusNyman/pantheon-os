@@ -1,6 +1,5 @@
-//! `aus` — Auspex's CLI/TUI (§9.7): `run`, `plan`, `ls`, `test`, `trust`.
+//! `aus` — Auspex's CLI/TUI (§9.6): `run`, `plan`, `ls`, `test`.
 
-fn main() {
-    // Scaffold — see PANTHEONOS-SPEC.md §9. Prints help until implemented.
-    println!("aus — Auspex (the omens). Not yet implemented.");
+fn main() -> std::process::ExitCode {
+    auspex::run_cli()
 }
