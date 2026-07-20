@@ -470,23 +470,40 @@ mod tests {
         );
     }
 
-    /// The six structural mutators of §10.1 are still stubs, so their keys are **dark**
-    /// (P§7): `on_action` returns `None` and Porticus greys them rather than offering a
-    /// move it cannot perform.
+    /// `pan`'s node actions are wired now that the cascade is built: `e` annotates, `r`
+    /// renames, `x` removes (§10.1, §10.3). `m` (move) and `a` (add) stay **dark** —
+    /// Porticus has no destination/child prompt for them yet, so `on_action` returns
+    /// `None` and the keys are greyed (P§7). The validate tab's `d` applies a fix carried
+    /// in a `Row` target (§10.2).
     #[test]
-    fn the_structural_mutators_stay_dark() {
+    fn the_node_actions_are_wired_and_move_stays_dark() {
         let root = fresh_root("dark");
         let mut app = PanApp { root: root.clone() };
         let node = pantheon::Code::parse("a").unwrap();
         let target = porticus::Target::Node { node, at: None };
-        for action in [Action::Rename, Action::Move, Action::Remove, Action::Add] {
+
+        for action in [Action::Edit, Action::Rename, Action::Remove] {
             assert!(
-                app.on_action(action, &target).is_none(),
-                "{action:?} must stay dark until the node-level cascade lands (§10.1)"
+                app.on_action(action, &target).is_some(),
+                "{action:?} is a built node action (§10.1, §10.3)"
             );
         }
-        // Annotate is the one node-level write that exists.
-        assert!(app.on_action(Action::Edit, &target).is_some());
+        for action in [Action::Move, Action::Add] {
+            assert!(
+                app.on_action(action, &target).is_none(),
+                "{action:?} has no prompt yet — dark, not faked (P§7)"
+            );
+        }
+
+        // The validate tab's `d` applies a finding's fix, carried as (code, label).
+        let fix = porticus::Target::Row(porticus::RecordRef {
+            home: pantheon::Code::parse("ax").unwrap(),
+            key: "bad_label".into(),
+        });
+        assert!(
+            app.on_action(Action::Done, &fix).is_some(),
+            "`d` applies a finding fix from the validate tab (§10.2)"
+        );
     }
 
     /// `pan`'s two tabs (§10), and the tree tab as a draw-view about the selected node.

@@ -1,5 +1,7 @@
 //! Node-level structural operations (§10.1): `rm`, `rename`, `mv`, `mv-file`, and the
-//! bulk `rename-prefix` / `rename-pattern`. Each builds a [`Plan`](crate::plan::Plan) of
+//! bulk `rename-prefix`. (`rename-pattern` — a literal substitution across labels, slugs,
+//! and series names, each slug hit cascading its refs — is the one verb still to land.)
+//! Each builds a [`Plan`](crate::plan::Plan) of
 //! directory and file renames — a node's code *is* its path (§5.2), so changing a code
 //! rewrites every descendant directory name and `[code]` filename prefix under the
 //! branch. The plans are dry-run-first and non-atomic (§10.1): a crash is diagnosed from
