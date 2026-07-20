@@ -199,6 +199,47 @@ impl Invocation {
     }
 }
 
+/// One field of the add form (§7.3, P§7).
+///
+/// A core declares the fields its `add` collects — the record's **name** and any data
+/// fields — and Porticus renders the form and assembles the invocation from them
+/// (P-II). The name field carries `flag: None` and is appended as the positional `add`
+/// requires; every other field is a `--flag value` pair, appended only where the hand
+/// fills it. The core owns which fields exist (I5); the assembled argv is the contract
+/// (I4). The label is what the form's box shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FieldSpec {
+    pub label: &'static str,
+    /// The CLI flag this field fills, e.g. `--coordinates`. `None` is the record's
+    /// name, which `add` takes as a positional and which is always required.
+    pub flag: Option<&'static str>,
+    /// A required field must be non-empty before the form will submit.
+    pub required: bool,
+}
+
+impl FieldSpec {
+    /// The record's name — the one field every core's `add` needs, and the whole of the
+    /// default form (§7.3).
+    #[must_use]
+    pub fn name() -> Self {
+        Self {
+            label: "name",
+            flag: None,
+            required: true,
+        }
+    }
+
+    /// An optional data field, filled through `--flag` when the hand types a value.
+    #[must_use]
+    pub fn field(label: &'static str, flag: &'static str) -> Self {
+        Self {
+            label,
+            flag: Some(flag),
+            required: false,
+        }
+    }
+}
+
 /// How a relayed write reaches a core (P§7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Writer {

@@ -10,7 +10,7 @@
 
 use pantheon::Code;
 
-use crate::action::{Action, Invocation, Target, Writer};
+use crate::action::{Action, FieldSpec, Invocation, Target, Writer};
 use crate::ident::Ident;
 use crate::view::View;
 
@@ -54,6 +54,19 @@ pub trait App {
     /// `None` → the action does not apply to this target: Porticus no-ops it and says
     /// so on the status line, rather than relaying something the core will refuse.
     fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation>;
+
+    /// The fields `a` collects for a new record — the multi-field add form (§7.3, P§7).
+    ///
+    /// The default is the record's **name** alone, which every core's `add` requires and
+    /// nothing more: that is enough to make `a` mint a record on any core, where before
+    /// it relayed a nameless `add` the spine refused. A core with data fields overrides
+    /// this to add them — Mappa its coordinates and address — each a `--flag` appended
+    /// only when filled. Porticus renders the form and assembles the invocation from the
+    /// base [`on_action`](App::on_action) gives it, so the core still authors the write
+    /// (I2) and owns which fields exist (I5).
+    fn add_form(&self) -> Vec<FieldSpec> {
+        vec![FieldSpec::name()]
+    }
 
     /// Run one relayed invocation.
     ///

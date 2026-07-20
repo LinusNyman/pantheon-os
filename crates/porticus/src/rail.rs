@@ -146,27 +146,13 @@ impl Rail {
     /// The breadcrumb the header's path bar shows (P§4).
     #[must_use]
     pub fn breadcrumb(&self) -> String {
-        let visible = self.visible();
-        let Some(current) = visible.get(self.cursor) else {
-            return String::new();
-        };
-        let mut trail: Vec<&Visible<'_>> = Vec::new();
-        let mut want = current.depth;
-        for entry in visible[..=self.cursor].iter().rev() {
-            if entry.depth == want {
-                trail.push(entry);
-                if want == 0 {
-                    break;
-                }
-                want -= 1;
-            }
-        }
-        trail.reverse();
-        trail
-            .iter()
-            .map(|v| format!("{}·{}", v.node.code.as_str(), v.node.label))
-            .collect::<Vec<_>>()
-            .join("  ")
+        // The current node's own name, not the trail down to it (P§4). The tree beside
+        // the header already draws the ancestry, so repeating `sphere · … · node` in the
+        // header was noise; the definition of where the cursor *is* stands alone.
+        self.visible()
+            .get(self.cursor)
+            .map(|current| current.node.label.to_string())
+            .unwrap_or_default()
     }
 
     pub fn down(&mut self) {

@@ -8,7 +8,7 @@ use pantheon::{Code, EntityRef, Response, Store};
 use porticus::action::{Invocation, Relayed};
 use porticus::view::Row;
 use porticus::views::{Card, Chart, Chip, EntityCard, Insights, Panel, TreeFile};
-use porticus::{Action, App, Ident, RecordRef, Target, View, Writer};
+use porticus::{Action, App, FieldSpec, Ident, RecordRef, Target, View, Writer};
 
 use crate::cli::{Cli, with_default_verb};
 
@@ -87,6 +87,21 @@ impl App for MappaApp {
 
     fn execute(&mut self, invocation: &Invocation) -> std::io::Result<Relayed> {
         Ok(in_process(invocation))
+    }
+
+    /// Mappa's add form (§8.2): a place's name and where it *is* — a point, an area, or
+    /// an address — plus a link, a zone, and a remark. `on_action` builds the base
+    /// `add -H <node>`; Porticus appends the name and whichever of these the hand fills.
+    fn add_form(&self) -> Vec<FieldSpec> {
+        vec![
+            FieldSpec::name(),
+            FieldSpec::field("coordinates", "--coordinates"),
+            FieldSpec::field("bounds", "--bounds"),
+            FieldSpec::field("address", "--address"),
+            FieldSpec::field("url", "--url"),
+            FieldSpec::field("timezone", "--timezone"),
+            FieldSpec::field("note", "--note"),
+        ]
     }
 
     fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {

@@ -11,7 +11,7 @@ use ratatui::layout::{Constraint, Direction, Layout as Cut, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 
-use crate::action::{Action, Invocation, RecordRef, Relayed, Target, Writer};
+use crate::action::{Action, FieldSpec, Invocation, RecordRef, Relayed, Target, Writer};
 use crate::app::App;
 use crate::keymap::{self, Chrome};
 use crate::overlay::{Overlay, Pending, Prompt};
@@ -213,8 +213,28 @@ fn draw(
     draw_status(frame, state, theme, bands[2]);
 
     if let Some(top) = state.overlays.last() {
-        draw_overlay(frame, top, theme, ident, area);
+        match top {
+            // The pick-a-home modal paints the tree itself, so it needs the app to ask
+            // each node its presence — a different render path from the line overlays.
+            Overlay::Tree { rail } => draw_tree_modal(frame, rail, app, theme, area),
+            other => draw_overlay(frame, other, theme, ident, area),
+        }
     }
+}
+
+/// The pick-a-home modal (P§4): a bordered box painting its own rail, so a quick add
+/// picks a node the same way the main tree is browsed.
+fn draw_tree_modal(frame: &mut Frame, rail: &Rail, app: &mut impl App, theme: Theme, area: Rect) {
+    let box_area = centred(area, 72, area.height.saturating_sub(2));
+    frame.render_widget(Clear, box_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.chrome())
+        .title("pick a node")
+        .style(theme.text());
+    let inner = block.inner(box_area);
+    block.render(box_area, frame.buffer_mut());
+    rail.draw(inner, frame.buffer_mut(), theme, true, &mut Asking(app));
 }
 
 fn draw_header(frame: &mut Frame, state: &State, theme: Theme, ident: &crate::Ident, area: Rect) {
@@ -245,6 +265,37 @@ fn draw_header(frame: &mut Frame, state: &State, theme: Theme, ident: &crate::Id
     frame.render_widget(Paragraph::new(Line::from(spans)).style(theme.text()), area);
 }
 
+/// Below this width the rail stacks above the content rather than sitting beside it — a
+/// narrow terminal has no room for two columns (P§6).
+const STACK_BELOW: u16 = 60;
+/// At or above this width the rail takes a fixed narrow column instead of a third of the
+/// screen, so it does not sprawl on a wide terminal (P§6).
+const WIDE_AT: u16 = 120;
+/// The rail's capped width once the terminal is [`WIDE_AT`] or wider.
+const WIDE_RAIL: u16 = 30;
+
+/// How to split a Rail view's body for a given terminal width (P§6, §18 — derived from
+/// the terminal, never a knob): stacked above the content when narrow, a fixed narrow
+/// column when wide, a third of the width in between.
+fn rail_cut(width: u16) -> (Direction, [Constraint; 2]) {
+    if width < STACK_BELOW {
+        (
+            Direction::Vertical,
+            [Constraint::Percentage(40), Constraint::Percentage(60)],
+        )
+    } else if width >= WIDE_AT {
+        (
+            Direction::Horizontal,
+            [Constraint::Length(WIDE_RAIL), Constraint::Min(1)],
+        )
+    } else {
+        (
+            Direction::Horizontal,
+            [Constraint::Percentage(34), Constraint::Percentage(66)],
+        )
+    }
+}
+
 fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Theme, area: Rect) {
     let Some(node) = state.rail.selected() else {
         // An empty tree is not an error (I7): the chrome stands, the content says so.
@@ -254,10 +305,14 @@ fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Th
     let layout = state.views[state.active].layout();
 
     let (rail_area, content) = match layout {
+        // The rail's shape follows the terminal, not a knob (§18): stacked above the
+        // content when there is no width for two columns, a fixed narrow column when
+        // there is width to spare, and a third of the screen in between (P§6).
         Layout::Rail => {
+            let (direction, constraints) = rail_cut(area.width);
             let cut = Cut::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
+                .direction(direction)
+                .constraints(constraints)
                 .split(area);
             (Some(cut[0]), cut[1])
         }
@@ -519,6 +574,10 @@ fn draw_overlay(
             )));
             lines
         }
+        Overlay::Form { fields, focus, .. } => form_lines(fields, *focus, theme),
+        // The tree modal is painted by `draw_tree_modal`, not through this line body — it
+        // never reaches here.
+        Overlay::Tree { .. } => Vec::new(),
     };
 
     let box_area = centred(area, 72, u16::try_from(body.len() + 2).unwrap_or(8));
@@ -536,6 +595,27 @@ fn draw_overlay(
             .wrap(Wrap { trim: false }),
         inner,
     );
+}
+
+/// The add form's fields as lines (P§7): the focused field carries the cursor mark and
+/// the name style, a required field is starred, and the typed value follows the label.
+fn form_lines(fields: &[(FieldSpec, String)], focus: usize, theme: Theme) -> Vec<Line<'static>> {
+    fields
+        .iter()
+        .enumerate()
+        .map(|(i, (spec, value))| {
+            let (mark, label_style) = if i == focus {
+                ("> ", theme.name())
+            } else {
+                ("  ", theme.dim())
+            };
+            let required = if spec.required { "*" } else { " " };
+            Line::from(vec![
+                Span::styled(format!("{mark}{}{required}  ", spec.label), label_style),
+                Span::styled(value.clone(), theme.text()),
+            ])
+        })
+        .collect()
 }
 
 /// Help is generated from the live keymap (P§4), so it cannot drift from the bindings.
@@ -821,12 +901,22 @@ fn begin(
         });
         return Ok(());
     }
+    // `A` opens the tree as a modal to pick a home at any node (P§4), then hands off to
+    // the same add form `a` opens — so a quick add differs only in how the home is
+    // chosen. Its own rail leaves the browsing cursor untouched.
     if action == Action::QuickAdd {
-        state.overlays.push(Overlay::Line {
-            prompt: Prompt::QuickAddCode,
-            label: "add at code".into(),
-            buffer: String::new(),
+        state.overlays.push(Overlay::Tree {
+            rail: Rail::new(&state.root)?,
         });
+        return Ok(());
+    }
+
+    // `a` opens the multi-field add form (§7.3, P§7): the core declares the fields it
+    // collects, the hand fills them, and only on submit is the invocation assembled and
+    // relayed. Before this, `a` relayed a nameless `add` that the spine refused, so no
+    // prompt appeared and nothing was minted.
+    if action == Action::Add {
+        open_add_form(app, state, target);
         return Ok(());
     }
 
@@ -1085,6 +1175,30 @@ fn handle_overlay(
 ) -> anyhow::Result<()> {
     let text_entry = state.overlays.last().is_some_and(Overlay::is_text_entry);
 
+    // A passive overlay (Title/Help) yields the keyboard: any key other than `Esc` and
+    // `Enter` (which already dismiss) pops it and is **re-dispatched to the base**, so a
+    // view-switch or a nav key both closes the overlay and acts, in one press (P§4).
+    // Without this the overlay swallowed every such key at the `_ => Ok(())` below, and a
+    // hand on Help had to `Esc` before it could go anywhere.
+    if state.overlays.last().is_some_and(Overlay::is_passive)
+        && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
+    {
+        state.overlays.pop();
+        return handle(screen, app, state, key);
+    }
+
+    // The add form holds one buffer per field, so it cannot ride the single-buffer
+    // text-entry path below — it owns its own key handler (P§7).
+    if matches!(state.overlays.last(), Some(Overlay::Form { .. })) {
+        return handle_form_key(screen, app, state, key);
+    }
+    // The pick-a-home modal navigates its own tree (P§4). It only opens an overlay, so
+    // it needs no `screen` to relay through and cannot fail.
+    if matches!(state.overlays.last(), Some(Overlay::Tree { .. })) {
+        handle_tree_key(app, state, key);
+        return Ok(());
+    }
+
     match key.code {
         KeyCode::Esc => {
             state.overlays.pop();
@@ -1136,6 +1250,161 @@ fn handle_confirm_key(
     }
 }
 
+/// The add form's keys (P§7): `Tab`/`Down` and `Up` move between fields, printable keys
+/// type into the focused one, `Backspace` erases, `Enter` submits once the required
+/// fields are filled, and `Esc` cancels. It cannot use the single-buffer text path
+/// because it holds one buffer per field.
+fn handle_form_key(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    key: KeyEvent,
+) -> anyhow::Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            state.overlays.pop();
+            Ok(())
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                *focus = (*focus + 1) % fields.len();
+            }
+            Ok(())
+        }
+        KeyCode::Up => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                *focus = (*focus + fields.len() - 1) % fields.len();
+            }
+            Ok(())
+        }
+        KeyCode::Backspace => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                fields[*focus].1.pop();
+            }
+            Ok(())
+        }
+        KeyCode::Char(c) => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                fields[*focus].1.push(c);
+            }
+            Ok(())
+        }
+        KeyCode::Enter => {
+            // A required field left blank keeps the form open and names which (P§7).
+            let missing = match state.overlays.last() {
+                Some(Overlay::Form { fields, .. }) => fields
+                    .iter()
+                    .find(|(spec, value)| spec.required && value.trim().is_empty())
+                    .map(|(spec, _)| spec.label),
+                _ => None,
+            };
+            if let Some(label) = missing {
+                state.status = Status::Notice(format!("{label} is required"));
+                return Ok(());
+            }
+            let Some(Overlay::Form { target, fields, .. }) = state.overlays.pop() else {
+                return Ok(());
+            };
+            submit_form(screen, app, state, &target, &fields)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Assemble and relay the add the form describes (§7.3, P§7).
+///
+/// The core authors the base invocation (`add -H <node>`) from the target; Porticus
+/// appends the name as the positional `add` needs and a `--flag value` for each data
+/// field the hand filled, then runs its own commit policy over it (P-II). An unfilled
+/// optional field contributes nothing, so the record simply omits it (I1).
+fn submit_form(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    target: &Target,
+    fields: &[(FieldSpec, String)],
+) -> anyhow::Result<()> {
+    let Some(mut invocation) = app.on_action(Action::Add, target) else {
+        state.status = Status::Notice(format!("{} does not apply here", Action::Add.label()));
+        return Ok(());
+    };
+    for (spec, value) in fields {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        match spec.flag {
+            None => invocation.args.push(value.to_owned()),
+            Some(flag) => {
+                invocation.args.push(flag.to_owned());
+                invocation.args.push(value.to_owned());
+            }
+        }
+    }
+    if let Some(short) = state.missing.iter().find(|s| **s == invocation.short) {
+        state.status = Status::Notice(format!("{short} is not on PATH"));
+        return Ok(());
+    }
+    commit_or_confirm(screen, app, state, Action::Add, invocation)
+}
+
+/// Open the add form for a home (§7.3, P§7): the fields the core declares, empty and
+/// focused on the first. Shared by `a` (the home is the tree cursor) and the pick-a-home
+/// modal (the home is the node selected there).
+fn open_add_form(app: &mut impl App, state: &mut State, target: Target) {
+    let fields = app
+        .add_form()
+        .into_iter()
+        .map(|spec| (spec, String::new()))
+        .collect();
+    state.overlays.push(Overlay::Form {
+        target,
+        fields,
+        focus: 0,
+    });
+}
+
+/// The pick-a-home modal's keys (P§4): arrows and `hjkl` walk its own tree, `Enter` opens
+/// the add form at the node under its cursor, `Esc` cancels.
+fn handle_tree_key(app: &mut impl App, state: &mut State, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            state.overlays.pop();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.down();
+            }
+        }
+        KeyCode::Left | KeyCode::Char('h') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.left();
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+                rail.right();
+            }
+        }
+        KeyCode::Enter => {
+            let node = match state.overlays.last() {
+                Some(Overlay::Tree { rail }) => rail.selected(),
+                _ => None,
+            };
+            state.overlays.pop();
+            if let Some(node) = node {
+                open_add_form(app, state, Target::Node { node, at: None });
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Search matches live (P§6) — and *whose* labels it matches follows focus.
 fn live_search(state: &mut State) {
     let Some(Overlay::Search { buffer }) = state.overlays.last() else {
@@ -1181,7 +1450,10 @@ fn submit(
             &snapshot,
         ),
         Overlay::Line { prompt, buffer, .. } => submit_line(screen, app, state, prompt, buffer),
-        Overlay::Title | Overlay::Help => Ok(()),
+        // Title/Help have nothing to submit; the form and the tree modal own their own
+        // `Enter` (in `handle_form_key`/`handle_tree_key`), so it never reaches here with
+        // either on top.
+        Overlay::Title | Overlay::Help | Overlay::Form { .. } | Overlay::Tree { .. } => Ok(()),
     }
 }
 
@@ -1263,48 +1535,7 @@ fn submit_line(
             };
             let mut invocation = invocation;
             invocation.args.push(buffer);
-            commit_or_confirm(
-                screen.as_deref_mut(),
-                app,
-                state,
-                Action::Rename,
-                invocation,
-            )
-        }
-        Prompt::QuickAddCode => {
-            state.overlays.push(Overlay::Line {
-                prompt: Prompt::QuickAddContent(buffer),
-                label: "add what".into(),
-                buffer: String::new(),
-            });
-            Ok(())
-        }
-        Prompt::QuickAddContent(code) => {
-            let Ok(node) = Code::parse(code.trim()) else {
-                state.status = Status::Error(format!("no node with code {code}"));
-                return Ok(());
-            };
-            let target = Target::Node { node, at: None };
-            let Some(invocation) = app.on_action(Action::Add, &target) else {
-                state.status = Status::Notice("add does not apply here".into());
-                return Ok(());
-            };
-            let mut invocation = invocation;
-            invocation.args.push(buffer);
-            commit_or_confirm(screen.as_deref_mut(), app, state, Action::Add, invocation)
-        }
-        Prompt::PickHome => {
-            // A Full view's `a` has no tree cursor to resolve a home from (P§7).
-            let Ok(node) = Code::parse(buffer.trim()) else {
-                state.status = Status::Error(format!("no node with code {buffer}"));
-                return Ok(());
-            };
-            let target = Target::Node { node, at: None };
-            let Some(invocation) = app.on_action(Action::Add, &target) else {
-                state.status = Status::Notice("add does not apply here".into());
-                return Ok(());
-            };
-            commit_or_confirm(screen, app, state, Action::Add, invocation)
+            commit_or_confirm(screen, app, state, Action::Rename, invocation)
         }
     }
 }
@@ -1457,4 +1688,30 @@ pub fn keys(script: &str) -> Vec<ratatui::crossterm::event::KeyEvent> {
         rest = chars.as_str();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Constraint, Direction, STACK_BELOW, WIDE_AT, WIDE_RAIL, rail_cut};
+
+    #[test]
+    fn the_rail_cut_follows_the_terminal_width() {
+        // Narrow: the rail stacks above the content — no room for two columns.
+        assert_eq!(rail_cut(50).0, Direction::Vertical, "a narrow width stacks");
+        // The mid band keeps a third of the width, side by side. Every width the frame
+        // tests render at (60–90) lands here, so their layout is unchanged.
+        assert_eq!(
+            rail_cut(STACK_BELOW).0,
+            Direction::Horizontal,
+            "the stack floor is exclusive — 60 is not narrow"
+        );
+        assert!(matches!(rail_cut(90).1[0], Constraint::Percentage(34)));
+        // Wide: a fixed narrow rail column rather than a sprawling third.
+        assert_eq!(rail_cut(WIDE_AT).0, Direction::Horizontal);
+        assert!(matches!(
+            rail_cut(WIDE_AT).1[0],
+            Constraint::Length(WIDE_RAIL)
+        ));
+        assert!(matches!(rail_cut(200).1[0], Constraint::Length(WIDE_RAIL)));
+    }
 }

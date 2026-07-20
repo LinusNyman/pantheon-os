@@ -5,7 +5,8 @@
 //! text-entry overlay it types a literal `q` (P-I); over Help, Title, or Confirm it is
 //! inert and `Esc` dismisses; only at the bare base does it quit.
 
-use crate::action::{Action, Invocation, Target};
+use crate::action::{Action, FieldSpec, Invocation, Target};
+use crate::rail::Rail;
 
 /// Why a line prompt is open — what its answer will be used for.
 #[derive(Clone, Debug)]
@@ -15,15 +16,6 @@ pub enum Prompt {
     /// An action a view asked for a line first (`View::prompts_for`) — the typed line
     /// is appended to the invocation and the confirm policy runs as usual.
     Field(Action, Target),
-    /// `A` — quick add by code: the node, then the content.
-    QuickAddCode,
-    /// `A`, second leg — the content, at the code just given.
-    QuickAddContent(String),
-    /// A Full view's `a`, which has no tree cursor to resolve a home from (P§7).
-    ///
-    /// P§4 wants the tree itself as a modal here; this is the line-entry form of the
-    /// same question, resolving a home by code.
-    PickHome,
 }
 
 /// One overlay.
@@ -60,6 +52,20 @@ pub enum Overlay {
         /// keystroke: the count named and an explicit key, never a stray `y` (P§5).
         heavy: Option<usize>,
     },
+    /// `a` — the multi-field add form (§7.3, P§7). Each field pairs the core's
+    /// [`FieldSpec`] with what has been typed into it; `focus` is which field owns the
+    /// keyboard. Unlike a [`Line`](Overlay::Line) it holds several buffers, so it routes
+    /// through its own key handler rather than the single-buffer text-entry path.
+    Form {
+        /// The node the new record is homed at (§7.3).
+        target: Target,
+        fields: Vec<(FieldSpec, String)>,
+        focus: usize,
+    },
+    /// `A` — the tree as a modal, to pick a home for a quick add at any node (P§4). It
+    /// holds its own [`Rail`] so navigating it leaves the browsing cursor where it was;
+    /// selecting a node hands off to the add [`Form`](Overlay::Form).
+    Tree { rail: Rail },
 }
 
 /// One write awaiting acknowledgement.
@@ -88,6 +94,19 @@ impl Overlay {
         matches!(self, Overlay::Search { .. } | Overlay::Line { .. })
     }
 
+    /// Whether this overlay is **passive** — Title and Help, which hold neither the
+    /// keyboard (a text buffer) nor a pending write (a confirm).
+    ///
+    /// A passive overlay is a read-only pane laid over the view, so it **yields** to a
+    /// navigation or chrome key rather than swallowing it: pressing a view-switch while
+    /// Help is up should reach the screen, not stall at the overlay (P§4). `Confirm` is
+    /// *not* passive — its `y`/`n`/`X` must keep owning the keyboard until the write is
+    /// acknowledged.
+    #[must_use]
+    pub fn is_passive(&self) -> bool {
+        matches!(self, Overlay::Title | Overlay::Help)
+    }
+
     /// The buffer being typed into, if any.
     pub fn buffer_mut(&mut self) -> Option<&mut String> {
         match self {
@@ -105,6 +124,8 @@ impl Overlay {
             Overlay::Search { .. } => "search".into(),
             Overlay::Line { label, .. } => label.clone(),
             Overlay::Confirm { action, .. } => format!("confirm — {}", action.label()),
+            Overlay::Form { .. } => "add".into(),
+            Overlay::Tree { .. } => "pick a node".into(),
         }
     }
 }

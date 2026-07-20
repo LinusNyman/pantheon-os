@@ -2,7 +2,7 @@
 source: crates/porticus/tests/frame.rs
 expression: "porticus::as_text(&buffer)"
 ---
-P E N S U M   a·actio  +    read
+P E N S U M   actio  +    read
 ▾ a actio               a_note
     ac cura             principium  mores
 ▾ c contextus
