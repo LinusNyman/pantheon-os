@@ -9,8 +9,8 @@ use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
-    Severity, Shape, build_tree, normalize, plan_new, plan_rm, resolve_all, resolve_code, validate,
-    with_record_lock,
+    Severity, Shape, build_tree, normalize, plan_mv, plan_new, plan_rename, plan_rm, resolve_all,
+    resolve_code, validate, with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -77,6 +77,105 @@ fn rm_removes_an_empty_node_and_refuses_a_full_one() {
     plan.apply(&root).unwrap();
     assert!(!root.join("c_contextus/c_s_societas/cs_a_amicitia").exists());
     assert!(root.join("c_contextus/c_s_societas").is_dir());
+}
+
+#[test]
+fn rename_char_cascades_dirs_and_files_over_the_whole_branch() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    write_record(
+        &root,
+        "cs",
+        "cs__group__club.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_rename(&root, &Code::parse("cs").unwrap(), Some("t"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+
+    // Every level's dir, meta dir, and record file followed cs -> ct.
+    assert!(
+        root.join("c_contextus/c_t_societas/ct__/ct__group__club.json")
+            .is_file()
+    );
+    assert!(
+        root.join("c_contextus/c_t_societas/ct_a_amicitia/cta__/cta__person__mara.json")
+            .is_file()
+    );
+    assert!(!root.join("c_contextus/c_s_societas").exists());
+    // No error-severity finding: the tree is consistent after the cascade.
+    assert!(
+        !validate(&root, &album_registry())
+            .unwrap()
+            .iter()
+            .any(|f| f.severity == Severity::Error)
+    );
+}
+
+#[test]
+fn rename_label_moves_only_the_node_dir() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+
+    let (plan, _) = plan_rename(
+        &root,
+        &Code::parse("cs").unwrap(),
+        None,
+        Some("guild"),
+        None,
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    // The label changed; the code did not, so the child keeps its `cs` prefix.
+    assert!(root.join("c_contextus/c_s_guild/cs_a_amicitia").is_dir());
+    assert!(!root.join("c_contextus/c_s_societas").exists());
+}
+
+#[test]
+fn mv_rehomes_and_cascades_and_refuses_a_cycle() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "root", triple("d", "disciplina"));
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    // A node cannot move into its own descendant.
+    assert!(plan_mv(&root, &Code::parse("c").unwrap(), "cs").is_err());
+
+    let (plan, _) = plan_mv(&root, &Code::parse("cs").unwrap(), "d").unwrap();
+    plan.apply(&root).unwrap();
+    assert!(
+        root.join("d_disciplina/d_s_societas/ds_a_amicitia/dsa__/dsa__person__mara.json")
+            .is_file()
+    );
+    assert!(!root.join("c_contextus/c_s_societas").exists());
+}
+
+#[test]
+fn rename_char_refuses_a_sibling_collision() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "c", triple("t", "tempus"));
+    // Renaming cs's char to `t` would collide with the existing sibling ct (§5.3).
+    assert!(plan_rename(&root, &Code::parse("cs").unwrap(), Some("t"), None, None).is_err());
 }
 
 #[test]

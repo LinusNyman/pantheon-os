@@ -17,8 +17,9 @@ use serde_json::{Value, json};
 
 use pantheon::mint::NewSpec;
 use pantheon::{
-    Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_new, plan_rm,
-    read_annotations, resolve_all, resolve_code, resolve_root, set_annotations, validate,
+    Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_new,
+    plan_rename, plan_rm, read_annotations, resolve_all, resolve_code, resolve_root,
+    set_annotations, validate,
 };
 
 // The screen rides the `tui` feature; drop it and the structural CLI stands alone (§14).
@@ -311,9 +312,14 @@ pub(crate) fn run(cli: &Cli) -> Result<RunOk> {
         // code is its path, so a rename rewrites every child directory name and file
         // prefix under the branch, plus every rule header naming the code (§9.2).
         Cmd::MvFile { .. } => Err(not_implemented("mv-file", NODE_CASCADE)),
-        Cmd::Mv { .. } => Err(not_implemented("mv", NODE_CASCADE)),
+        Cmd::Mv { code, to } => cmd_mv(cli, code, to),
         Cmd::Rm { code } => cmd_rm(cli, code),
-        Cmd::Rename { .. } => Err(not_implemented("rename", NODE_CASCADE)),
+        Cmd::Rename {
+            code,
+            ch,
+            label,
+            def,
+        } => cmd_rename(cli, code, ch.as_deref(), label.as_deref(), def.as_deref()),
         Cmd::RenamePrefix { .. } => Err(not_implemented("rename-prefix", NODE_CASCADE)),
         Cmd::RenamePattern { .. } => Err(not_implemented("rename-pattern", NODE_CASCADE)),
     }
@@ -368,6 +374,29 @@ fn cmd_rm(cli: &Cli, code: &str) -> Result<RunOk> {
     let code = Code::parse(code)?;
     let (plan, removed) = plan_rm(&root, &code)?;
     run_plan(cli, &root, &plan, json!({ "removed": [removed] }))
+}
+
+/// `pan rename <code> [--char C] [--label L]` — rename a node, cascading the code change
+/// over its branch (§10.1). A definition-prefix node renames with `--def`.
+fn cmd_rename(
+    cli: &Cli,
+    code: &str,
+    ch: Option<&str>,
+    label: Option<&str>,
+    def: Option<&str>,
+) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let code = Code::parse(code)?;
+    let (plan, record) = plan_rename(&root, &code, ch, label, def)?;
+    run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
+}
+
+/// `pan mv <code> --to <parent>` — re-home a node, cascading the code change (§10.1).
+fn cmd_mv(cli: &Cli, code: &str, to: &str) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let code = Code::parse(code)?;
+    let (plan, record) = plan_mv(&root, &code, to)?;
+    run_plan(cli, &root, &plan, json!({ "moved": [record] }))
 }
 
 fn cmd_tree(cli: &Cli, code: Option<&str>) -> Result<RunOk> {
