@@ -139,8 +139,14 @@ fn a_passive_overlay_yields_to_a_navigation_key() {
     // A non-Esc key yields: `+` then `?` closes the title and opens Help in one press.
     // Without the yield, `?` was swallowed and the title stayed up.
     let swapped = up("+?");
-    assert!(!swapped.contains("format 1"), "title yielded to `?`: {swapped}");
-    assert!(swapped.contains("switch view"), "help came up in its place: {swapped}");
+    assert!(
+        !swapped.contains("format 1"),
+        "title yielded to `?`: {swapped}"
+    );
+    assert!(
+        swapped.contains("switch view"),
+        "help came up in its place: {swapped}"
+    );
 }
 
 /// Narrow: the rail stacks above the content and the frame still renders in full — the
@@ -152,7 +158,44 @@ fn a_narrow_terminal_stacks_the_rail_above_the_content() {
     let text = porticus::as_text(&porticus::render_once(&mut Fake, &root, 50, 16).unwrap());
     assert!(!text.starts_with("terminal too small"), "{text}");
     assert!(text.contains("actio"), "the rail drew: {text}");
-    assert!(text.contains("no todos here"), "the content drew below it: {text}");
+    assert!(
+        text.contains("no todos here"),
+        "the content drew below it: {text}"
+    );
+}
+
+/// `a` opens the add form even for a core that declares no fields: the default form is
+/// the record's name alone, so `a` mints a record on every core rather than relaying the
+/// nameless `add` the spine used to refuse (§7.3, P§7).
+#[test]
+fn a_opens_the_default_add_form() {
+    struct Adder;
+    impl App for Adder {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(
+                TreeFile::of(|_: &Code| Vec::new()).offering(&[Action::Add]),
+            )]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    // `a` raises the form; it shows the required `name` field the default declares.
+    let frame = porticus::drive(&mut Adder, &root, &porticus::keys("a"), 72, 12).unwrap();
+    assert!(
+        frame.contains("name"),
+        "the default name field is shown: {frame}"
+    );
 }
 
 /// A lineup must have a `[0]` to open on, and no more than nine views to switch

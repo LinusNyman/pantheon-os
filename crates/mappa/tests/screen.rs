@@ -178,3 +178,46 @@ fn x_on_a_row_removes_the_record_from_disk() {
         listed(&root)
     );
 }
+
+/// **`a` opens the add form, fills it, and mints a record through the core, on disk.**
+///
+/// The defect this closes: `a` used to relay a nameless `add` the spine refused (§7.3),
+/// so no prompt appeared and nothing was created. Now `a` opens the multi-field form;
+/// the hand types a name and a coordinate and `<enter>` relays
+/// `map add -H clu <name> --coordinates … -y` in-process (P§7).
+#[test]
+fn a_opens_the_add_form_and_mints_a_record() {
+    let root = fresh_root();
+    assert!(listed(&root).is_empty(), "clu starts empty");
+
+    // At launch the rail cursor is on the sphere; descend to `clu`, then `a` opens the
+    // form. Type the name, `<tab>` to the coordinates field, type a point, `<enter>`.
+    porticus::drive(
+        &mut MappaApp::new(&root),
+        &root,
+        &porticus::keys("<down><right><down>atorg<tab>59.33,18.06<enter>"),
+        90,
+        18,
+    )
+    .unwrap();
+
+    assert_eq!(
+        listed(&root),
+        ["torg"],
+        "`a` must reach the file, not just the frame: {:?}",
+        listed(&root)
+    );
+
+    // The coordinate field reached the record too — a multi-field add, not a name alone.
+    let out = Command::new(env!("CARGO_BIN_EXE_map"))
+        .arg("-C")
+        .arg(&root)
+        .args(["list", "-H", "clu"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("59.33") && text.contains("18.06"),
+        "the coordinate the form collected is on disk: {text}"
+    );
+}

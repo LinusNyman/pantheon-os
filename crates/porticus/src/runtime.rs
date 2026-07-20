@@ -11,7 +11,7 @@ use ratatui::layout::{Constraint, Direction, Layout as Cut, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 
-use crate::action::{Action, Invocation, RecordRef, Relayed, Target, Writer};
+use crate::action::{Action, FieldSpec, Invocation, RecordRef, Relayed, Target, Writer};
 use crate::app::App;
 use crate::keymap::{self, Chrome};
 use crate::overlay::{Overlay, Pending, Prompt};
@@ -554,6 +554,7 @@ fn draw_overlay(
             )));
             lines
         }
+        Overlay::Form { fields, focus, .. } => form_lines(fields, *focus, theme),
     };
 
     let box_area = centred(area, 72, u16::try_from(body.len() + 2).unwrap_or(8));
@@ -571,6 +572,27 @@ fn draw_overlay(
             .wrap(Wrap { trim: false }),
         inner,
     );
+}
+
+/// The add form's fields as lines (P§7): the focused field carries the cursor mark and
+/// the name style, a required field is starred, and the typed value follows the label.
+fn form_lines(fields: &[(FieldSpec, String)], focus: usize, theme: Theme) -> Vec<Line<'static>> {
+    fields
+        .iter()
+        .enumerate()
+        .map(|(i, (spec, value))| {
+            let (mark, label_style) = if i == focus {
+                ("> ", theme.name())
+            } else {
+                ("  ", theme.dim())
+            };
+            let required = if spec.required { "*" } else { " " };
+            Line::from(vec![
+                Span::styled(format!("{mark}{}{required}  ", spec.label), label_style),
+                Span::styled(value.clone(), theme.text()),
+            ])
+        })
+        .collect()
 }
 
 /// Help is generated from the live keymap (P§4), so it cannot drift from the bindings.
@@ -865,6 +887,24 @@ fn begin(
         return Ok(());
     }
 
+    // `a` opens the multi-field add form (§7.3, P§7): the core declares the fields it
+    // collects, the hand fills them, and only on submit is the invocation assembled and
+    // relayed. Before this, `a` relayed a nameless `add` that the spine refused, so no
+    // prompt appeared and nothing was minted.
+    if action == Action::Add {
+        let fields = app
+            .add_form()
+            .into_iter()
+            .map(|spec| (spec, String::new()))
+            .collect();
+        state.overlays.push(Overlay::Form {
+            target,
+            fields,
+            focus: 0,
+        });
+        return Ok(());
+    }
+
     let Some(invocation) = app.on_action(action, &target) else {
         // None → the action does not apply to this target (P§2).
         state.status = Status::Notice(format!("{} does not apply here", action.label()));
@@ -1132,6 +1172,12 @@ fn handle_overlay(
         return handle(screen, app, state, key);
     }
 
+    // The add form holds one buffer per field, so it cannot ride the single-buffer
+    // text-entry path below — it owns its own key handler (P§7).
+    if matches!(state.overlays.last(), Some(Overlay::Form { .. })) {
+        return handle_form_key(screen, app, state, key);
+    }
+
     match key.code {
         KeyCode::Esc => {
             state.overlays.pop();
@@ -1183,6 +1229,104 @@ fn handle_confirm_key(
     }
 }
 
+/// The add form's keys (P§7): `Tab`/`Down` and `Up` move between fields, printable keys
+/// type into the focused one, `Backspace` erases, `Enter` submits once the required
+/// fields are filled, and `Esc` cancels. It cannot use the single-buffer text path
+/// because it holds one buffer per field.
+fn handle_form_key(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    key: KeyEvent,
+) -> anyhow::Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            state.overlays.pop();
+            Ok(())
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                *focus = (*focus + 1) % fields.len();
+            }
+            Ok(())
+        }
+        KeyCode::Up => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                *focus = (*focus + fields.len() - 1) % fields.len();
+            }
+            Ok(())
+        }
+        KeyCode::Backspace => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                fields[*focus].1.pop();
+            }
+            Ok(())
+        }
+        KeyCode::Char(c) => {
+            if let Some(Overlay::Form { fields, focus, .. }) = state.overlays.last_mut() {
+                fields[*focus].1.push(c);
+            }
+            Ok(())
+        }
+        KeyCode::Enter => {
+            // A required field left blank keeps the form open and names which (P§7).
+            let missing = match state.overlays.last() {
+                Some(Overlay::Form { fields, .. }) => fields
+                    .iter()
+                    .find(|(spec, value)| spec.required && value.trim().is_empty())
+                    .map(|(spec, _)| spec.label),
+                _ => None,
+            };
+            if let Some(label) = missing {
+                state.status = Status::Notice(format!("{label} is required"));
+                return Ok(());
+            }
+            let Some(Overlay::Form { target, fields, .. }) = state.overlays.pop() else {
+                return Ok(());
+            };
+            submit_form(screen, app, state, &target, &fields)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Assemble and relay the add the form describes (§7.3, P§7).
+///
+/// The core authors the base invocation (`add -H <node>`) from the target; Porticus
+/// appends the name as the positional `add` needs and a `--flag value` for each data
+/// field the hand filled, then runs its own commit policy over it (P-II). An unfilled
+/// optional field contributes nothing, so the record simply omits it (I1).
+fn submit_form(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    target: &Target,
+    fields: &[(FieldSpec, String)],
+) -> anyhow::Result<()> {
+    let Some(mut invocation) = app.on_action(Action::Add, target) else {
+        state.status = Status::Notice(format!("{} does not apply here", Action::Add.label()));
+        return Ok(());
+    };
+    for (spec, value) in fields {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        match spec.flag {
+            None => invocation.args.push(value.to_owned()),
+            Some(flag) => {
+                invocation.args.push(flag.to_owned());
+                invocation.args.push(value.to_owned());
+            }
+        }
+    }
+    if let Some(short) = state.missing.iter().find(|s| **s == invocation.short) {
+        state.status = Status::Notice(format!("{short} is not on PATH"));
+        return Ok(());
+    }
+    commit_or_confirm(screen, app, state, Action::Add, invocation)
+}
+
 /// Search matches live (P§6) — and *whose* labels it matches follows focus.
 fn live_search(state: &mut State) {
     let Some(Overlay::Search { buffer }) = state.overlays.last() else {
@@ -1228,7 +1372,9 @@ fn submit(
             &snapshot,
         ),
         Overlay::Line { prompt, buffer, .. } => submit_line(screen, app, state, prompt, buffer),
-        Overlay::Title | Overlay::Help => Ok(()),
+        // Title/Help have nothing to submit; the form owns its own submit through
+        // `handle_form_key`, so `Enter` never reaches here with it on top.
+        Overlay::Title | Overlay::Help | Overlay::Form { .. } => Ok(()),
     }
 }
 
@@ -1508,7 +1654,7 @@ pub fn keys(script: &str) -> Vec<ratatui::crossterm::event::KeyEvent> {
 
 #[cfg(test)]
 mod tests {
-    use super::{rail_cut, Constraint, Direction, STACK_BELOW, WIDE_AT, WIDE_RAIL};
+    use super::{Constraint, Direction, STACK_BELOW, WIDE_AT, WIDE_RAIL, rail_cut};
 
     #[test]
     fn the_rail_cut_follows_the_terminal_width() {
@@ -1524,7 +1670,10 @@ mod tests {
         assert!(matches!(rail_cut(90).1[0], Constraint::Percentage(34)));
         // Wide: a fixed narrow rail column rather than a sprawling third.
         assert_eq!(rail_cut(WIDE_AT).0, Direction::Horizontal);
-        assert!(matches!(rail_cut(WIDE_AT).1[0], Constraint::Length(WIDE_RAIL)));
+        assert!(matches!(
+            rail_cut(WIDE_AT).1[0],
+            Constraint::Length(WIDE_RAIL)
+        ));
         assert!(matches!(rail_cut(200).1[0], Constraint::Length(WIDE_RAIL)));
     }
 }

@@ -5,7 +5,7 @@
 //! text-entry overlay it types a literal `q` (P-I); over Help, Title, or Confirm it is
 //! inert and `Esc` dismisses; only at the bare base does it quit.
 
-use crate::action::{Action, Invocation, Target};
+use crate::action::{Action, FieldSpec, Invocation, Target};
 
 /// Why a line prompt is open — what its answer will be used for.
 #[derive(Clone, Debug)]
@@ -59,6 +59,16 @@ pub enum Overlay {
         /// Set for `X` (remove-all), the one that demands a distinct, heavier
         /// keystroke: the count named and an explicit key, never a stray `y` (P§5).
         heavy: Option<usize>,
+    },
+    /// `a` — the multi-field add form (§7.3, P§7). Each field pairs the core's
+    /// [`FieldSpec`] with what has been typed into it; `focus` is which field owns the
+    /// keyboard. Unlike a [`Line`](Overlay::Line) it holds several buffers, so it routes
+    /// through its own key handler rather than the single-buffer text-entry path.
+    Form {
+        /// The node the new record is homed at (§7.3).
+        target: Target,
+        fields: Vec<(FieldSpec, String)>,
+        focus: usize,
     },
 }
 
@@ -118,6 +128,7 @@ impl Overlay {
             Overlay::Search { .. } => "search".into(),
             Overlay::Line { label, .. } => label.clone(),
             Overlay::Confirm { action, .. } => format!("confirm — {}", action.label()),
+            Overlay::Form { .. } => "add".into(),
         }
     }
 }
