@@ -123,7 +123,13 @@ variants — a *dispatch type, not a disk format*, since the filename already na
 have turned `edit -k` into a record transformation when §7.2 says it is a file rename.
 
 **Still scaffold** — a stub printing a not-implemented line: `auspex` (8), `speculum` and
-`studium` (9). **Next real work is step 8** — Auspex, the one reactive writer (I2, §9).
+`studium` (10). **Next real work is step 8** — Auspex, the one reactive writer (I2, §9).
+Step 9 is now a **cleanups** pass — the deferrals steps 1–8 left (pan's node cascade §10.1,
+`pan migrate`, validate's candidate fixes §10.2, the figlet banner, `Pick` as tree-as-modal,
+nested `data` render) plus the chrome debts hands-on use surfaced (**no add form** — `a`
+relays a nameless `add` with no field prompt; responsive top/bottom split and a narrower
+rail; passive overlays yielding to a nav key; header showing the node not the whole trail).
+Lenses and releases shift to 10 and 11.
 
 ### What step 6 deliberately left
 
