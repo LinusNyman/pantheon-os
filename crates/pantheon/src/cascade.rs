@@ -221,23 +221,46 @@ impl Cascade {
     /// copied verbatim — the same discipline `write_line` keeps.
     pub fn apply(&self, root: &Path) -> Result<()> {
         for rewrite in &self.rewrites {
-            let path = root.join(&rewrite.rel_path);
-            let (from, to) = (self.from.clone(), self.to.clone());
-            let is_series = rewrite.is_series;
-            crate::lock::with_record_lock(&path, move |prev| {
-                let bytes = prev.unwrap_or_default();
-                if is_series {
-                    rewrite_series(bytes, &from, &to)
-                } else {
-                    rewrite_entity(bytes, &from, &to)
-                }
-            })?;
+            rewrite_refs_in_file(
+                root,
+                &rewrite.rel_path,
+                rewrite.is_series,
+                &self.from,
+                &self.to,
+            )?;
         }
         // One batch, one completion. This is where step 8's single, *triggerless*
         // `aus run` fires — triggerless because a batch touching several cores and
         // homes at once has no one write to name as the trigger (§5.4, §9.3–§9.4).
         Ok(())
     }
+}
+
+/// Rewrite one file's `refs`, swapping `from` for `to`, under the record lock (§6.4).
+/// The single-file primitive [`Cascade::apply`] loops and a [`Plan`](crate::plan::Plan)'s
+/// `RewriteRefs` change calls — so the node cascade folds a ref rewrite into its own
+/// transaction (§10.1). Only the envelope's `refs` array is touched; `data` and untouched
+/// series lines are carried through verbatim (I5, §6.1).
+///
+/// # Errors
+/// If the file cannot be read/written or does not deserialize.
+pub fn rewrite_refs_in_file(
+    root: &Path,
+    rel_path: &Path,
+    is_series: bool,
+    from: &Ref,
+    to: &Ref,
+) -> Result<()> {
+    let path = root.join(rel_path);
+    let (from, to) = (from.clone(), to.clone());
+    crate::lock::with_record_lock(&path, move |prev| {
+        let bytes = prev.unwrap_or_default();
+        if is_series {
+            rewrite_series(bytes, &from, &to)
+        } else {
+            rewrite_entity(bytes, &from, &to)
+        }
+    })
 }
 
 fn swap(refs: &mut [Ref], from: &Ref, to: &Ref) {

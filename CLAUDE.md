@@ -169,10 +169,16 @@ Step 7's follow-ups, all landed:
 
 ### Things a later step must not be surprised by
 
-- **`pan`'s node-level cascade (§10.1) is still stubbed.** Its six structural mutators
-  (`mv`, `rm`, `rename`, `rename-prefix`, `rename-pattern`, `mv-file`) return not-implemented,
-  so `r`/`m`/`x` are **dark** in `pan`'s TUI — `on_action` returns `None` and Porticus greys
-  them (P§7). The *record*-level cascade (§5.4) is done and is what the cores use.
+- **`pan`'s node-level cascade (§10.1) is built** (step 9's node-cascade branch). All six
+  mutators (`mv`, `rm`, `rename` incl. `--def`, `rename-prefix`, `rename-pattern`, `mv-file`)
+  work over `pantheon::node_ops` — `plan_recode` walks a branch and emits a `Change::Rename`
+  per descendant dir + `[code]` file prefix; `Change::RewriteRefs` folds a def-prefix /
+  pattern re-slug's ref cascade into the same plan and token. `r`/`x` are live in `pan`'s
+  TUI (`m` stays dark — no destination prompt yet), and the validate tab's `d` applies a
+  finding's fix (step 9's 2b). The *record*-level cascade (§5.4, `cascade.rs`) is reused for
+  the ref rewrites. **Still deferred, Auspex-gated:** the `writes=core@home` rule-header
+  token cascade and the "dead code in a header" validate finding — no header parser exists
+  (Auspex is a scaffold); rule *files* are renamed by prefix like any other.
 - **`classify` is structural, and only the registry knows what a name *means*.** A determined
   series whose determinant is a *slug* (`crp__balance__checking.jsonl`) wears the same three
   segments as a hand-named one, so `classify` calls it `NamedSeries` — correctly. Only the

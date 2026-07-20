@@ -106,7 +106,7 @@ fn resolve_parent(root: &Path, parent: &str) -> Result<(Option<Code>, PathBuf)> 
 
 /// A defining char is one alphabetic character or two ASCII digits (§5.1),
 /// normalized on the way in.
-fn normalize_char(ch: &str) -> Result<String> {
+pub(crate) fn normalize_char(ch: &str) -> Result<String> {
     let ch = name::normalize_token(ch, "char")?;
     let two_digits = ch.len() == 2 && ch.bytes().all(|b| b.is_ascii_digit());
     let one_alpha = ch.chars().count() == 1 && ch.chars().all(char::is_alphabetic);
@@ -139,7 +139,7 @@ fn check_no_collision(siblings: &[crate::code::NodeName], new_code: &Code) -> Re
 
 /// Whether `longer` is `shorter` plus a `_`-joined continuation — the prefix-shadow
 /// a compact walk cannot disambiguate (§5.3).
-fn prefix_shadows(longer: &str, shorter: &str) -> bool {
+pub(crate) fn prefix_shadows(longer: &str, shorter: &str) -> bool {
     longer.len() > shorter.len()
         && longer.starts_with(shorter)
         && longer.as_bytes().get(shorter.len()) == Some(&b'_')

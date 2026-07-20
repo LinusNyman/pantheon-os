@@ -11,13 +11,30 @@ use sha2::{Digest, Sha256};
 use crate::code::Code;
 use crate::{Error, Result};
 
-/// One change in a plan. Step 1 mints nodes; `Rename`/`Remove` are here for the
-/// structural verbs that land later.
+/// One change in a plan. `Mkdir` mints a node; `Rename`/`Remove` are the node cascade's
+/// directory and file moves (§10.1); `RewriteRefs` is the `core:slug` ref rewrite a
+/// definition-prefix node rename drags along (§5.4) — a record's `refs` array, edited in
+/// place, so the ref cascade rides in the same plan and the same token as the renames.
 #[derive(Clone, Debug)]
 pub enum Change {
-    Mkdir { code: Code, rel_path: PathBuf },
-    Rename { from: PathBuf, to: PathBuf },
-    Remove { rel_path: PathBuf },
+    Mkdir {
+        code: Code,
+        rel_path: PathBuf,
+    },
+    Rename {
+        from: PathBuf,
+        to: PathBuf,
+    },
+    Remove {
+        rel_path: PathBuf,
+    },
+    RewriteRefs {
+        rel_path: PathBuf,
+        is_series: bool,
+        /// The retired and replacement refs, as `core:slug` tokens.
+        from: String,
+        to: String,
+    },
 }
 
 impl Change {
@@ -31,6 +48,11 @@ impl Change {
             }
             Change::Remove { rel_path } => {
                 json!({ "op": "remove", "path": rel_path.to_string_lossy() })
+            }
+            Change::RewriteRefs {
+                rel_path, from, to, ..
+            } => {
+                json!({ "op": "rewrite_refs", "path": rel_path.to_string_lossy(), "from": from, "to": to })
             }
         }
     }
@@ -99,6 +121,19 @@ impl Plan {
                     } else {
                         std::fs::remove_file(&target)?;
                     }
+                }
+                // Ref rewrites come after the renames (the record's own file has already
+                // moved), so a crash leaves refs dangling on the old slug — exactly what
+                // `pan validate` names (§5.4, §10.1).
+                Change::RewriteRefs {
+                    rel_path,
+                    is_series,
+                    from,
+                    to,
+                } => {
+                    let from = crate::envelope::Ref::parse(from)?;
+                    let to = crate::envelope::Ref::parse(to)?;
+                    crate::cascade::rewrite_refs_in_file(root, rel_path, *is_series, &from, &to)?;
                 }
             }
         }

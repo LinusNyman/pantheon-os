@@ -17,8 +17,9 @@ use serde_json::{Value, json};
 
 use pantheon::mint::NewSpec;
 use pantheon::{
-    Annotations, Code, CoreRegistry, Error, Ref, Result, build_tree, plan_new, read_annotations,
-    resolve_all, resolve_code, resolve_root, set_annotations, validate,
+    Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_mv_file,
+    plan_new, plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm,
+    read_annotations, resolve_all, resolve_code, resolve_root, set_annotations, validate,
 };
 
 // The screen rides the `tui` feature; drop it and the structural CLI stands alone (§14).
@@ -310,12 +311,17 @@ pub(crate) fn run(cli: &Cli) -> Result<RunOk> {
         // *node*-level one (§10.1), which is a different and larger job — a node's
         // code is its path, so a rename rewrites every child directory name and file
         // prefix under the branch, plus every rule header naming the code (§9.2).
-        Cmd::MvFile { .. } => Err(not_implemented("mv-file", NODE_CASCADE)),
-        Cmd::Mv { .. } => Err(not_implemented("mv", NODE_CASCADE)),
-        Cmd::Rm { .. } => Err(not_implemented("rm", NODE_CASCADE)),
-        Cmd::Rename { .. } => Err(not_implemented("rename", NODE_CASCADE)),
-        Cmd::RenamePrefix { .. } => Err(not_implemented("rename-prefix", NODE_CASCADE)),
-        Cmd::RenamePattern { .. } => Err(not_implemented("rename-pattern", NODE_CASCADE)),
+        Cmd::MvFile { file, to } => cmd_mv_file(cli, file, to),
+        Cmd::Mv { code, to } => cmd_mv(cli, code, to),
+        Cmd::Rm { code } => cmd_rm(cli, code),
+        Cmd::Rename {
+            code,
+            ch,
+            label,
+            def,
+        } => cmd_rename(cli, code, ch.as_deref(), label.as_deref(), def.as_deref()),
+        Cmd::RenamePrefix { old, new, code } => cmd_rename_prefix(cli, old, new, code.as_deref()),
+        Cmd::RenamePattern { from, to, code } => cmd_rename_pattern(cli, from, to, code.as_deref()),
     }
 }
 
@@ -337,7 +343,15 @@ fn cmd_new(
         }
     };
     let (plan, node) = plan_new(&root, parent, spec)?;
+    run_plan(cli, &root, &plan, json!({ "created": [node] }))
+}
 
+/// The shared structural-verb flow (§10.1, §7.3) — the ladder `cmd_new` first spelled
+/// out, now run by every node mutator. `--dry-run` emits the plan and its token; no `-y`
+/// off a terminal is the checkpoint (print the plan, exit 5); otherwise a supplied token
+/// is checked against the freshly computed one (stale review → exit 3) and the plan is
+/// applied, returning `applied`.
+fn run_plan(cli: &Cli, root: &std::path::Path, plan: &Plan, applied: Value) -> Result<RunOk> {
     if cli.dry_run {
         return Ok(RunOk::Json(plan.to_json()));
     }
@@ -349,8 +363,73 @@ fn cmd_new(
     if let Some(token) = &cli.plan {
         plan.check_token(token)?;
     }
-    plan.apply(&root)?;
-    Ok(RunOk::Json(json!({ "created": [node] })))
+    plan.apply(root)?;
+    Ok(RunOk::Json(applied))
+}
+
+/// `pan rm <code>` — remove an empty node (§10.1). Refused if the node holds anything but
+/// its meta scaffold; the refusal is the spine's ([`plan_rm`]).
+fn cmd_rm(cli: &Cli, code: &str) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let code = Code::parse(code)?;
+    let (plan, removed) = plan_rm(&root, &code)?;
+    run_plan(cli, &root, &plan, json!({ "removed": [removed] }))
+}
+
+/// `pan rename <code> [--char C] [--label L]` — rename a node, cascading the code change
+/// over its branch (§10.1). A definition-prefix node renames with `--def`.
+fn cmd_rename(
+    cli: &Cli,
+    code: &str,
+    ch: Option<&str>,
+    label: Option<&str>,
+    def: Option<&str>,
+) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let code = Code::parse(code)?;
+    // `--def` re-slugs a definition-prefix node's entity, so it needs the registry to map
+    // the entity's kind → core for the ref cascade (§10.1). A triple rename does not.
+    let (plan, record) = match def {
+        Some(new_def) => plan_rename_def(&root, &code, new_def, &CoreRegistry::discover())?,
+        None => plan_rename(&root, &code, ch, label, def)?,
+    };
+    run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
+}
+
+/// `pan mv <code> --to <parent>` — re-home a node, cascading the code change (§10.1).
+fn cmd_mv(cli: &Cli, code: &str, to: &str) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let code = Code::parse(code)?;
+    let (plan, record) = plan_mv(&root, &code, to)?;
+    run_plan(cli, &root, &plan, json!({ "moved": [record] }))
+}
+
+/// `pan mv-file <file> --to <code>` — re-home one record/series/rule file (§10.1, §7.2).
+fn cmd_mv_file(cli: &Cli, file: &std::path::Path, to: &str) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let to = Code::parse(to)?;
+    let (plan, record) = plan_mv_file(&root, file, &to)?;
+    run_plan(cli, &root, &plan, json!({ "moved": [record] }))
+}
+
+/// `pan rename-prefix <old> <new> [code]` — repair a drifted code prefix over a subtree
+/// (§10.1, §10.2).
+fn cmd_rename_prefix(cli: &Cli, old: &str, new: &str, code: Option<&str>) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let scope = code.map(Code::parse).transpose()?;
+    let (plan, record) = plan_rename_prefix(&root, old, new, scope.as_ref())?;
+    run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
+}
+
+/// `pan rename-pattern <from> <to> [code]` — substitute a literal across record slugs and
+/// series names in a scope, cascading refs (§10.1, §5.4). Needs the registry to map a
+/// record's kind → core for the cascade.
+fn cmd_rename_pattern(cli: &Cli, from: &str, to: &str, code: Option<&str>) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let scope = code.map(Code::parse).transpose()?;
+    let (plan, record) =
+        plan_rename_pattern(&root, from, to, scope.as_ref(), &CoreRegistry::discover())?;
+    run_plan(cli, &root, &plan, json!({ "renamed": [record] }))
 }
 
 fn cmd_tree(cli: &Cli, code: Option<&str>) -> Result<RunOk> {
@@ -534,12 +613,6 @@ fn confirm(plan_json: &Value) -> bool {
     let mut line = String::new();
     io::stdin().read_line(&mut line).is_ok() && matches!(line.trim(), "y" | "Y" | "yes")
 }
-
-/// What the six structural mutators are waiting on (§10.1). Named once, because a
-/// core's refusal points a hand at `pan rename --def` and `pan mv` — those are the
-/// permanently correct answers (§7.2), so the message they arrive at should say what
-/// is actually missing rather than a step number that has since gone by.
-const NODE_CASCADE: &str = "the node-level path cascade, §10.1";
 
 fn not_implemented(verb: &str, when: &str) -> Error {
     Error::runtime(format!("`pan {verb}` is not implemented yet ({when})"))

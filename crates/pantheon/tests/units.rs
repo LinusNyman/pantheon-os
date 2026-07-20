@@ -9,8 +9,9 @@ use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
-    Severity, Shape, build_tree, normalize, plan_new, resolve_all, resolve_code, validate,
-    with_record_lock,
+    Severity, Shape, build_tree, normalize, plan_mv, plan_mv_file, plan_new, plan_rename,
+    plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm, resolve_all, resolve_code,
+    validate, with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -46,6 +47,294 @@ fn album_registry() -> CoreRegistry {
         kinds: vec![("person".to_string(), Shape::Partitioned)],
         format_version: 1,
     }])
+}
+
+#[test]
+fn rm_removes_an_empty_node_and_refuses_a_full_one() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+
+    // A node with a child is refused (§10.1, exit 3).
+    let err = plan_rm(&root, &Code::parse("cs").unwrap()).unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+
+    // A node holding a record is refused too.
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    assert!(plan_rm(&root, &Code::parse("csa").unwrap()).is_err());
+
+    // Emptied, the leaf removes — meta scaffold and all — and the parent survives.
+    std::fs::remove_file(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__mara.json"),
+    )
+    .unwrap();
+    let (plan, _) = plan_rm(&root, &Code::parse("csa").unwrap()).unwrap();
+    plan.apply(&root).unwrap();
+    assert!(!root.join("c_contextus/c_s_societas/cs_a_amicitia").exists());
+    assert!(root.join("c_contextus/c_s_societas").is_dir());
+}
+
+#[test]
+fn rename_char_cascades_dirs_and_files_over_the_whole_branch() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    write_record(
+        &root,
+        "cs",
+        "cs__group__club.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_rename(&root, &Code::parse("cs").unwrap(), Some("t"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+
+    // Every level's dir, meta dir, and record file followed cs -> ct.
+    assert!(
+        root.join("c_contextus/c_t_societas/ct__/ct__group__club.json")
+            .is_file()
+    );
+    assert!(
+        root.join("c_contextus/c_t_societas/ct_a_amicitia/cta__/cta__person__mara.json")
+            .is_file()
+    );
+    assert!(!root.join("c_contextus/c_s_societas").exists());
+    // No error-severity finding: the tree is consistent after the cascade.
+    assert!(
+        !validate(&root, &album_registry())
+            .unwrap()
+            .iter()
+            .any(|f| f.severity == Severity::Error)
+    );
+}
+
+#[test]
+fn rename_label_moves_only_the_node_dir() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+
+    let (plan, _) = plan_rename(
+        &root,
+        &Code::parse("cs").unwrap(),
+        None,
+        Some("guild"),
+        None,
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    // The label changed; the code did not, so the child keeps its `cs` prefix.
+    assert!(root.join("c_contextus/c_s_guild/cs_a_amicitia").is_dir());
+    assert!(!root.join("c_contextus/c_s_societas").exists());
+}
+
+#[test]
+fn mv_rehomes_and_cascades_and_refuses_a_cycle() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "root", triple("d", "disciplina"));
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    // A node cannot move into its own descendant.
+    assert!(plan_mv(&root, &Code::parse("c").unwrap(), "cs").is_err());
+
+    let (plan, _) = plan_mv(&root, &Code::parse("cs").unwrap(), "d").unwrap();
+    plan.apply(&root).unwrap();
+    assert!(
+        root.join("d_disciplina/d_s_societas/ds_a_amicitia/dsa__/dsa__person__mara.json")
+            .is_file()
+    );
+    assert!(!root.join("c_contextus/c_s_societas").exists());
+}
+
+#[test]
+fn mv_file_rehomes_a_misfiled_record() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    // A `csa` record misfiled in `cs`'s meta dir (§10.2's misfile case).
+    write_record(
+        &root,
+        "cs",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let misfiled = std::path::Path::new("c_contextus/c_s_societas/cs__/csa__person__mara.json");
+    let (plan, _) = plan_mv_file(&root, misfiled, &Code::parse("csa").unwrap()).unwrap();
+    plan.apply(&root).unwrap();
+
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__mara.json")
+            .is_file()
+    );
+    assert!(
+        !root
+            .join("c_contextus/c_s_societas/cs__/csa__person__mara.json")
+            .exists()
+    );
+}
+
+#[test]
+fn rename_def_reslugs_the_entity_and_cascades_its_refs() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("b", "beata"));
+    // A definition-prefix node under csa with an album person promoted to it.
+    mint(
+        &root,
+        "csa",
+        NewSpec::Def {
+            definition: "john_appleseed",
+        },
+    );
+    write_record(
+        &root,
+        "csa_john_appleseed",
+        "csa_john_appleseed__person.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    // A record elsewhere in the tree that references album:john_appleseed.
+    write_record(
+        &root,
+        "csb",
+        "csb__person__mara.json",
+        r#"{"refs":["album:john_appleseed"],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_rename_def(
+        &root,
+        &Code::parse("csa_john_appleseed").unwrap(),
+        "john_smith",
+        &album_registry(),
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    // The node dir, meta dir, and entity file followed the new definition.
+    assert!(
+        root.join(
+            "c_contextus/c_s_societas/cs_a_amicitia/csa_john_smith_/csa_john_smith__/\
+             csa_john_smith__person.json"
+        )
+        .is_file()
+    );
+    // The external ref was rewritten to the new slug.
+    let mara = std::fs::read_to_string(
+        root.join("c_contextus/c_s_societas/cs_b_beata/csb__/csb__person__mara.json"),
+    )
+    .unwrap();
+    assert!(mara.contains("album:john_smith"), "{mara}");
+    assert!(!mara.contains("john_appleseed"), "{mara}");
+}
+
+#[test]
+fn rename_prefix_repairs_a_drifted_code_prefix() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("o", "officium"));
+    // A `csa`-prefixed file stranded in `cso`'s meta dir — what a crashed rename leaves.
+    write_record(
+        &root,
+        "cso",
+        "csa__person__x.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let (plan, _) =
+        plan_rename_prefix(&root, "csa", "cso", Some(&Code::parse("cso").unwrap())).unwrap();
+    plan.apply(&root).unwrap();
+
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_o_officium/cso__/cso__person__x.json")
+            .is_file()
+    );
+    assert!(
+        !root
+            .join("c_contextus/c_s_societas/cs_o_officium/cso__/csa__person__x.json")
+            .exists()
+    );
+}
+
+#[test]
+fn rename_pattern_reslugs_records_and_cascades_refs() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("b", "beata"));
+    // A person with a typo'd slug, and a record elsewhere referencing it.
+    write_record(
+        &root,
+        "csa",
+        "csa__person__johnn.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    write_record(
+        &root,
+        "csb",
+        "csb__person__mara.json",
+        r#"{"refs":["album:johnn"],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_rename_pattern(&root, "johnn", "john", None, &album_registry()).unwrap();
+    plan.apply(&root).unwrap();
+
+    // The slug'd file was renamed.
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__john.json")
+            .is_file()
+    );
+    assert!(
+        !root
+            .join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__johnn.json")
+            .exists()
+    );
+    // The ref followed the re-slug.
+    let mara = std::fs::read_to_string(
+        root.join("c_contextus/c_s_societas/cs_b_beata/csb__/csb__person__mara.json"),
+    )
+    .unwrap();
+    assert!(
+        mara.contains("album:john") && !mara.contains("johnn"),
+        "{mara}"
+    );
+}
+
+#[test]
+fn rename_char_refuses_a_sibling_collision() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "c", triple("t", "tempus"));
+    // Renaming cs's char to `t` would collide with the existing sibling ct (§5.3).
+    assert!(plan_rename(&root, &Code::parse("cs").unwrap(), Some("t"), None, None).is_err());
 }
 
 #[test]
