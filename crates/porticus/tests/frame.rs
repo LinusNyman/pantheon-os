@@ -121,6 +121,40 @@ fn a_tiny_terminal_says_so_and_nothing_else() {
     assert!(!text.contains("P E N S U M"), "{text}");
 }
 
+/// A passive overlay (Title/Help) **yields** to a navigation or chrome key: it dismisses
+/// and the key reaches the base in one press, rather than being swallowed until `Esc`
+/// (P§4). `Esc` still just closes.
+#[test]
+fn a_passive_overlay_yields_to_a_navigation_key() {
+    let root = fresh_root();
+    let up = |script: &str| {
+        let mut app = Fake;
+        porticus::drive(&mut app, &root, &porticus::keys(script), 72, 12).unwrap()
+    };
+
+    // `+` raises the Title overlay — its version line is the tell it is up.
+    assert!(up("+").contains("format 1"), "title should be up");
+    // `Esc` still just closes it — the one unwind that is unchanged.
+    assert!(!up("+<esc>").contains("format 1"), "esc closes the title");
+    // A non-Esc key yields: `+` then `?` closes the title and opens Help in one press.
+    // Without the yield, `?` was swallowed and the title stayed up.
+    let swapped = up("+?");
+    assert!(!swapped.contains("format 1"), "title yielded to `?`: {swapped}");
+    assert!(swapped.contains("switch view"), "help came up in its place: {swapped}");
+}
+
+/// Narrow: the rail stacks above the content and the frame still renders in full — the
+/// content is not squeezed to nothing (P§6). The split decision itself is unit-tested in
+/// `runtime`; this pins that the stacked path actually draws.
+#[test]
+fn a_narrow_terminal_stacks_the_rail_above_the_content() {
+    let root = fresh_root();
+    let text = porticus::as_text(&porticus::render_once(&mut Fake, &root, 50, 16).unwrap());
+    assert!(!text.starts_with("terminal too small"), "{text}");
+    assert!(text.contains("actio"), "the rail drew: {text}");
+    assert!(text.contains("no todos here"), "the content drew below it: {text}");
+}
+
 /// A lineup must have a `[0]` to open on, and no more than nine views to switch
 /// between (P§3). Both are rejected at `run`, before a terminal is taken.
 #[test]

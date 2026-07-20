@@ -88,6 +88,19 @@ impl Overlay {
         matches!(self, Overlay::Search { .. } | Overlay::Line { .. })
     }
 
+    /// Whether this overlay is **passive** — Title and Help, which hold neither the
+    /// keyboard (a text buffer) nor a pending write (a confirm).
+    ///
+    /// A passive overlay is a read-only pane laid over the view, so it **yields** to a
+    /// navigation or chrome key rather than swallowing it: pressing a view-switch while
+    /// Help is up should reach the screen, not stall at the overlay (P§4). `Confirm` is
+    /// *not* passive — its `y`/`n`/`X` must keep owning the keyboard until the write is
+    /// acknowledged.
+    #[must_use]
+    pub fn is_passive(&self) -> bool {
+        matches!(self, Overlay::Title | Overlay::Help)
+    }
+
     /// The buffer being typed into, if any.
     pub fn buffer_mut(&mut self) -> Option<&mut String> {
         match self {

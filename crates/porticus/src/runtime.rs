@@ -245,6 +245,37 @@ fn draw_header(frame: &mut Frame, state: &State, theme: Theme, ident: &crate::Id
     frame.render_widget(Paragraph::new(Line::from(spans)).style(theme.text()), area);
 }
 
+/// Below this width the rail stacks above the content rather than sitting beside it — a
+/// narrow terminal has no room for two columns (P§6).
+const STACK_BELOW: u16 = 60;
+/// At or above this width the rail takes a fixed narrow column instead of a third of the
+/// screen, so it does not sprawl on a wide terminal (P§6).
+const WIDE_AT: u16 = 120;
+/// The rail's capped width once the terminal is [`WIDE_AT`] or wider.
+const WIDE_RAIL: u16 = 30;
+
+/// How to split a Rail view's body for a given terminal width (P§6, §18 — derived from
+/// the terminal, never a knob): stacked above the content when narrow, a fixed narrow
+/// column when wide, a third of the width in between.
+fn rail_cut(width: u16) -> (Direction, [Constraint; 2]) {
+    if width < STACK_BELOW {
+        (
+            Direction::Vertical,
+            [Constraint::Percentage(40), Constraint::Percentage(60)],
+        )
+    } else if width >= WIDE_AT {
+        (
+            Direction::Horizontal,
+            [Constraint::Length(WIDE_RAIL), Constraint::Min(1)],
+        )
+    } else {
+        (
+            Direction::Horizontal,
+            [Constraint::Percentage(34), Constraint::Percentage(66)],
+        )
+    }
+}
+
 fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Theme, area: Rect) {
     let Some(node) = state.rail.selected() else {
         // An empty tree is not an error (I7): the chrome stands, the content says so.
@@ -254,10 +285,14 @@ fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Th
     let layout = state.views[state.active].layout();
 
     let (rail_area, content) = match layout {
+        // The rail's shape follows the terminal, not a knob (§18): stacked above the
+        // content when there is no width for two columns, a fixed narrow column when
+        // there is width to spare, and a third of the screen in between (P§6).
         Layout::Rail => {
+            let (direction, constraints) = rail_cut(area.width);
             let cut = Cut::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(34), Constraint::Percentage(66)])
+                .direction(direction)
+                .constraints(constraints)
                 .split(area);
             (Some(cut[0]), cut[1])
         }
@@ -1085,6 +1120,18 @@ fn handle_overlay(
 ) -> anyhow::Result<()> {
     let text_entry = state.overlays.last().is_some_and(Overlay::is_text_entry);
 
+    // A passive overlay (Title/Help) yields the keyboard: any key other than `Esc` and
+    // `Enter` (which already dismiss) pops it and is **re-dispatched to the base**, so a
+    // view-switch or a nav key both closes the overlay and acts, in one press (P§4).
+    // Without this the overlay swallowed every such key at the `_ => Ok(())` below, and a
+    // hand on Help had to `Esc` before it could go anywhere.
+    if state.overlays.last().is_some_and(Overlay::is_passive)
+        && !matches!(key.code, KeyCode::Esc | KeyCode::Enter)
+    {
+        state.overlays.pop();
+        return handle(screen, app, state, key);
+    }
+
     match key.code {
         KeyCode::Esc => {
             state.overlays.pop();
@@ -1457,4 +1504,27 @@ pub fn keys(script: &str) -> Vec<ratatui::crossterm::event::KeyEvent> {
         rest = chars.as_str();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rail_cut, Constraint, Direction, STACK_BELOW, WIDE_AT, WIDE_RAIL};
+
+    #[test]
+    fn the_rail_cut_follows_the_terminal_width() {
+        // Narrow: the rail stacks above the content — no room for two columns.
+        assert_eq!(rail_cut(50).0, Direction::Vertical, "a narrow width stacks");
+        // The mid band keeps a third of the width, side by side. Every width the frame
+        // tests render at (60–90) lands here, so their layout is unchanged.
+        assert_eq!(
+            rail_cut(STACK_BELOW).0,
+            Direction::Horizontal,
+            "the stack floor is exclusive — 60 is not narrow"
+        );
+        assert!(matches!(rail_cut(90).1[0], Constraint::Percentage(34)));
+        // Wide: a fixed narrow rail column rather than a sprawling third.
+        assert_eq!(rail_cut(WIDE_AT).0, Direction::Horizontal);
+        assert!(matches!(rail_cut(WIDE_AT).1[0], Constraint::Length(WIDE_RAIL)));
+        assert!(matches!(rail_cut(200).1[0], Constraint::Length(WIDE_RAIL)));
+    }
 }
