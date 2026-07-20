@@ -17,8 +17,8 @@ use serde_json::{Value, json};
 
 use pantheon::mint::NewSpec;
 use pantheon::{
-    Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_new,
-    plan_rename, plan_rm, read_annotations, resolve_all, resolve_code, resolve_root,
+    Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_mv_file,
+    plan_new, plan_rename, plan_rm, read_annotations, resolve_all, resolve_code, resolve_root,
     set_annotations, validate,
 };
 
@@ -311,7 +311,7 @@ pub(crate) fn run(cli: &Cli) -> Result<RunOk> {
         // *node*-level one (§10.1), which is a different and larger job — a node's
         // code is its path, so a rename rewrites every child directory name and file
         // prefix under the branch, plus every rule header naming the code (§9.2).
-        Cmd::MvFile { .. } => Err(not_implemented("mv-file", NODE_CASCADE)),
+        Cmd::MvFile { file, to } => cmd_mv_file(cli, file, to),
         Cmd::Mv { code, to } => cmd_mv(cli, code, to),
         Cmd::Rm { code } => cmd_rm(cli, code),
         Cmd::Rename {
@@ -396,6 +396,14 @@ fn cmd_mv(cli: &Cli, code: &str, to: &str) -> Result<RunOk> {
     let root = resolve_root(cli.root.as_deref())?;
     let code = Code::parse(code)?;
     let (plan, record) = plan_mv(&root, &code, to)?;
+    run_plan(cli, &root, &plan, json!({ "moved": [record] }))
+}
+
+/// `pan mv-file <file> --to <code>` — re-home one record/series/rule file (§10.1, §7.2).
+fn cmd_mv_file(cli: &Cli, file: &std::path::Path, to: &str) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let to = Code::parse(to)?;
+    let (plan, record) = plan_mv_file(&root, file, &to)?;
     run_plan(cli, &root, &plan, json!({ "moved": [record] }))
 }
 

@@ -209,6 +209,70 @@ pub fn plan_mv(root: &Path, code: &Code, to_parent: &str) -> Result<(Plan, Value
     Ok((plan, record))
 }
 
+/// `pan mv-file <file> --to <code>` (§10.1, §7.2) — re-home one record, series, or rule
+/// file to another node, rewriting its `[code]__` prefix to the target's. The file's
+/// remainder (`kind__slug`, `kind__name.jsonl`, `function__name…`) is invariant, so this
+/// is a single rename into the target's meta dir. A document (single-`_` name) is moved
+/// by its own core, not here.
+pub fn plan_mv_file(root: &Path, file: &Path, to_code: &Code) -> Result<(Plan, Value)> {
+    let file_abs = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        root.join(file)
+    };
+    if !file_abs.is_file() {
+        return Err(Error::not_found(format!("no file at {}", file.display())));
+    }
+    let basename = file_abs
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let Some((_old_code, rest)) = basename.split_once("__") else {
+        return Err(Error::usage(format!(
+            "mv-file re-homes a record, series, or rule (a `__`-named file); {basename:?} is not \
+             one — a document is re-homed by its core (§7.2)"
+        )));
+    };
+
+    let (_to_nn, to_path) = resolve_node(root, to_code)?;
+    let to_meta = to_path.join(format!("{}__", to_code.as_str()));
+    let new_basename = format!("{}__{rest}", to_code.as_str());
+    let dest = to_meta.join(&new_basename);
+
+    if dest == file_abs {
+        return Err(Error::validation(format!(
+            "{basename:?} is already at {} (§7.2)",
+            to_code.as_str()
+        )));
+    }
+    if dest.exists() {
+        return Err(Error::validation(format!(
+            "{} already holds a file named {new_basename:?} — re-home would overwrite it (§5.4)",
+            to_code.as_str()
+        )));
+    }
+
+    let mut changes = Vec::new();
+    // The target meta dir is minted lazily on first write; create it if this is the first.
+    if !to_meta.is_dir() {
+        changes.push(Change::Mkdir {
+            code: to_code.clone(),
+            rel_path: rel_path(root, &to_meta),
+        });
+    }
+    changes.push(Change::Rename {
+        from: rel_path(root, &file_abs),
+        to: rel_path(root, &dest),
+    });
+
+    let plan = Plan::new("mv-file", changes);
+    let record = json!({
+        "file": rel_path(root, &file_abs).to_string_lossy(),
+        "to": rel_path(root, &dest).to_string_lossy(),
+    });
+    Ok((plan, record))
+}
+
 /// Walk the branch rooted at `old_code` and emit a [`Change::Rename`] for every directory
 /// and file whose name carries a code in the branch (§10.1). The renamed node's own dir
 /// moves to `new_top_rel`; every descendant then follows mechanically — its code's

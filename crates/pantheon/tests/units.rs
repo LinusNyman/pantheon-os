@@ -9,8 +9,8 @@ use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
-    Severity, Shape, build_tree, normalize, plan_mv, plan_new, plan_rename, plan_rm, resolve_all,
-    resolve_code, validate, with_record_lock,
+    Severity, Shape, build_tree, normalize, plan_mv, plan_mv_file, plan_new, plan_rename, plan_rm,
+    resolve_all, resolve_code, validate, with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -166,6 +166,35 @@ fn mv_rehomes_and_cascades_and_refuses_a_cycle() {
             .is_file()
     );
     assert!(!root.join("c_contextus/c_s_societas").exists());
+}
+
+#[test]
+fn mv_file_rehomes_a_misfiled_record() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    // A `csa` record misfiled in `cs`'s meta dir (§10.2's misfile case).
+    write_record(
+        &root,
+        "cs",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let misfiled = std::path::Path::new("c_contextus/c_s_societas/cs__/csa__person__mara.json");
+    let (plan, _) = plan_mv_file(&root, misfiled, &Code::parse("csa").unwrap()).unwrap();
+    plan.apply(&root).unwrap();
+
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__mara.json")
+            .is_file()
+    );
+    assert!(
+        !root
+            .join("c_contextus/c_s_societas/cs__/csa__person__mara.json")
+            .exists()
+    );
 }
 
 #[test]
