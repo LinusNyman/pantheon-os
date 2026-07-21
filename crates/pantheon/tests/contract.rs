@@ -48,6 +48,8 @@ fn classify_map() {
     let cases: &[(&str, bool)] = &[
         ("csa__", true),
         ("csa__.toml", false),
+        ("csa_curriculum.toml", false),
+        ("Cargo.toml", false),
         ("csa__person__alex.json", false),
         ("csa_john_appleseed__person.json", false),
         ("cso__log__meetings.jsonl", false),

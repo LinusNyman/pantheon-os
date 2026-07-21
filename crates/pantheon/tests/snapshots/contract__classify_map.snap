@@ -1,11 +1,16 @@
 ---
 source: crates/pantheon/tests/contract.rs
+assertion_line: 72
 expression: out
 ---
 csa__  (dir=true)
   => MetaDir { code: Code("csa") }
 csa__.toml  (dir=false)
   => Annotation { code: Code("csa") }
+csa_curriculum.toml  (dir=false)
+  => Bulk
+Cargo.toml  (dir=false)
+  => Bulk
 csa__person__alex.json  (dir=false)
   => Partitioned { code: Code("csa"), kind: "person", slug: "alex" }
 csa_john_appleseed__person.json  (dir=false)

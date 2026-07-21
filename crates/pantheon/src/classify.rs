@@ -151,13 +151,18 @@ fn classify_file(name: &str, node: &Code) -> FileClass {
 
 fn classify_toml(name: &str, segments: &[&str]) -> FileClass {
     // Annotation is `[code]__.toml`: the stem `[code]__` splits to `[code, ""]`.
+    // A stem *shaped* like an annotation but carrying a bad code stays flagged —
+    // that is a broken annotation. Anything else with a `.toml` extension is not
+    // an annotation at all (a lens's `[code]_curriculum.toml`, §19.3; a project's
+    // `Cargo.toml`, §6.5) and is bulk like any other non-record file (§6.1) — the
+    // same landing a `.pdf` or `.mp4` gets, rather than a spurious finding.
     if segments.len() == 2 && segments[1].is_empty() {
         return match Code::parse(segments[0]) {
             Ok(code) => FileClass::Annotation { code },
             Err(_) => unclassifiable(name),
         };
     }
-    unclassifiable(name)
+    FileClass::Bulk
 }
 
 fn classify_json(name: &str, segments: &[&str]) -> FileClass {
