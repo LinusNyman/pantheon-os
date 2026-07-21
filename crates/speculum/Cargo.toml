@@ -14,9 +14,26 @@ repository.workspace = true
 name = "spe"
 path = "src/main.rs"
 
+[features]
+# Copied from Atrium's split exactly: `porticus`/`ratatui` ride the default `tui`
+# feature, and **`tessera` stays non-optional** — the folds are the lens's substance,
+# not its chrome, so `--no-default-features` drops the screen and keeps the folds
+# (§14, §12). `jiff` rides `tui` too: only the horizon view does date arithmetic, and a
+# headless fold reports figures, not a window.
+default = ["tui"]
+tui = ["dep:porticus", "dep:ratatui", "dep:jiff"]
+
 [dependencies]
 pantheon.workspace = true
-porticus.workspace = true
 tessera.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
+# A lens writes its own mosaic and horizon draw-views (§12, P§3), which paint into a
+# ratatui `Buffer` — so it takes the full crate, upstream's rule for an application (§13).
+porticus = { workspace = true, optional = true }
+ratatui = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
