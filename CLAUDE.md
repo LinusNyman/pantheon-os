@@ -95,21 +95,26 @@ Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `
 - `xtask/` — workspace automation (run via `cargo xtask`).
 - `docs/` — the mdBook spec. `deny.toml`, `dist-workspace.toml`, `release-plz.toml` — supply chain & release.
 
-## Status — build order steps 1–7 are done (§16); all seven cores exist
+## Status — build order steps 1–10 done (§16); step 11 (releases) deferred indefinitely
 
 **Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4),
 `tabella` (5), `porticus` + `tessera` + `atrium` (6), `mappa` + `rationes` + `fasti` (7),
 `auspex` (8) — the reactive loop now closes: a write wakes it, a rule proposes, and Auspex
-applies through the core CLIs.
+applies through the core CLIs. **Step 9 (cleanups)** paid the deferrals — pan's node cascade
+(§10.1), the add form and the chrome debts (P§4–P§7), validate's candidate fixes (§10.2), the
+nested-`data` render — all landed. **Step 10 (lenses)** built the last two, `speculum` (review
+across horizons) and `studium` (the studies lens, §19), so **every instrument now exists**:
+twelve binaries, all `pan doctor`-visible.
 **All three storage shapes exist** — Partitioned, Series in *both* its hand-named and nameless
 forms, and Document — plus the `core:slug` resolver, the record-level rename cascade, and the
 record lock under contention.
 
 **The vertical slice closed at step 6**, which is what it was for: a real screen renders
 derived-out (I1) and relays a human write back through a core (I2, §12) — `d` on an Atrium row
-runs `pen edit … --done -y` and `pen list` reads it back from another process. Nine instruments
-have TUIs (`pan`, `atr`, `alb`, `ann`, `pen`, `tab`, `map`, `rat`, `fas`); the table renderer
-fills §7.3's "TTY → table"; `cargo xtask seed` mints a tree to look at.
+runs `pen edit … --done -y` and `pen list` reads it back from another process. **Every instrument
+now has a TUI** — the nine of steps 6–7 (`pan`, `atr`, `alb`, `ann`, `pen`, `tab`, `map`, `rat`,
+`fas`), plus `aus`'s rules browser (8) and the two lens mosaics `spe`/`stu` (10); the table
+renderer fills §7.3's "TTY → table"; `cargo xtask seed` mints a tree to look at.
 
 **Step 7 built the three cores the slice did not need**, against a contract a screen had already
 exercised — and they were built in parallel git worktrees off one `main`, each touching only its
@@ -124,12 +129,43 @@ variants — a *dispatch type, not a disk format*, since the filename already na
 `location`/`region` are one storage shape, so it keeps one flat struct, and an enum there would
 have turned `edit -k` into a record transformation when §7.2 says it is a file rename.
 
-**Still scaffold** — a stub printing a not-implemented line: `speculum` and `studium` (10).
+**Still stubbed** — one not-implemented line: `pan migrate` (`Cmd::Migrate`, §5.5). It is
+*blocked, not deferred*: shape-directed and idempotent, it can only be built once a *prior*
+format version exists to rewrite from, so it waits on the first release (§16 step 11).
 **Step 8 (`auspex`) is done**, landed in four parts against §16's own "`plan` before `run`"
 sequencing: the hook (below), the **read half** (discovery, the header, `ls`/`version`/`help`,
 the browser screen), the **propose protocol** (`plan`/`test`), and **apply** (`run` — the
-capability check, the dedupe, and the writes, §9.5). Step 9 is the **cleanups** pass — pan's
-node cascade (§10.1) landed on `main` already; the lenses and releases are steps 10 and 11.
+capability check, the dedupe, and the writes, §9.5).
+
+**Step 11 (releases) is deferred indefinitely — a deliberate hold, not a debt.** The OS is
+feature-complete across all four layers; the current phase is **user-testing each app and
+improving it** before anything is tagged and published. So: do **not** start `release-plz`,
+per-crate tags, or a `dist` run until the improvement phase closes and a release is *explicitly*
+asked for, and `pan migrate` stays blocked until then (it needs that first version boundary).
+Treat incoming work as **per-app improvement requests**, scoped to one instrument at a time — not
+build-order steps. The fan-out is done; the shape now is iterate-on-one-app.
+
+**What steps 9–10 settled that a later change must not undo:**
+- **The lenses follow Atrium's shape** (lib-with-a-five-line-bin, the I4 guard, the feature split
+  that drops `porticus`/`ratatui` under `--no-default-features` while `tessera` stays). `speculum`
+  is a horizon dashboard (day→week→month→year across every core); `studium` folds the **GPA**.
+- **§19 is law and it *replaced* §12's one-line sketch.** The original §12 said a Studium enrolment
+  is a Fasti span "whose fields carry credits and grade" — **unbuildable**, since Fasti's `Span` is
+  `deny_unknown_fields {from,to,note}`. The settled design (`docs/src/spec/19-studium.md`): grade is
+  an **Annales `log` fact** paired to its span by shared slug; the grading **scale lives in a
+  per-programme `[code]_curriculum.toml`** — a deliberate **§18 carve-out** (reference data a lens
+  reads, never a behaviour knob). GPA = credit-weighted fold, best-passing on retake, null-not-zero.
+  **If you touch grading, read §19, not §12.**
+- **`classify_toml` routes a non-annotation `.toml` to `Bulk`** (not `unclassifiable_file`), so a
+  `curriculum.toml` — or a project's `Cargo.toml` (§6.5) — validates clean; only an
+  annotation-shaped stem (`[code]__`) with a bad code stays flagged.
+- **Every app's `version -f json` MUST spell the key `format_version`, never `format`.** `pan
+  doctor` reads `format_version` to check the suite agrees (§15.5); an app spelling it `format`
+  parses as absent and is *silently skipped* by the agreement fold — `agreed` stays true while the
+  app never contributes. `atr` and `spe` both carried this bug (atrium from step 6, speculum copied
+  it); fixed, and `doctor.rs` now asserts **every seen app also contributes a format_version**, so
+  the next misspelling fails CI instead of vanishing. Copy `studium`'s `version_json`, not the older
+  ones, for any new app.
 
 **`aus` is `pan`-shaped and `pan doctor` sees it** — it emits `version -f json` with
 `format_version: 1`, so it reads as installed. Three things about its shape a later change must not
@@ -304,9 +340,10 @@ Step 7's follow-ups, all landed:
   pattern re-slug's ref cascade into the same plan and token. `r`/`x` are live in `pan`'s
   TUI (`m` stays dark — no destination prompt yet), and the validate tab's `d` applies a
   finding's fix (step 9's 2b). The *record*-level cascade (§5.4, `cascade.rs`) is reused for
-  the ref rewrites. **Still deferred, Auspex-gated:** the `writes=core@home` rule-header
-  token cascade and the "dead code in a header" validate finding — no header parser exists
-  (Auspex is a scaffold); rule *files* are renamed by prefix like any other.
+  the ref rewrites. **Still deferred:** the `writes=core@home` rule-header token cascade and the
+  "dead code in a header" validate finding — Auspex's header parser now *exists* (step 8,
+  `grant.rs`), but `pan`'s node cascade does not yet reach into rule headers to rewrite the
+  `writes=` grant tokens a recode invalidates; rule *files* are renamed by prefix like any other.
 - **`classify` is structural, and only the registry knows what a name *means*.** A determined
   series whose determinant is a *slug* (`crp__balance__checking.jsonl`) wears the same three
   segments as a hand-named one, so `classify` calls it `NamedSeries` — correctly. Only the
