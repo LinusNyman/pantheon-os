@@ -98,4 +98,22 @@ fn the_installed_apps_agree_about_the_format_version() {
         d["absent"].as_array().unwrap().is_empty(),
         "every known app is built at step 10, so none reads absent"
     );
+    // Every *seen* app must also *contribute* a format_version. An app seen but silent
+    // on the key — spelled `format` rather than `format_version` — parses as absent and
+    // is skipped by the agreement fold, not flagged (§15.5). That is how `atr` and `spe`
+    // once dropped out of the check while `agreed` stayed true. Seen-but-silent is the
+    // real failure, so assert against it directly.
+    let contributors: std::collections::HashSet<&str> = d["format"]["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|v| v["apps"].as_array().unwrap())
+        .map(|s| s.as_str().unwrap())
+        .collect();
+    for seen in &shorts {
+        assert!(
+            contributors.contains(seen),
+            "{seen} is seen but contributes no format_version — silently skipped by the agreement check (§15.5)"
+        );
+    }
 }
