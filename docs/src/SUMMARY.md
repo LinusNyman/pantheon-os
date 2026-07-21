@@ -19,5 +19,6 @@
   - [16. Build order](./spec/16-build-order.md)
   - [17. Worked example (end to end)](./spec/17-worked-example.md)
   - [18. Non-goals — deliberately absent, do not add](./spec/18-non-goals.md)
+  - [19. Studium — the studies lens](./spec/19-studium.md)
 - [Porticus — the TUI chrome](./PORTICUS-SPEC.md)
 - [Appendix A — On the names](./APPENDIX-A-NAMES.md)
