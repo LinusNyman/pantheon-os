@@ -142,7 +142,10 @@ fn version_json() -> Value {
         "name": "atrium",
         "short": "atr",
         "version": env!("CARGO_PKG_VERSION"),
-        "format": 1,
+        // `format_version`, not `format`: `pan doctor` reads this key off every app's
+        // `version -f json` to check the suite agrees (§15.5). Spelled `format`, it
+        // parses as absent and `atr` is silently skipped by that check.
+        "format_version": 1,
     })
 }
 
