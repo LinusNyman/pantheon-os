@@ -1,6 +1,12 @@
-//! `spe` — Speculum, the review lens (§12). Folds every core across any horizon
-//! (day → year). Owns no primitive; never originates a write (I2). Scaffold.
+//! `spe` — the binary. §14's "~30-line clap shell", and nothing else.
+//!
+//! Everything — the whole `Cli`, the verbs, the mosaic, and the horizon — lives in the
+//! lib (`src/cli.rs`, `src/screen.rs`, `src/mosaic.rs`, `src/horizon.rs`), because an
+//! integration test links the lib and a screen in the bin is a screen no test can
+//! reach. The shell stays this thin on purpose: there is nothing here to test.
 
-fn main() {
-    println!("spe — Speculum (the mirror). Not yet implemented.");
+use std::process::ExitCode;
+
+fn main() -> ExitCode {
+    speculum::run_cli()
 }

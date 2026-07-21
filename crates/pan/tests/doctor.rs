@@ -85,17 +85,19 @@ fn the_installed_apps_agree_about_the_format_version() {
         .iter()
         .map(|a| a["short"].as_str().unwrap())
         .collect();
-    for built in ["pan", "alb", "ann", "pen", "tab"] {
+    // `spe` graduated from scaffold to a real lens at step 10, so it now emits
+    // `version -f json` and reads as seen like any app (§12 — `pan doctor` sees it).
+    for built in ["pan", "alb", "ann", "pen", "tab", "spe"] {
         assert!(shorts.contains(&built), "{built} is built and must be seen");
     }
     // A scaffold prints a line rather than emitting `version -f json`, so it reads as
     // absent — which is the honest answer, and the same tolerance discovery shows a
-    // missing core (§5.0).
+    // missing core (§5.0). `stu` is the lens still unbuilt (step 10).
     assert!(
         d["absent"]
             .as_array()
             .unwrap()
-            .contains(&Value::from("spe")),
+            .contains(&Value::from("stu")),
         "an unbuilt app is absent, not an error"
     );
 }
