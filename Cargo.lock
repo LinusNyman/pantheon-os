@@ -1859,9 +1859,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "jiff",
  "pantheon",
  "porticus",
+ "ratatui",
+ "serde_json",
  "tessera",
+ "toml_edit",
 ]
 
 [[package]]

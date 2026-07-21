@@ -12,9 +12,31 @@ repository.workspace = true
 name = "stu"
 path = "src/main.rs"
 
+[features]
+# `porticus` rides the default `tui` feature as everywhere else; **`tessera` does not**
+# — the folds are the lens's substance, not its chrome, so `--no-default-features` drops
+# the screen and keeps the GPA (§14, §12). Nothing trails in behind it: a tile owns no
+# backend (`ratatui-core`, §13), so a headless lens links no terminal.
+default = ["tui"]
+tui = ["dep:porticus", "dep:ratatui"]
+
 [dependencies]
 pantheon.workspace = true
-porticus.workspace = true
 tessera.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
+# The one parser for the `[code]_curriculum.toml` reference data (§19.3, §18): the same
+# `toml_edit` every other TOML surface takes.
+toml_edit.workspace = true
+# "Next exam" is relative to today, so the live fold reads the clock — the one figure that
+# does. The GPA and every credit total are folded from dated records alone (§19.4).
+jiff.workspace = true
+# A lens writes its own mosaic draw-view (§12, P§3), which paints into a ratatui
+# `Buffer` — so it takes the full crate, upstream's rule for an application (§13).
+porticus = { workspace = true, optional = true }
+ratatui = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
+pantheon.workspace = true
