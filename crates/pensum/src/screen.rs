@@ -200,24 +200,38 @@ fn open_tasks(root: &std::path::Path, at: Option<&Code>) -> Vec<(Code, String, b
 }
 
 fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
-    open_tasks(root, Some(node))
+    let labels = porticus::node_labels(root);
+    let mut rows: Vec<Row> = open_tasks(root, Some(node))
         .into_iter()
         .filter(|(_, _, done)| !done)
-        .map(|(home, key, _)| row(home, key))
-        .collect()
+        .map(|(home, key, _)| row(&labels, home, key))
+        .collect();
+    // Node-first, so a subtree fold reads grouped by node (P1). The Agenda sorts its
+    // own rows; a TreeFile does not, so the order is set here.
+    rows.sort_by(|a, b| a.label.cmp(&b.label));
+    rows
 }
 
 fn all_rows(root: &std::path::Path) -> Vec<Row> {
+    let labels = porticus::node_labels(root);
     open_tasks(root, None)
         .into_iter()
         .filter(|(_, _, done)| !done)
-        .map(|(home, key, _)| row(home, key))
+        .map(|(home, key, _)| row(&labels, home, key))
         .collect()
 }
 
-fn row(home: Code, key: String) -> Row {
+/// One task row: **node first**, then the task de-underscored for reading (P1). The
+/// node reads as its label (`cura`) not its code (`ac`), and the real key is kept as
+/// the target — so search matches the visible label while a relay writes the stored
+/// slug (P§7, I3).
+fn row(labels: &std::collections::HashMap<String, String>, home: Code, key: String) -> Row {
+    let node = labels
+        .get(home.as_str())
+        .map_or_else(|| home.as_str().to_owned(), Clone::clone);
+    let task = porticus::prettify(&key);
     Row {
-        label: format!("{key}   {}", home.as_str()),
+        label: format!("{node}   {task}"),
         target: Target::Row(RecordRef { home, key }),
         when: None,
     }
@@ -225,22 +239,10 @@ fn row(home: Code, key: String) -> Row {
 
 /// Pensum's own figures — its tasks, never another core's (I5, P§3).
 fn panels(root: &std::path::Path) -> Vec<Panel> {
+    let labels = porticus::node_labels(root);
     let all = open_tasks(root, None);
     let done = all.iter().filter(|(_, _, d)| *d).count();
     let open = all.len() - done;
-
-    let mut by_node: Vec<(String, f64)> = Vec::new();
-    for (home, _, is_done) in &all {
-        if *is_done {
-            continue;
-        }
-        let code = home.as_str().to_owned();
-        #[allow(clippy::cast_precision_loss)]
-        match by_node.iter_mut().find(|(c, _)| *c == code) {
-            Some((_, count)) => *count += 1.0,
-            None => by_node.push((code, 1.0)),
-        }
-    }
 
     vec![
         Panel {
@@ -253,7 +255,38 @@ fn panels(root: &std::path::Path) -> Vec<Panel> {
         },
         Panel {
             title: "open by node".into(),
-            chart: Chart::Bars(by_node),
+            chart: Chart::Bars(by_node(&all, &labels, false)),
+        },
+        // Marking a task done moves its count from the chart above to this one, so a
+        // completion *shows* rather than simply vanishing from the only per-node chart
+        // (P2).
+        Panel {
+            title: "done by node".into(),
+            chart: Chart::Bars(by_node(&all, &labels, true)),
         },
     ]
+}
+
+/// Tasks per node, labeled by the node's human name so a bar reads as `cura` rather
+/// than the code `ac` (P2). `want_done` selects the open or the done tally.
+fn by_node(
+    all: &[(Code, String, bool)],
+    labels: &std::collections::HashMap<String, String>,
+    want_done: bool,
+) -> Vec<(String, f64)> {
+    let mut out: Vec<(String, f64)> = Vec::new();
+    for (home, _, is_done) in all {
+        if *is_done != want_done {
+            continue;
+        }
+        let label = labels
+            .get(home.as_str())
+            .map_or_else(|| home.as_str().to_owned(), Clone::clone);
+        #[allow(clippy::cast_precision_loss)]
+        match out.iter_mut().find(|(l, _)| *l == label) {
+            Some((_, count)) => *count += 1.0,
+            None => out.push((label, 1.0)),
+        }
+    }
+    out
 }

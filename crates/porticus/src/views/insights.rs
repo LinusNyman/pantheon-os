@@ -216,23 +216,28 @@ fn draw_bars(values: &[(Label, f64)], area: Rect, buf: &mut Buffer, theme: Theme
                 .style(Style::default().fg(theme.accent))
         })
         .collect();
+    let longest = values.iter().map(|(l, _)| l.chars().count()).max();
     BarChart::default()
         .data(BarGroup::default().bars(&bars))
-        .bar_width(bar_width(area.width, values.len()))
+        .bar_width(bar_width(area.width, values.len(), longest))
         .bar_gap(1)
         .style(theme.text())
         .render(area, buf);
 }
 
-/// Wide enough to read, narrow enough that every bar fits.
-fn bar_width(width: u16, count: usize) -> u16 {
-    let Ok(count) = u16::try_from(count) else {
+/// Wide enough to show the label, narrow enough that every bar still fits (P2).
+///
+/// `ratatui` truncates a bar's label to the bar's own width, so a fixed cap crushed a
+/// node name to a couple of letters. The width now grows to the longest label when the
+/// panel has the room and only tightens when it does not — the label wins over the
+/// whitespace between bars.
+fn bar_width(width: u16, count: usize, longest: Option<usize>) -> u16 {
+    let Ok(count) = u16::try_from(count.max(1)) else {
         return 1;
     };
-    if count == 0 {
-        return 1;
-    }
-    (width / count).saturating_sub(1).clamp(1, 8)
+    let per = (width / count).saturating_sub(1);
+    let want = longest.and_then(|l| u16::try_from(l).ok()).unwrap_or(per);
+    per.min(want).max(1)
 }
 
 fn draw_trend(series: &[(String, f64)], area: Rect, buf: &mut Buffer, theme: Theme) {

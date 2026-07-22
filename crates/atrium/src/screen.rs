@@ -125,6 +125,7 @@ fn tasks(root: &std::path::Path) -> Vec<Row> {
     let Some(Value::Array(rows)) = tessera::read(root, PENSUM, &["list"]) else {
         return Vec::new();
     };
+    let labels = porticus::node_labels(root);
     rows.iter()
         .filter_map(|row| {
             let key = row["key"].as_str()?;
@@ -137,8 +138,13 @@ fn tasks(root: &std::path::Path) -> Vec<Row> {
                     format!("   {}", names.join(", "))
                 }
             });
+            // Node-first, the task de-underscored — the same row shape Pensum shows, so
+            // the agenda reads identically wherever it appears (P1, I3).
+            let node = labels
+                .get(home.as_str())
+                .map_or_else(|| home.as_str().to_owned(), Clone::clone);
             Some(Row {
-                label: format!("{key}   {}{refs}", home.as_str()),
+                label: format!("{node}   {}{refs}", porticus::prettify(key)),
                 target: Target::Row(RecordRef {
                     home,
                     key: key.to_string(),

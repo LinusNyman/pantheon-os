@@ -69,10 +69,26 @@ fn d_on_a_studium_task_marks_it_done_in_another_process() {
     let joined = std::env::join_paths(dirs).expect("a joinable PATH");
     unsafe { std::env::set_var("PATH", &joined) };
 
+    // The task shows on the agenda, node-first and de-underscored (P1). Captured before
+    // the write, since marking it done empties the agenda — and asserting the spaced
+    // form proves the *label*, not the `buy_milk` command echoed in the status line.
+    let agenda = porticus::drive(
+        &mut Studium::new(&root),
+        &root,
+        &porticus::keys("3"),
+        100,
+        24,
+    )
+    .expect("the lens drives");
+    assert!(
+        agenda.contains("buy milk"),
+        "the task is on the agenda, de-underscored (P1): {agenda}"
+    );
+
     // `3` switches to the tasks agenda (mosaic · courses · tasks), `d` marks the focused
     // row done (P§4, P§5). The write leaves this process: Porticus builds `pen edit …
     // --done`, adds `-C` and `-y`, and spawns it (P§7).
-    let frame = porticus::drive(
+    porticus::drive(
         &mut Studium::new(&root),
         &root,
         &porticus::keys("3d"),
@@ -80,10 +96,6 @@ fn d_on_a_studium_task_marks_it_done_in_another_process() {
         24,
     )
     .expect("the lens drives");
-    assert!(
-        frame.contains("buy_milk"),
-        "the task is on the agenda: {frame}"
-    );
 
     // Read it back with the binary. `--all` is required: a plain `list` is every *open*
     // task, so a done one is gone from it.

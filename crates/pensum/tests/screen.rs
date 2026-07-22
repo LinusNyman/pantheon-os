@@ -98,8 +98,10 @@ fn the_screen_draws_the_nodes_tasks() {
     )
     .unwrap();
     assert!(frame.contains("P E N S U M"), "{frame}");
-    assert!(frame.contains("buy_milk"), "{frame}");
-    assert!(frame.contains("call_the_dentist"), "{frame}");
+    // The row shows the task de-underscored, node-first (P1) — the stored key stays
+    // `buy_milk`, but a reader sees `buy milk`.
+    assert!(frame.contains("buy milk"), "{frame}");
+    assert!(frame.contains("call the dentist"), "{frame}");
 }
 
 /// **`d` marks a task done, through the core, on disk.**
