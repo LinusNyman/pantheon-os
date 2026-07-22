@@ -463,6 +463,45 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   schema, so those fall back to pretty JSON. The flatness test is deliberately *not* recursive.
   No contract snapshot covers any of this, because every contract test pipes.
 
+### Improvement phase — Wave 1 (chrome UX, `porticus`; IMPROVEMENT-PLAN.md)
+
+The first per-app improvement pass, all in `porticus`, so **one edit moved all twelve** (P-II).
+What a later change must not undo:
+
+- **Scrolloff is one stateless helper** — `runtime::scroll_first(cursor, len, height)`, shared by
+  `draw_rows` and `Rail::draw` so list and tree scroll identically (I3, C3). It **centres the
+  cursor** (half a pane from the top), top-anchored near the head and bottom-anchored at the end;
+  derived from the cursor each frame, never a stored offset (I1, §18 — no knob). It *replaced* the
+  bottom-anchored `first = cursor - (height-1)`, which is why the C1 clamp test no longer asserts
+  "one Up lifts off the last row" (that was bottom-anchor behaviour) but instead that stepping back
+  the list length returns to the head.
+- **Search is the content surface, and ranked (C4).** `/` now takes **content focus** wherever a
+  Rail view held the tree (`Chrome::Search` sets `Focus::Content`), so typing narrows the *rows*,
+  not the tree cursor — **`Rail::seek` was removed**, not just unused. `filtered()` ranks matches
+  **prefix > word-boundary > substring** with a stable sort (original index breaks ties), so the
+  order is deterministic frame-to-frame — every caller (`draw_rows`, `current_target`,
+  `row_targets`) must agree on the same cursor row. A per-frame **fold memo was deliberately not
+  added**: while typing, `rows()` folds once per frame (live_search only sets the filter), so the
+  reported slowness was the missing rank + tree-seek, not repeated folds.
+- **The Title splash is a full-page banner painted on its own path (C7, C6).** `Overlay::Title`
+  routes to `draw_title` (like `Overlay::Tree`→`draw_tree_modal`), **not** through `draw_overlay`'s
+  line body — so `draw_overlay` no longer takes `ident`. The face is **`porticus::banner`**, an
+  embedded **8-row serifed Roman-caps** alphabet (serif feet/heads, tall inscriptional/Trajan)
+  **authored in-repo** (public-domain, no dependency, nothing loaded at runtime) — the plan's "render
+  the caps without a third-party `.flf`" path, taken because no `cargo deny`-clean figlet font was on
+  hand and none could be fetched. (A first 5-row solid-block cut read too modern; redrawn taller and
+  serifed to land as classical.) It renders `ident.name`,
+  falls back to the tracked word when too narrow, and **drops the tagline** (C6 — the `Ident.tagline`
+  field stays, removing it is 12-crate churn for no gain; it is simply no longer rendered anywhere).
+  The version line stays verbatim (`crate … · format 1`), which one frame test keys on.
+- **The theme pass (C5) is values-only** — `theme.rs` palette + spheres, a warm/legibility lift over
+  the same ink-on-vellum model; the accent's restraint (name + focus alone, P§8) is unchanged.
+  Invisible to the frame snapshots (`as_text` strips style), so **no snapshot churned** — a later
+  palette edit is free of snapshot review for the same reason, but must keep the P§8 table in sync.
+- **The untracked `PORTICUS-SPEC.md` was updated in step** (P§4 Title row, P§6 search/scroll + the
+  `count_at`-only count model, P§8 banner + palette table). Cite `P§n` from these; they now match
+  the code.
+
 ### Step 6's durable rules (the chrome)
 
 - **A view declares intent; Porticus runs the flow** (P-II). A view says which `Action`s it
@@ -481,10 +520,17 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   every relay centrally; **a lens's own reads are its own to root** (`tessera::read` takes one,
   and Atrium holds the root for its tiles, its agenda fold, and its `count_at`). Both halves of
   this were real bugs, found one after the other.
-- **The dim asks `any_at`, the badge asks `count_at`** (P§6). Two questions on purpose: an
-  instrument whose count is costly overrides `any_at` and the dim stays cheap. Collapse them and
-  that override becomes unreachable. The default `any_at` counts, so a node holding records is
-  folded twice a frame — the cost P§6 tells a costly instrument to override away.
+- **`count_at` is one node-local fold, memoized per frame (P§6).** The dim is `count_at > 0`
+  and the badge is `count_at`, over the *same* per-frame memo in `Asking` — so a held node is
+  folded once, not once for the dim and again for the badge. **`count_at` MUST fold node-local**
+  (`fold_local`/`find_entities_local`/`find_documents_local`), the records *at* the node and not
+  its subtree: the rail asks it of every visible node, and a subtree fold re-read a branch once
+  per ancestor — the O(depth·records) cost that made walking a core's tree slow. This *replaced*
+  the old `any_at`/`count_at` split: with a node-local count there is no costly question to make
+  cheap, so `App::any_at` was removed and the badge is now node-local where it once summed the
+  subtree (a deliberate change; `pan` was already node-local, and no test pinned the sum). The
+  content pane (`rows_at`) still folds the subtree — it is one fold per frame, never the rail's
+  per-node cost — so a parent's badge (its own records) can read lower than the list below it.
 - **`None` from `rows` is a draw-view; `Some(vec![])` is an empty row-view** (P§3). The first is
   *about the selected node*, so the node is its target; the second honestly has an empty set.
   Conflating them made `e` on a draw-view silently do nothing.

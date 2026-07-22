@@ -265,6 +265,40 @@ impl<C: Core> Store<C> {
         Ok(())
     }
 
+    /// A childless copy of the node at `code` — its own identity and path, no
+    /// descendants (§5.0).
+    ///
+    /// The `_local` finders build one and hand it to the same `collect_*` the subtree
+    /// walk uses. Those recurse `node.children`; with none, they read the node's own
+    /// meta dir and stop. Every record they find is attributed `home = node`, so a
+    /// node-local read yields *exactly* the records the subtree fold would attribute to
+    /// this node — the per-node count the rail draws, folded once rather than re-folded
+    /// for every ancestor above it (P§6).
+    fn leaf_node(&self, code: &Code) -> Result<Node> {
+        let (nn, path) = resolve_node(&self.root, code)?;
+        Ok(Node {
+            code: nn.code,
+            form: nn.form,
+            ch: nn.ch,
+            label: nn.label,
+            path,
+            children: Vec::new(),
+        })
+    }
+
+    /// This core's series filed **at** `at`, not under it — the node-local counterpart
+    /// to [`find_series`] (§5.0). One meta-dir `read_dir`, no subtree walk.
+    pub fn find_series_local(
+        &self,
+        at: &Code,
+        kind: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<Vec<SeriesRef>> {
+        let mut out = Vec::new();
+        Self::collect_series(&self.leaf_node(at)?, kind, name, &mut out)?;
+        Ok(out)
+    }
+
     /// Resolve a series by name to exactly one file (§7.3). Zero is not found (exit
     /// `4`); more than one is reported with its candidate homes rather than guessed
     /// (exit `2`).
@@ -376,8 +410,20 @@ impl<C: Core> Store<C> {
         at: Option<&Code>,
         kind: Option<&str>,
     ) -> Result<Vec<PresentLine<C::Record>>> {
+        self.fold_srefs(self.find_series(at, kind, None)?)
+    }
+
+    /// The present at `at` alone, its descendants excluded — the node-local counterpart
+    /// to [`fold`] (§7.1). The rail's per-node count folds this so a node's series are
+    /// read once, never re-read for every ancestor (P§6).
+    pub fn fold_local(&self, at: &Code, kind: Option<&str>) -> Result<Vec<PresentLine<C::Record>>> {
+        self.fold_srefs(self.find_series_local(at, kind, None)?)
+    }
+
+    /// Read and present a set of series — the shared tail of [`fold`] and [`fold_local`].
+    fn fold_srefs(&self, srefs: Vec<SeriesRef>) -> Result<Vec<PresentLine<C::Record>>> {
         let mut out = Vec::new();
-        for sref in self.find_series(at, kind, None)? {
+        for sref in srefs {
             let lines = self.read_series(&sref)?;
             for line in Self::present(lines) {
                 out.push(PresentLine {
@@ -993,6 +1039,21 @@ impl<C: Core> Store<C> {
         Ok(out)
     }
 
+    /// This core's entities filed **at** `at`, not under it — the node-local counterpart
+    /// to [`find_entities`] (§5.0). One meta-dir `read_dir` and no file reads, which is
+    /// all a per-node count needs (P§6): each entity is one file, so the ref set *is* the
+    /// count.
+    pub fn find_entities_local(
+        &self,
+        at: &Code,
+        kind: Option<&str>,
+        slug: Option<&str>,
+    ) -> Result<Vec<EntityRef>> {
+        let mut out = Vec::new();
+        Self::collect_entities(&self.leaf_node(at)?, kind, slug, &mut out)?;
+        Ok(out)
+    }
+
     /// Write one entity object, creating or overwriting it (§6.1, §6.4).
     ///
     /// Pretty-printed with a trailing newline: a series line must be one line, but an
@@ -1125,6 +1186,15 @@ impl<C: Core> Store<C> {
                 .cmp(b.home.as_str())
                 .then_with(|| a.slug.cmp(&b.slug))
         });
+        Ok(out)
+    }
+
+    /// This core's documents filed **at** `at`, not under it — the node-local
+    /// counterpart to [`find_documents`] (§5.0). One `read_dir`, no body read: each
+    /// document is one file, so the ref set is the per-node count the rail draws (P§6).
+    pub fn find_documents_local(&self, at: &Code, slug: Option<&str>) -> Result<Vec<DocumentRef>> {
+        let mut out = Vec::new();
+        Self::collect_documents(&self.leaf_node(at)?, slug, &mut out)?;
         Ok(out)
     }
 

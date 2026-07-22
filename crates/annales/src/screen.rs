@@ -67,7 +67,12 @@ impl App for AnnalesApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        readings(&self.root, Some(node)).len()
+        // The readings filed **at** this node, not the subtree under it — folded
+        // node-local so the rail reads each node once, never re-reads a subtree per
+        // ancestor (P§6, I1).
+        Store::<Annales>::new(self.root.clone())
+            .fold_local(node, None)
+            .map_or(0, |lines| lines.len())
     }
 
     fn writer(&self) -> Writer {

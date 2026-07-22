@@ -85,7 +85,13 @@ impl App for RationesApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        holdings(&self.root, Some(node)).len()
+        // The holdings filed **at** this node, not the subtree under it — a node-local
+        // `read_dir`, no file reads, so the rail folds each node once (P§6, I1). A
+        // `balance` is a series, not an entity, so it does not reach this count — as
+        // before, when the badge folded only `holdings`.
+        Store::<Rationes>::new(self.root.clone())
+            .find_entities_local(node, None, None)
+            .map_or(0, |refs| refs.len())
     }
 
     fn writer(&self) -> Writer {

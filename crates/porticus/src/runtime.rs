@@ -169,15 +169,40 @@ fn check_lineup(views: &[Box<dyn View>]) -> anyhow::Result<()> {
 ///
 /// An adapter rather than two closures, because both answers come from the same `App`
 /// and two closures would each want a mutable borrow of it.
-struct Asking<'a, A>(&'a mut A);
+///
+/// It **memoizes [`count_at`](App::count_at) for the life of one draw**. The rail asks
+/// the dim (`any`) and then, only where a badge shows, the count — both of the *same*
+/// node. Without the memo that node folds twice a frame; with it the second question is
+/// a map hit. A fresh `Asking` is built per frame (`draw`/`draw_tree_modal`), so the memo
+/// never outlives the frame it was derived on (I1).
+struct Asking<'a, A> {
+    app: &'a mut A,
+    counts: std::collections::HashMap<String, usize>,
+}
+
+impl<'a, A> Asking<'a, A> {
+    fn new(app: &'a mut A) -> Self {
+        Self {
+            app,
+            counts: std::collections::HashMap::new(),
+        }
+    }
+}
 
 impl<A: App> crate::rail::Presence for Asking<'_, A> {
     fn any(&mut self, node: &Code) -> bool {
-        self.0.any_at(node)
+        // The dim is exactly *count > 0*, and it reuses the memoized count — so a held
+        // node the badge will also show is folded once, not once here and once there.
+        self.count(node) > 0
     }
 
     fn count(&mut self, node: &Code) -> usize {
-        self.0.count_at(node)
+        if let Some(&n) = self.counts.get(node.as_str()) {
+            return n;
+        }
+        let n = self.app.count_at(node);
+        self.counts.insert(node.as_str().to_owned(), n);
+        n
     }
 }
 
@@ -224,7 +249,9 @@ fn draw(
             // The pick-a-home modal paints the tree itself, so it needs the app to ask
             // each node its presence — a different render path from the line overlays.
             Overlay::Tree { rail } => draw_tree_modal(frame, rail, app, theme, area),
-            other => draw_overlay(frame, other, theme, ident, area),
+            // The Title splash paints a full-page banner, not a small line box (P§8, C7).
+            Overlay::Title => draw_title(frame, ident, theme, area),
+            other => draw_overlay(frame, other, theme, area),
         }
     }
 }
@@ -241,7 +268,63 @@ fn draw_tree_modal(frame: &mut Frame, rail: &Rail, app: &mut impl App, theme: Th
         .style(theme.text());
     let inner = block.inner(box_area);
     block.render(box_area, frame.buffer_mut());
-    rail.draw(inner, frame.buffer_mut(), theme, true, &mut Asking(app));
+    rail.draw(
+        inner,
+        frame.buffer_mut(),
+        theme,
+        true,
+        &mut Asking::new(app),
+    );
+}
+
+/// The Title splash (P§4, P§8, C7): a full-screen banner of the instrument's name in the
+/// embedded block-caps face, its symbol, and the two versions — summoned by `+`, painted
+/// over the whole `area` rather than the small line-overlay box every other overlay uses.
+///
+/// The **tagline is gone** (C6): the name is the signature, so the splash says it big and
+/// does not gloss it. Where the block caps would overrun a narrow terminal it falls back
+/// to the tracked name-word, so the splash never spills past its edges.
+fn draw_title(frame: &mut Frame, ident: &crate::Ident, theme: Theme, area: Rect) {
+    frame.render_widget(Clear, area);
+    // Paint the ink ground across the whole splash so it reads as a full page turned to,
+    // not a hole cut in the screen behind it.
+    frame.render_widget(Block::default().style(theme.text()), area);
+
+    let block = crate::banner::render(ident.name);
+    let mut lines: Vec<Line> = Vec::new();
+    if u16::try_from(crate::banner::width(&block)).unwrap_or(u16::MAX) <= area.width {
+        for row in &block {
+            lines.push(Line::from(Span::styled(row.clone(), theme.name())));
+        }
+    } else {
+        // Too narrow for the block caps — the tracked name-word still says who this is.
+        lines.push(Line::from(Span::styled(ident.tracked(), theme.name())));
+    }
+    lines.push(Line::from(String::new()));
+    lines.push(Line::from(Span::styled(
+        ident.symbol.to_string(),
+        theme.text(),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("crate {}  ·  format 1", env!("CARGO_PKG_VERSION")),
+        theme.dim(),
+    )));
+
+    // Centre the stack vertically in the full area.
+    let height = u16::try_from(lines.len())
+        .unwrap_or(u16::MAX)
+        .min(area.height);
+    let inner = Rect {
+        y: area.y + area.height.saturating_sub(height) / 2,
+        height,
+        ..area
+    };
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(theme.text())
+            .alignment(ratatui::layout::Alignment::Center),
+        inner,
+    );
 }
 
 fn draw_header(frame: &mut Frame, state: &State, theme: Theme, ident: &crate::Ident, area: Rect) {
@@ -328,13 +411,13 @@ fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Th
 
     if let Some(rail_area) = rail_area {
         let focused = state.focus == Focus::Rail;
-        // One borrow of the instrument, two questions (P§6).
+        // One borrow of the instrument, two questions over one per-frame memo (P§6).
         state.rail.draw(
             rail_area,
             frame.buffer_mut(),
             theme,
             focused,
-            &mut Asking(app),
+            &mut Asking::new(app),
         );
     }
 
@@ -428,10 +511,29 @@ fn draw_grid(frame: &mut Frame, grid: &Grid, theme: Theme, area: Rect) -> Rect {
     }
 }
 
+/// The first row to draw so the cursor keeps a margin from both edges — the scroll
+/// begins *before* the cursor reaches an edge, and on a tall pane the cursor rides the
+/// middle rather than the foot (P§6, C3).
+///
+/// Stateless: derived from the cursor each frame, never a stored offset (I1). It reads
+/// top-anchored while the cursor is still near the head, centres the cursor through the
+/// body, and bottom-anchors at the end so the last rows are never scrolled past. Shared
+/// by the content list ([`draw_rows`]) and the tree ([`Rail::draw`](crate::rail::Rail))
+/// so the two feel identical (I3).
+pub(crate) fn scroll_first(cursor: usize, len: usize, height: usize) -> usize {
+    if height == 0 || len <= height {
+        return 0; // the whole list fits — no scroll, no margin to keep
+    }
+    // The cursor sits half a pane below the top (centred), capped so the window never
+    // runs off the end of the list — which is also what bottom-anchors it at the tail.
+    let half = height / 2;
+    cursor.saturating_sub(half).min(len - height)
+}
+
 fn draw_rows(frame: &mut Frame, rows: &[Row], state: &State, theme: Theme, area: Rect) {
     let height = area.height as usize;
     let cursor = state.row.min(rows.len().saturating_sub(1));
-    let first = cursor.saturating_sub(height.saturating_sub(1));
+    let first = scroll_first(cursor, rows.len(), height);
     let focused = state.focus == Focus::Content;
 
     let lines: Vec<Line> = rows
@@ -497,25 +599,8 @@ fn hint(state: &State) -> String {
         .join("   ")
 }
 
-fn draw_overlay(
-    frame: &mut Frame,
-    overlay: &Overlay,
-    theme: Theme,
-    ident: &crate::Ident,
-    area: Rect,
-) {
+fn draw_overlay(frame: &mut Frame, overlay: &Overlay, theme: Theme, area: Rect) {
     let body: Vec<Line> = match overlay {
-        Overlay::Title => vec![
-            Line::from(Span::styled(ident.tracked(), theme.name())),
-            Line::from(Span::styled(
-                format!("{}  {}", ident.symbol, ident.tagline),
-                theme.text(),
-            )),
-            Line::from(Span::styled(
-                format!("crate {}  ·  format 1", env!("CARGO_PKG_VERSION")),
-                theme.dim(),
-            )),
-        ],
         Overlay::Help => help_lines(theme),
         Overlay::Search { buffer } => {
             vec![Line::from(Span::styled(format!("/{buffer}"), theme.text()))]
@@ -582,9 +667,9 @@ fn draw_overlay(
             lines
         }
         Overlay::Form { fields, focus, .. } => form_lines(fields, *focus, theme),
-        // The tree modal is painted by `draw_tree_modal`, not through this line body — it
-        // never reaches here.
-        Overlay::Tree { .. } => Vec::new(),
+        // Both are painted on their own full-area path — the Title splash by `draw_title`,
+        // the pick-a-home tree by `draw_tree_modal` — so neither reaches this line body.
+        Overlay::Tree { .. } | Overlay::Title => Vec::new(),
     };
 
     let box_area = centred(area, 72, u16::try_from(body.len() + 2).unwrap_or(8));
@@ -648,17 +733,48 @@ fn centred(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-/// Incremental match over a view's labels — the whole of what a view exposes for
-/// search, which is why search is written once for all of them (P§6).
+/// Incremental match over a view's labels, **ranked** so the best answers float to the
+/// top as you type (P§6) — the whole of what a view exposes for search, which is why it
+/// is written once for all of them.
+///
+/// An empty filter is the unranked list in its own order (a refold must not reshuffle
+/// rows under the cursor, P§3); a non-empty one keeps only the matches and orders them
+/// best-first. The rank tiers are prefix > word-boundary > substring, and within a tier
+/// the original order holds — a stable sort — so the ranking is deterministic frame to
+/// frame, which every caller ([`draw_rows`], [`current_target`], [`row_targets`]) needs
+/// to agree on the same cursor row.
 fn filtered(rows: &[Row], filter: &str) -> Vec<Row> {
     if filter.is_empty() {
         return rows.to_vec();
     }
     let needle = filter.to_lowercase();
-    rows.iter()
-        .filter(|row| row.label.to_lowercase().contains(&needle))
-        .cloned()
-        .collect()
+    let mut scored: Vec<(u8, usize, &Row)> = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(i, row)| rank(&row.label, &needle).map(|r| (r, i, row)))
+        .collect();
+    // Best rank first; the original index breaks ties, keeping the sort stable.
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, row)| row.clone()).collect()
+}
+
+/// Where `label` matches `needle` (already lowercased), as a rank: `0` a prefix, `1` at a
+/// word boundary (the char before the match is not alphanumeric — a space, `_`, `-`, `·`),
+/// `2` a bare substring. `None` if it does not match at all (P§6).
+fn rank(label: &str, needle: &str) -> Option<u8> {
+    let hay = label.to_lowercase();
+    let pos = hay.find(needle)?;
+    if pos == 0 {
+        Some(0)
+    } else if hay[..pos]
+        .chars()
+        .next_back()
+        .is_some_and(|c| !c.is_alphanumeric())
+    {
+        Some(1)
+    } else {
+        Some(2)
+    }
 }
 
 // ── input (P§5) ──────────────────────────────────────────────────────────────
@@ -762,9 +878,16 @@ fn handle_chrome(state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
         Chrome::Quit => state.quit = true,
         Chrome::Help => state.overlays.push(Overlay::Help),
         Chrome::Title => state.overlays.push(Overlay::Title),
-        Chrome::Search => state.overlays.push(Overlay::Search {
-            buffer: String::new(),
-        }),
+        Chrome::Search => {
+            // Search is the content surface (P§6, C4): `/` filters and ranks the row
+            // list, so it takes content focus wherever a rail view held it rather than
+            // jumping the tree cursor. A draw-view has no rows and simply shows an empty
+            // filter — it opts out of `/` by construction (P§6).
+            state.focus = Focus::Content;
+            state.overlays.push(Overlay::Search {
+                buffer: String::new(),
+            });
+        }
         Chrome::RecordsOnly => {
             if state.views[state.active].layout() == Layout::Rail {
                 state.rail.toggle_records_only();
@@ -829,6 +952,15 @@ fn undrill(state: &mut State) {
     state.focus = Focus::Content;
 }
 
+/// Rows the active row-view now shows for the held node, after the live search filter —
+/// `None` for a draw-view, which carries its own selection. The same fold `draw_rows` and
+/// `current_target` read, so the cursor clamps against the set they display (P§6).
+fn visible_row_count(state: &mut State) -> Option<usize> {
+    let node = state.rail.selected()?;
+    let rows = state.views[state.active].rows(&node)?;
+    Some(filtered(&rows, &state.filter).len())
+}
+
 fn motion(state: &mut State, nav: Nav) -> anyhow::Result<()> {
     let full = state.views[state.active].layout() == Layout::Full;
     if full || state.focus == Focus::Content {
@@ -838,7 +970,15 @@ fn motion(state: &mut State, nav: Nav) -> anyhow::Result<()> {
             return Ok(());
         }
         match nav {
-            Nav::Down => state.row = state.row.saturating_add(1),
+            // Clamp to the live filtered length, mirroring `Rail::down` — a reader
+            // (`draw_rows`, `current_target`) clamps too, but the raw counter drifting
+            // past the end is what makes `Up` lag after an over-scroll (P§6).
+            Nav::Down => {
+                state.row = match visible_row_count(state) {
+                    Some(len) => state.row.saturating_add(1).min(len.saturating_sub(1)),
+                    None => state.row.saturating_add(1), // draw-view: cursor is the view's
+                };
+            }
             Nav::Up => state.row = state.row.saturating_sub(1),
             _ => {}
         }
@@ -1412,18 +1552,15 @@ fn handle_tree_key(app: &mut impl App, state: &mut State, key: KeyEvent) {
     }
 }
 
-/// Search matches live (P§6) — and *whose* labels it matches follows focus.
+/// Search matches live (P§6, C4): each keystroke narrows and ranks the content row list,
+/// and resets the cursor so the top answer is under it. Content is the search surface —
+/// `Chrome::Search` took content focus, so this no longer branches on it.
 fn live_search(state: &mut State) {
     let Some(Overlay::Search { buffer }) = state.overlays.last() else {
         return;
     };
-    let needle = buffer.clone();
-    if state.focus == Focus::Rail {
-        state.rail.seek(&needle);
-    } else {
-        state.filter = needle;
-        state.row = 0;
-    }
+    state.filter = buffer.clone();
+    state.row = 0;
 }
 
 fn submit(
@@ -1436,11 +1573,9 @@ fn submit(
     };
     match overlay {
         Overlay::Search { buffer } => {
-            if state.focus == Focus::Rail {
-                state.rail.seek(&buffer);
-            } else {
-                state.filter = buffer;
-            }
+            // Content is the search surface (P§6, C4): the filter the live keystrokes
+            // built stays put on submit; there is no tree seek to commit.
+            state.filter = buffer;
             Ok(())
         }
         Overlay::Confirm {

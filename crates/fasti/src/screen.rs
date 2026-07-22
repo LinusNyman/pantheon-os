@@ -107,7 +107,21 @@ impl App for FastiApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        spans(&self.root, Some(node)).len() + occurrences(&self.root, Some(node)).len()
+        // Spans and events filed **at** this node, not the subtree under it — folded
+        // node-local so the rail reads each node once, never a whole subtree per ancestor
+        // (P§6, I1). A span is one entity file, so its ref set is the count; an event is
+        // a series, counted by its raw lines — the same tally `occurrences` made per node.
+        let store = store(&self.root);
+        let spans = store
+            .find_entities_local(node, Some(Fasti::SPAN), None)
+            .map_or(0, |refs| refs.len());
+        let events = store
+            .find_series_local(node, Some(Fasti::EVENT), None)
+            .unwrap_or_default()
+            .iter()
+            .map(|sref| store.read_series(sref).map_or(0, |lines| lines.len()))
+            .sum::<usize>();
+        spans + events
     }
 
     fn writer(&self) -> Writer {

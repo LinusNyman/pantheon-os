@@ -86,8 +86,12 @@ impl App for PensumApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        // Folded on the frame it is shown, kept nowhere (I1).
-        open_tasks(&self.root, Some(node)).len()
+        // The tasks filed **at** this node, not the subtree under it — folded node-local
+        // so the rail reads each node's series once, never re-reads a whole subtree per
+        // ancestor above it (P§6, I1).
+        Store::<Pensum>::new(self.root.clone())
+            .fold_local(node, None)
+            .map_or(0, |lines| lines.len())
     }
 
     fn writer(&self) -> Writer {

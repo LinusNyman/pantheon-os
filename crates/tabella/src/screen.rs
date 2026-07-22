@@ -79,7 +79,11 @@ impl App for TabellaApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        documents(&self.root, Some(node)).len()
+        // The documents filed **at** this node, not the subtree under it — a node-local
+        // `read_dir`, no body read, so the rail folds each node once (P§6, I1).
+        Store::<Tabella>::new(self.root.clone())
+            .find_documents_local(node, None)
+            .map_or(0, |refs| refs.len())
     }
 
     fn writer(&self) -> Writer {

@@ -174,6 +174,13 @@ impl View for Courses {
         Layout::Rail
     }
 
+    fn actions(&self) -> &[Action] {
+        // `a` records or re-marks a grade against the enrolment at the cursor's node — the
+        // form and relay were always wired (`add_form`, `on_action`); only this offering
+        // was missing, so the key sat dark (P§5, §19.8).
+        &[Action::Add]
+    }
+
     fn rows(&mut self, node: &Code) -> Option<Vec<Row>> {
         let spans = tessera::read(
             &self.root,

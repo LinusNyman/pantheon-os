@@ -32,6 +32,7 @@
 
 pub mod action;
 pub mod app;
+mod banner;
 pub mod ident;
 pub mod keymap;
 pub mod overlay;

@@ -26,11 +26,12 @@ use crate::theme::{self, Theme};
 /// A trait rather than two closures because both answers come from the *same*
 /// instrument, and two closures would each want a mutable borrow of it.
 ///
-/// They are separate on purpose. **`any` asks only *any?*** and drives the dim and the
-/// `.` collapse; **`count` asks how many** and drives the badge. An instrument whose
-/// count is costly overrides `any_at` to answer the dim without a full fold — collapse
-/// the two and that override becomes unreachable, and every instrument pays a full
-/// count for a yes/no.
+/// **`any` drives the dim and the `.` collapse; `count` drives the badge.** Both are the
+/// same node-local fold ([`App::count_at`](crate::App::count_at)) — `any` is just
+/// `count > 0` — and the adapter behind this trait memoizes it per frame, so a held node
+/// the badge shows is folded once, not once for the dim and again for the count. The fold
+/// is node-local, so it is cheap to ask of every visible node; that is what lets the two
+/// questions collapse onto one call without the tree walk paying for it (P§6).
 pub trait Presence {
     fn any(&mut self, node: &Code) -> bool;
     fn count(&mut self, node: &Code) -> usize;
@@ -218,20 +219,6 @@ impl Rail {
         self.records_only
     }
 
-    /// Move the cursor to the first node whose code or label matches — what `/` does
-    /// when the rail has focus (P§6).
-    pub fn seek(&mut self, needle: &str) {
-        let needle = needle.to_lowercase();
-        if needle.is_empty() {
-            return;
-        }
-        if let Some(found) = self.visible().iter().position(|v| {
-            v.node.code.as_str().contains(&needle) || v.node.label.to_lowercase().contains(&needle)
-        }) {
-            self.cursor = found;
-        }
-    }
-
     /// Draw the rail.
     ///
     /// [`Presence`] is asked only for the lines actually on screen, and `count` only
@@ -246,7 +233,9 @@ impl Rail {
     ) {
         let visible = self.visible();
         let height = area.height as usize;
-        let first = self.cursor.saturating_sub(height.saturating_sub(1));
+        // The same scrolloff the content list keeps, so the tree scrolls before the
+        // cursor hits an edge and reads identically to the rows beside it (P§6, I3, C3).
+        let first = crate::runtime::scroll_first(self.cursor, visible.len(), height);
         let mut lines = Vec::new();
 
         for (index, entry) in visible.iter().enumerate().skip(first).take(height) {

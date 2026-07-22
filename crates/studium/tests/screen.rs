@@ -251,6 +251,80 @@ fn about(value: &Value, target: f64) -> bool {
     value.as_f64().is_some_and(|v| (v - target).abs() < 0.001)
 }
 
+/// C2: `a` on the courses view opens the grade form and relays `ann add`, recording a mark
+/// on the enrolment under the rail cursor (§19.8, §12).
+///
+/// The form and its relay were always wired; only the Courses view's action offering was
+/// missing, so `a` sat dark. Driven end to end here: land on the studies node, fill the
+/// form, submit, and read the fact back through `ann` — a keystroke in the lens becoming a
+/// write by another process.
+fn records_a_grade_through_the_lens(root: &Path) {
+    // Land the cursor on the studies node `asd`, where the enrolments live: a fresh launch
+    // expands only the top sphere, so `a` (actio) is open and `as` (scientia) is not — step
+    // down onto `as`, expand it, then step in to `asd`.
+    let on_asd = "2<down><right><down>";
+    let at_asd = porticus::drive(
+        &mut Studium::new(root),
+        root,
+        &porticus::keys(on_asd),
+        100,
+        24,
+    )
+    .expect("the lens drives");
+    assert!(
+        at_asd.contains("mekanik"),
+        "the rail is on `asd`, its enrolments folded into the courses view: {at_asd}"
+    );
+
+    // `a` raises the grade form: its `grade`/`credits` field labels show — words the
+    // read-only course rows never print (they carry the grade *value*, not the word).
+    let form = porticus::drive(
+        &mut Studium::new(root),
+        root,
+        &porticus::keys(&format!("{on_asd}a")),
+        100,
+        24,
+    )
+    .expect("the lens drives");
+    assert!(
+        form.contains("grade") && form.contains("credits"),
+        "`a` on the courses view opens the grade form (it was dark before C2): {form}"
+    );
+
+    // Fill it for a mekanik retake and submit. Add does not confirm, so Enter relays at
+    // once (P§5); the fields are course · grade · credits · date, Tab between them. This
+    // records `ann add -H asd mekanik A 7.5 --at 250701` — an A after the seeded B.
+    porticus::drive(
+        &mut Studium::new(root),
+        root,
+        &porticus::keys(&format!("{on_asd}amekanik<tab>A<tab>7.5<tab>250701<enter>")),
+        100,
+        24,
+    )
+    .expect("the lens drives the add");
+
+    // Read the fact back through the core: the present is the latest reading (I1), so
+    // mekanik now grades A, not the seeded B.
+    let out = Command::new(bin_dir().join("ann"))
+        .arg("-C")
+        .arg(root)
+        .args(["get", "mekanik", "-f", "json"])
+        .output()
+        .expect("ann runs");
+    assert!(
+        out.status.success(),
+        "ann get mekanik: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let present: Value = serde_json::from_slice(&out.stdout).expect("ann emits JSON");
+    assert_eq!(
+        present["data"]["values"][0].as_str(),
+        Some("A"),
+        "`a` in the lens recorded the retake through `ann` — mekanik's present grade is now \
+         the A just entered, not the seeded B: {present}"
+    );
+}
+
 /// One test on purpose: it mutates `PATH` once (a process-global the harness must not
 /// race), then folds a rich tree, an empty one, and the real screen over that one `PATH`.
 #[test]
@@ -332,6 +406,9 @@ fn the_gpa_folds_across_three_cores_and_the_screen_shows_it() {
         tasks.contains("agenda"),
         "the third view is the tasks agenda: {tasks}"
     );
+
+    // ── C2: `a` on the courses view records a grade (§19.8, §12) ──────────────
+    records_a_grade_through_the_lens(&root);
 
     // ── an empty scope is no GPA, not a zero (§19.4) ─────────────────────────
     // A studies life with no grade fact yet: the fold ran and found nothing to weigh, so
