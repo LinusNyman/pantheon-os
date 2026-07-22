@@ -113,16 +113,16 @@ impl App for MappaApp {
             (Action::Add | Action::QuickAdd, Target::Node { node, .. }) => {
                 Some(Invocation::new("map", ["add", "-H", node.as_str()]))
             }
-            (Action::Edit, Target::Row(RecordRef { home, key })) => {
+            (Action::Edit, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("map", ["edit", "-H", home.as_str(), key]))
             }
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("map", ["rm", "-H", home.as_str(), key]))
             }
-            (Action::Rename, Target::Row(RecordRef { home, key })) => {
+            (Action::Rename, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("map", ["rename", "-H", home.as_str(), key]))
             }
-            (Action::Move, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Move, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "map",
                 ["move", "-H", home.as_str(), key, "--to"],
             )),
@@ -186,10 +186,7 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
         .into_iter()
         .map(|(eref, _)| Row {
             label: format!("{}   {}", eref.slug, eref.kind),
-            target: Target::Row(RecordRef {
-                home: eref.home,
-                key: eref.slug,
-            }),
+            target: Target::Row(RecordRef::new(eref.home, eref.slug)),
             when: None,
         })
         .collect()

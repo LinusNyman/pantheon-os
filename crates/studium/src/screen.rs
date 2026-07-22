@@ -139,11 +139,11 @@ impl App for Studium {
                 Some(Invocation::new(ANNALES, ["add", "-H", node.as_str()]))
             }
             // Mark a task done — the Atrium relay unchanged (§19.8, §7.2).
-            (Action::Done, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Done, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 PENSUM,
                 ["edit", "-H", home.as_str(), key, "--done"],
             )),
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new(PENSUM, ["rm", "-H", home.as_str(), key]))
             }
             _ => None,
@@ -225,10 +225,7 @@ impl Courses {
 
         Some(Row {
             label: format!("{slug:<24}  {grade:<4}  {period}"),
-            target: Target::Row(RecordRef {
-                home,
-                key: slug.to_string(),
-            }),
+            target: Target::Row(RecordRef::new(home, slug.to_string())),
             when: None,
         })
     }
@@ -255,10 +252,7 @@ fn tasks(root: &std::path::Path) -> Vec<Row> {
                 .map_or_else(|| home.as_str().to_owned(), Clone::clone);
             Some(Row {
                 label: format!("{node}   {}", porticus::prettify(key)),
-                target: Target::Row(RecordRef {
-                    home,
-                    key: key.to_string(),
-                }),
+                target: Target::Row(RecordRef::new(home, key.to_string())),
                 when: row["data"]["done"].as_str().map(str::to_owned),
             })
         })

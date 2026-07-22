@@ -185,6 +185,9 @@ where
         self.last_node.clone().map(|node| Target::Node {
             node,
             at: Some(key_of(self.cursor)),
+            // The node is overwritten by layout and so is the core, which the *view*
+            // declares (`View::core`) rather than a cell address (P§7).
+            core: None,
         })
     }
 

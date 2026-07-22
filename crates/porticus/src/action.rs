@@ -105,11 +105,43 @@ impl Action {
 
 /// A record's address — its home rides *with* it, since an Agenda's rows are
 /// cross-node and each must relay to its own node (P§7).
+///
+/// **And its core rides with it too.** A cross-core lens folds rows from several
+/// binaries into one list (§12), and a relay has to reach the binary that owns the row
+/// — which an address of home+key alone cannot say. Speculum used to recover it by
+/// re-reading every dated core and matching home/key, a fold per keystroke that two
+/// cores filing one date-key at one node would have misrouted. The row knows where it
+/// came from; this is where it says so.
+///
+/// `None` is the honest answer for a **core's own TUI**, which has exactly one core and
+/// names it in `on_action` without asking (I5 — a lens is the only reader here).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordRef {
     pub home: Code,
     /// The record's key or slug (§5.4) — its identity and its name at once.
     pub key: String,
+    /// The three-char short of the core that owns this record — `pen`, `alb` (§7.3).
+    pub core: Option<String>,
+}
+
+impl RecordRef {
+    /// An address within the caller's own core — the one every core's own TUI builds.
+    pub fn new(home: Code, key: impl Into<String>) -> Self {
+        Self {
+            home,
+            key: key.into(),
+            core: None,
+        }
+    }
+
+    /// An address that names its core, for a lens whose rows span several (§12).
+    pub fn in_core(core: impl Into<String>, home: Code, key: impl Into<String>) -> Self {
+        Self {
+            home,
+            key: key.into(),
+            core: Some(core.into()),
+        }
+    }
 }
 
 /// What an action acts on (P§3).
@@ -126,7 +158,27 @@ pub enum Target {
         /// A dated Full view's cell date, so `a` on a calendar keeps the day you
         /// pointed at rather than defaulting to today (§7.3).
         at: Option<String>,
+        /// The core a *new* record here belongs to, taken from the active view's
+        /// [`View::core`](crate::view::View::core) declaration.
+        ///
+        /// A row says its own core (it was folded from one); an add has no record yet,
+        /// so the **view** answers for it — which is what lets one lens offer `a` on a
+        /// people list and on a documents list and route each to its own binary (§12).
+        /// `None` wherever the view declared none, the case of every core's own TUI.
+        core: Option<String>,
     },
+}
+
+impl Target {
+    /// A bare node target — no date, no core, the shape most callers want.
+    #[must_use]
+    pub fn node(node: Code) -> Self {
+        Target::Node {
+            node,
+            at: None,
+            core: None,
+        }
+    }
 }
 
 /// A built CLI invocation — the same command a hand would type (§7.2).

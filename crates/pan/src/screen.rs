@@ -117,7 +117,7 @@ impl App for PanApp {
             // The finding's fix rides in the row target as (code, normalized-label), so
             // this relays it verbatim (§10.2). A finding with no fix carries a node
             // target this arm does not match, so `d` there is a no-op.
-            (Action::Done, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Done, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "pan",
                 ["rename", home.as_str(), "--label", key.as_str()],
             )),
@@ -359,10 +359,8 @@ fn row_of(finding: &Finding) -> Row {
 /// `Target::Row` carrying `(code, normalized-label)` so `d` relays it. Anything else (no
 /// fix, or a shape this does not recognise) targets a bare node the apply arm ignores.
 fn fix_target(finding: &Finding) -> Target {
-    let placeholder = Target::Node {
-        node: Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")),
-        at: None,
-    };
+    let placeholder =
+        Target::node(Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")));
     let Some(fix) = &finding.fix else {
         return placeholder;
     };
@@ -370,10 +368,7 @@ fn fix_target(finding: &Finding) -> Target {
     // display-only until it is taught here.
     match fix.split_whitespace().collect::<Vec<_>>().as_slice() {
         ["pan", "rename", code, "--label", label] => match Code::parse(code) {
-            Ok(home) => Target::Row(RecordRef {
-                home,
-                key: (*label).to_owned(),
-            }),
+            Ok(home) => Target::Row(RecordRef::new(home, (*label).to_owned())),
             Err(_) => placeholder,
         },
         _ => placeholder,
@@ -480,7 +475,7 @@ mod tests {
         let root = fresh_root("dark");
         let mut app = PanApp { root: root.clone() };
         let node = pantheon::Code::parse("a").unwrap();
-        let target = porticus::Target::Node { node, at: None };
+        let target = porticus::Target::node(node);
 
         for action in [Action::Edit, Action::Rename, Action::Remove] {
             assert!(
@@ -496,10 +491,10 @@ mod tests {
         }
 
         // The validate tab's `d` applies a finding's fix, carried as (code, label).
-        let fix = porticus::Target::Row(porticus::RecordRef {
-            home: pantheon::Code::parse("ax").unwrap(),
-            key: "bad_label".into(),
-        });
+        let fix = porticus::Target::Row(porticus::RecordRef::new(
+            pantheon::Code::parse("ax").unwrap(),
+            "bad_label",
+        ));
         assert!(
             app.on_action(Action::Done, &fix).is_some(),
             "`d` applies a finding fix from the validate tab (§10.2)"

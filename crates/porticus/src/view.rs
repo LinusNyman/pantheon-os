@@ -138,6 +138,16 @@ pub trait View {
         &[]
     }
 
+    /// The core a **new** record on this view belongs to — its three-char short (§7.3).
+    ///
+    /// Only a lens needs this, and only for `a`: a row carries its own core in its
+    /// [`RecordRef`], but an add has no record yet, so the view answers for it and
+    /// Porticus stamps the [`Target::Node`] it builds. A core's own TUI declares
+    /// nothing — it has one core and names it in `on_action` (I5).
+    fn core(&self) -> Option<&str> {
+        None
+    }
+
     /// Tier-3 keys and their labels, **declared** so Porticus can route them, keep
     /// them off Tiers 1 and 2, and list them in Help (P§4).
     fn nav_keys(&self) -> &[(char, &'static str)] {

@@ -88,10 +88,10 @@ impl App for AnnalesApp {
             (Action::Add | Action::QuickAdd, Target::Node { node, .. }) => {
                 Some(Invocation::new("ann", ["add", "-H", node.as_str()]))
             }
-            (Action::Edit, Target::Row(RecordRef { home, key })) => {
+            (Action::Edit, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("ann", ["edit", "-H", home.as_str(), key]))
             }
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("ann", ["rm", "-H", home.as_str(), key]))
             }
             // A reading has no name of its own to rename and no home but the one it was
@@ -169,10 +169,7 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
         .into_iter()
         .map(|(home, series, key, values)| Row {
             label: format!("{series}   {values}"),
-            target: Target::Row(RecordRef {
-                home,
-                key: key.clone(),
-            }),
+            target: Target::Row(RecordRef::new(home, key.clone())),
             when: Some(key),
         })
         .collect()

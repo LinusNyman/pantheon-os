@@ -108,22 +108,22 @@ impl App for PensumApp {
                 // Porticus appends the typed name; a fresh add runs free (§7.3).
                 Some(Invocation::new("pen", ["add", "-H", node.as_str()]))
             }
-            (Action::Done, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Done, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "pen",
                 ["edit", "-H", home.as_str(), key, "--done"],
             )),
             // The editor form: no value inline, so the hand's own editor opens and the
             // session *is* the confirm (§7.3). Porticus suspends around it (P§10).
-            (Action::Edit, Target::Row(RecordRef { home, key })) => {
+            (Action::Edit, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("pen", ["edit", "-H", home.as_str(), key]))
             }
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("pen", ["rm", "-H", home.as_str(), key]))
             }
-            (Action::Rename, Target::Row(RecordRef { home, key })) => {
+            (Action::Rename, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("pen", ["rename", "-H", home.as_str(), key]))
             }
-            (Action::Move, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Move, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "pen",
                 ["move", "-H", home.as_str(), key, "--to"],
             )),
@@ -232,7 +232,7 @@ fn row(labels: &std::collections::HashMap<String, String>, home: Code, key: Stri
     let task = porticus::prettify(&key);
     Row {
         label: format!("{node}   {task}"),
-        target: Target::Row(RecordRef { home, key }),
+        target: Target::Row(RecordRef::new(home, key)),
         when: None,
     }
 }

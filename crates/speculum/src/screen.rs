@@ -21,7 +21,8 @@ use crate::mosaic::Mosaic;
 /// The cores whose **dated points** the horizon folds — logs, events, balances. Each
 /// row their `list` returns carries `core`/`home`/`key` (§7.2); a row whose key is a
 /// date lands on the horizon, one whose key is a slug (a task, a place, a span) does
-/// not. The order is the routing priority (see [`Speculum::core_of`]).
+/// not. The order is only the fold's order: a row remembers the core it came from
+/// ([`RecordRef::in_core`]), so nothing about routing depends on it.
 const DATED: &[&str] = &[ANNALES, FASTI, RATIONES];
 
 /// Open the mosaic.
@@ -50,28 +51,6 @@ impl Speculum {
         Self {
             root: root.to_path_buf(),
         }
-    }
-
-    /// Which core owns the record at `(home, key)`.
-    ///
-    /// A cross-core lens must route a relay to the right binary, but a [`RecordRef`]
-    /// carries no core — so the owner is recovered by re-reading the dated sources and
-    /// matching `home`/`key` (I5, §12). The first source that holds it wins, which is
-    /// why [`DATED`]'s order is a priority: were two cores to file a record at the same
-    /// node under the same date-key, the relay would go to the earlier one. (That the
-    /// `RecordRef` has no core slot is a Porticus gap this works around; see the crate's
-    /// PR notes.)
-    fn core_of(&self, home: &str, key: &str) -> Option<&'static str> {
-        for short in DATED {
-            if let Some(Value::Array(rows)) = tessera::read(&self.root, short, &["list"])
-                && rows.iter().any(|row| {
-                    row["home"].as_str() == Some(home) && row["key"].as_str() == Some(key)
-                })
-            {
-                return Some(short);
-            }
-        }
-        None
     }
 }
 
@@ -161,12 +140,16 @@ impl App for Speculum {
     fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {
         // Only the app knows its verb grammar, because only the app authors the write
         // (I2). Porticus owns the confirm and the relay and knows none of this.
-        let Target::Row(RecordRef { home, key }) = target else {
+        let Target::Row(RecordRef { home, key, core }) = target else {
             // Speculum adds nothing: it owns no primitive, so a new record is a core's
             // to create, not a mirror's (§12).
             return None;
         };
-        let short = self.core_of(home.as_str(), key)?;
+        // The row *says* which core it came from (G8): the fold that built it read that
+        // core's `list`, so the relay reaches the binary that owns the reading rather
+        // than the first of several that happens to hold the same date-key at the same
+        // node — which is what re-reading every dated core to match could not promise.
+        let short = core.as_deref()?;
         let home = home.as_str();
         match action {
             // `e` with no value inline is the editor form (§7.3): the reading opens in
@@ -216,10 +199,9 @@ fn dated_rows(root: &std::path::Path) -> Vec<Row> {
             let home_str = home.as_str();
             out.push(Row {
                 label: format!("{core:<9} {what}   {home_str}{refs}"),
-                target: Target::Row(RecordRef {
-                    home,
-                    key: key.to_string(),
-                }),
+                // The row carries the short it was folded from, so a relay routes by
+                // provenance and never by a second guess (§12, P§7).
+                target: Target::Row(RecordRef::in_core(*short, home, key.to_string())),
                 when: Some(key.to_string()),
             });
         }

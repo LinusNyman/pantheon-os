@@ -1265,6 +1265,7 @@ fn rooted(invocation: &Invocation, root: &std::path::Path) -> Invocation {
 fn target_for(state: &mut State, action: Action) -> Option<Target> {
     // A scoped action presupposes a row source, so it is a row-view's alone (P§7).
     let node = state.rail.selected()?;
+    let core = view_core(state);
     match action {
         Action::Add => {
             // A dated Full view fills the `at` from its own cell, so `a` on a calendar
@@ -1273,13 +1274,22 @@ fn target_for(state: &mut State, action: Action) -> Option<Target> {
                 Some(Target::Node { at, .. }) => at,
                 _ => None,
             };
-            Some(Target::Node { node, at })
+            Some(Target::Node { node, at, core })
         }
-        Action::DoneAll | Action::RemoveAll | Action::QuickAdd => {
-            Some(Target::Node { node, at: None })
-        }
+        Action::DoneAll | Action::RemoveAll | Action::QuickAdd => Some(Target::Node {
+            node,
+            at: None,
+            core,
+        }),
         _ => current_target(state),
     }
+}
+
+/// The active view's declared core (P§3) — what a *new* record here would belong to.
+///
+/// A row carries its own; only an add needs asking, and only a lens ever answers.
+fn view_core(state: &State) -> Option<String> {
+    state.views[state.active].core().map(str::to_owned)
 }
 
 /// The focused row's target — bound to the **record key captured at render**, never
@@ -1290,13 +1300,18 @@ fn target_for(state: &mut State, action: Action) -> Option<Target> {
 /// different record, because the key travelled with the row.
 fn current_target(state: &mut State) -> Option<Target> {
     let node = state.rail.selected()?;
+    let core = view_core(state);
     let view = &mut state.views[state.active];
     let Some(rows) = view.rows(&node) else {
         // **`None` is a draw-view, not an empty one** (P§3). A draw/Full view carries
         // its own selection and names it as an address — a Timeline's focused bar. One
         // that names none is *about the selected node* — `pan`'s tree tab is the case —
         // so the node is the subject.
-        return view.target().or(Some(Target::Node { node, at: None }));
+        return view.target().or(Some(Target::Node {
+            node,
+            at: None,
+            core,
+        }));
     };
     // A **row-view's** focused row wins over any address the view also names. A dated
     // Full view names its *cell* so `a` can date the add (P§7, `target_for`), and that
@@ -1545,7 +1560,18 @@ fn handle_tree_key(app: &mut impl App, state: &mut State, key: KeyEvent) {
             };
             state.overlays.pop();
             if let Some(node) = node {
-                open_add_form(app, state, Target::Node { node, at: None });
+                // The home is the modal's, the core is still the view's: `A` differs
+                // from `a` only in how the node is chosen (P§4).
+                let core = view_core(state);
+                open_add_form(
+                    app,
+                    state,
+                    Target::Node {
+                        node,
+                        at: None,
+                        core,
+                    },
+                );
             }
         }
         _ => {}

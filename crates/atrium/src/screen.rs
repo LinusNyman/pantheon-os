@@ -101,7 +101,7 @@ impl App for Atrium {
     fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {
         // Only the app knows its verb grammar, because only the app authors the write
         // (I2). Porticus owns the confirm and the relay and knows none of this.
-        let Target::Row(RecordRef { home, key }) = target else {
+        let Target::Row(RecordRef { home, key, .. }) = target else {
             // Atrium adds nothing: it owns no primitive, so a new record is a core's to
             // create, not a dashboard's (§12).
             return None;
@@ -145,10 +145,7 @@ fn tasks(root: &std::path::Path) -> Vec<Row> {
                 .map_or_else(|| home.as_str().to_owned(), Clone::clone);
             Some(Row {
                 label: format!("{node}   {}{refs}", porticus::prettify(key)),
-                target: Target::Row(RecordRef {
-                    home,
-                    key: key.to_string(),
-                }),
+                target: Target::Row(RecordRef::new(home, key.to_string())),
                 when: row["data"]["done"].as_str().map(str::to_owned),
             })
         })

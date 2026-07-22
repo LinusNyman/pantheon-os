@@ -77,10 +77,7 @@ impl App for Fake {
 fn row(key: &str, home: &str) -> Row {
     Row {
         label: key.to_string(),
-        target: Target::Row(RecordRef {
-            home: Code::parse(home).unwrap(),
-            key: key.to_string(),
-        }),
+        target: Target::Row(RecordRef::new(Code::parse(home).unwrap(), key.to_string())),
         when: None,
     }
 }
@@ -219,6 +216,99 @@ fn a_opens_the_default_add_form() {
         frame.contains("name"),
         "the default name field is shown: {frame}"
     );
+}
+
+/// A target names its core, so **one lens can act on several** (§12, P§7).
+///
+/// A row carries the core it was folded from; an add has no record yet, so the *view*
+/// declares it and Porticus stamps the [`Target::Node`] it builds — for `a` and for the
+/// pick-a-home modal's `A` alike. Without this a cross-core lens had to guess which
+/// binary a keystroke meant, which is what Speculum's re-read-every-core hack was.
+#[test]
+fn a_target_names_the_core_its_view_declared() {
+    /// Records what `on_action` was handed, so the test asserts the *target* rather
+    /// than a rendered string.
+    struct CrossCore {
+        seen: Option<(String, Option<String>)>,
+    }
+    impl App for CrossCore {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![
+                Box::new(
+                    TreeFile::of(|node: &Code| vec![people_row("mara", node.as_str())])
+                        .offering(&[Action::Add, Action::Remove])
+                        .called("people")
+                        .in_core("alb"),
+                ),
+                Box::new(
+                    TreeFile::of(|_: &Code| Vec::new())
+                        .offering(&[Action::Add])
+                        .called("documents")
+                        .in_core("tab"),
+                ),
+            ]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {
+            let core = match target {
+                Target::Row(record) => record.core.clone(),
+                Target::Node { core, .. } => core.clone(),
+            };
+            self.seen = Some((action.label().to_owned(), core));
+            None
+        }
+    }
+
+    let root = fresh_root();
+
+    // `a` on the people list: the add is Album's, because that view said so.
+    let mut app = CrossCore { seen: None };
+    porticus::drive(&mut app, &root, &porticus::keys("amara<enter>"), 72, 12).unwrap();
+    assert_eq!(
+        app.seen,
+        Some(("add".to_owned(), Some("alb".to_owned()))),
+        "the add target carries the view's core"
+    );
+
+    // The second view declares another — one lineup, two binaries (§12).
+    let mut app = CrossCore { seen: None };
+    porticus::drive(&mut app, &root, &porticus::keys("2anote<enter>"), 72, 12).unwrap();
+    assert_eq!(
+        app.seen,
+        Some(("add".to_owned(), Some("tab".to_owned()))),
+        "the second view's add reaches its own core"
+    );
+
+    // A **row** answers for itself: its core rode with it out of the fold, so a relay
+    // on an existing record never consults the view at all.
+    let mut app = CrossCore { seen: None };
+    porticus::drive(&mut app, &root, &porticus::keys("x"), 72, 12).unwrap();
+    assert_eq!(
+        app.seen,
+        Some(("remove".to_owned(), Some("map".to_owned()))),
+        "the row's own core wins over the view's"
+    );
+}
+
+/// A row whose core is not its view's — what a cross-core fold produces.
+fn people_row(key: &str, home: &str) -> Row {
+    Row {
+        label: key.to_string(),
+        target: Target::Row(RecordRef::in_core(
+            "map",
+            Code::parse(home).unwrap(),
+            key.to_string(),
+        )),
+        when: None,
+    }
 }
 
 /// `A` (quick add) opens the tree as a modal to pick a home (P§4) — replacing the old
@@ -887,10 +977,7 @@ fn enter_pins_a_row_into_the_detail_view() {
     );
 
     // Pinned, it folds that record.
-    lineup[1].pin(Some(RecordRef {
-        home: node.clone(),
-        key: "mara".into(),
-    }));
+    lineup[1].pin(Some(RecordRef::new(node.clone(), "mara")));
     let buffer = {
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8)).unwrap();
         term.draw(|f| {
@@ -1217,20 +1304,14 @@ fn a_timeline_bar_carries_its_own_home() {
                             label: "mvp_phase".into(),
                             from: "260101".into(),
                             to: Some("260630".into()),
-                            home: RecordRef {
-                                home: Code::parse("ac").unwrap(),
-                                key: "mvp_phase".into(),
-                            },
+                            home: RecordRef::new(Code::parse("ac").unwrap(), "mvp_phase"),
                         },
                         CardSpan {
                             label: "residence".into(),
                             from: "260201".into(),
                             // Open: drawn to the range's right edge (§8.4).
                             to: None,
-                            home: RecordRef {
-                                home: Code::parse("cs").unwrap(),
-                                key: "residence".into(),
-                            },
+                            home: RecordRef::new(Code::parse("cs").unwrap(), "residence"),
                         },
                     ]
                 })

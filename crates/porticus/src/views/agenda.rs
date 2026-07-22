@@ -16,6 +16,7 @@ pub struct Agenda<F> {
     fold: F,
     actions: Vec<Action>,
     empty: &'static str,
+    core: Option<&'static str>,
 }
 
 impl<F> Agenda<F>
@@ -31,7 +32,18 @@ where
             fold,
             actions: Vec::new(),
             empty: "nothing scheduled",
+            core: None,
         }
+    }
+
+    /// The core a **new** record on this list belongs to (P§3, §12).
+    ///
+    /// A row says its own core; an add has no record yet, so the view answers for it and
+    /// Porticus stamps the target it builds. Only a lens needs this (I5).
+    #[must_use]
+    pub fn in_core(mut self, short: &'static str) -> Self {
+        self.core = Some(short);
+        self
     }
 
     #[must_use]
@@ -75,6 +87,10 @@ where
 
     fn actions(&self) -> &[Action] {
         &self.actions
+    }
+
+    fn core(&self) -> Option<&str> {
+        self.core
     }
 
     fn navigate(&mut self, _nav: Nav) -> crate::Handled {

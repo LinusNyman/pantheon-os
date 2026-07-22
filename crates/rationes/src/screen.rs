@@ -107,16 +107,16 @@ impl App for RationesApp {
             (Action::Add | Action::QuickAdd, Target::Node { node, .. }) => {
                 Some(Invocation::new("rat", ["add", "-H", node.as_str()]))
             }
-            (Action::Edit, Target::Row(RecordRef { home, key })) => {
+            (Action::Edit, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("rat", ["edit", "-H", home.as_str(), key]))
             }
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("rat", ["rm", "-H", home.as_str(), key]))
             }
-            (Action::Rename, Target::Row(RecordRef { home, key })) => {
+            (Action::Rename, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("rat", ["rename", "-H", home.as_str(), key]))
             }
-            (Action::Move, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Move, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "rat",
                 ["move", "-H", home.as_str(), key, "--to"],
             )),
@@ -206,10 +206,7 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
                 .map_or_else(String::new, |(_, amount)| format!("   {amount}"));
             Row {
                 label: format!("{}   {}{figure}", eref.slug, eref.kind),
-                target: Target::Row(RecordRef {
-                    home: eref.home,
-                    key: eref.slug,
-                }),
+                target: Target::Row(RecordRef::new(eref.home, eref.slug)),
                 when: None,
             }
         })

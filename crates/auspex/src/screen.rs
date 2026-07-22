@@ -165,10 +165,7 @@ impl View for RulesTab {
                     label: label_for(rule),
                     // The scope is the rule's home, so an action would relay to the
                     // right node the day one is offered (P§7).
-                    target: Target::Row(RecordRef {
-                        home: rule.scope.clone(),
-                        key: rule.name.clone(),
-                    }),
+                    target: Target::Row(RecordRef::new(rule.scope.clone(), rule.name.clone())),
                     when: None,
                 })
                 .collect(),
