@@ -9,6 +9,10 @@ use serde_json::json;
 
 /// A fold is a grid: envelope keys first in reading order, `data`'s keys hoisted into
 /// columns of their own — which is the whole reason to render a table at all.
+///
+/// The `core`/`home`/`kind` columns are **constant** across both rows here, so they
+/// carry no information and are elided at the TTY (P3, see [`a_constant_column_is_dropped`]);
+/// what is left is the identity `KEY`, the varying `REFS`, and the hoisted `DONE`.
 #[test]
 fn a_fold_hoists_data_into_columns() {
     let value = json!([
@@ -18,11 +22,64 @@ fn a_fold_hoists_data_into_columns() {
     assert_eq!(
         render(&value),
         "\
-CORE    HOME  KIND  KEY        REFS        DONE
-pensum  ac    task  buy_milk               260719
-pensum  ac    task  call_alex  album:alex
+KEY        REFS        DONE
+buy_milk               260719
+call_alex  album:alex
 "
     );
+}
+
+/// A column constant across every row carries no information and is dropped at the TTY
+/// (P3): `pen ls` shows only what varies. The **identity** column stays even were it
+/// constant, and a single-row list keeps everything (that is what
+/// [`a_single_row_keeps_its_constant_columns`] pins). Piped output is JSON and unaffected.
+#[test]
+fn a_constant_column_is_dropped() {
+    let value = json!([
+        {"core":"pensum","home":"ac","kind":"task","key":"buy_milk"},
+        {"core":"pensum","home":"ac","kind":"task","key":"call_alex"},
+    ]);
+    let out = render(&value);
+    assert!(
+        !out.contains("CORE"),
+        "the constant core column is dropped: {out}"
+    );
+    assert!(
+        !out.contains("KIND"),
+        "the constant kind column is dropped: {out}"
+    );
+    assert!(out.contains("KEY"), "the identity column stays: {out}");
+    assert!(
+        out.contains("buy_milk") && out.contains("call_alex"),
+        "the varying values remain: {out}"
+    );
+}
+
+/// The drop is **general, never per-core** (I5): a two-shape core's `kind` varies across
+/// rows, so it stays — for free, no core knowledge in the spine.
+#[test]
+fn a_varying_column_is_kept() {
+    let value = json!([
+        {"core":"fasti","kind":"span","slug":"enrol"},
+        {"core":"fasti","kind":"event","slug":"exam"},
+    ]);
+    let out = render(&value);
+    assert!(out.contains("KIND"), "a varying kind is kept: {out}");
+    assert!(
+        !out.contains("CORE"),
+        "the constant core still drops: {out}"
+    );
+}
+
+/// A **single-row** list keeps every column even when each is trivially "constant" — a
+/// one-record list must still show what it is (P3), so the drop only fires with rows to
+/// compare.
+#[test]
+fn a_single_row_keeps_its_constant_columns() {
+    let value = json!([{"core":"pensum","home":"ac","kind":"task","key":"buy_milk"}]);
+    let out = render(&value);
+    assert!(out.contains("CORE"), "one row shows what it is: {out}");
+    assert!(out.contains("KIND"), "{out}");
 }
 
 /// A column a row does not carry is **blank**, not `null`. A fold spans nodes, so an

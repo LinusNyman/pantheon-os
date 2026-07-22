@@ -135,8 +135,34 @@ fn columns(rows: &[Value]) -> Vec<String> {
             .position(|known| known == key)
             .unwrap_or(usize::MAX)
     });
+
+    // Drop an envelope column that carries no information: identical across every row,
+    // and not the record's identity (`slug`/`key`, its name at once, §5.4). A `pen ls`
+    // need not repeat `pensum`/`task` on every line — but a **single-row** list keeps
+    // every column, since it must still show what it is, so this only fires with rows to
+    // compare (§7.3, §8.7, P3). It is general, never per-core (I5): a two-shape core's
+    // `kind` varies and so stays, for free. `data`'s hoisted columns are never dropped —
+    // they are the record itself — and `-f json` shows the full envelope regardless (I4).
+    if rows.len() > 1 {
+        envelope
+            .retain(|key| matches!(key.as_str(), "slug" | "key") || !constant_column(rows, key));
+    }
+
     envelope.extend(hoisted);
     envelope
+}
+
+/// Whether every row renders the same cell for this (non-`data`) envelope key —
+/// treating an absent key as a blank cell, exactly as [`render_row`] does, so a key
+/// some rows omit and others carry blank counts as constant.
+fn constant_column(rows: &[Value], key: &str) -> bool {
+    let cell = |row: &Value| {
+        row.as_object()
+            .and_then(|object| object.get(key))
+            .map_or(String::new(), scalar)
+    };
+    let first = cell(&rows[0]);
+    rows.iter().all(|row| cell(row) == first)
 }
 
 /// This row's cell for every column. A key the row does not carry is blank, not
