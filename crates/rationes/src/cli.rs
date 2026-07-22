@@ -170,13 +170,20 @@ enum Cmd {
     },
     /// Remove a holding and its balance series, or one reading with `-a` (§7.2, §18).
     Rm { slug: String },
-    /// Every holding across the subtree, each with its **derived** latest balance
-    /// (§7.2, I1). `-k` filters; `--net` folds them to net worth instead.
+    /// Every holding across the subtree, or one node with `--here`, each with its
+    /// **derived** latest balance (§7.2, I1). `-k` filters; `--net` folds them to net
+    /// worth instead.
     #[command(alias = "ls")]
     List {
+        /// The node to fold, as a bare code — sugar for `-H` (§7.3).
+        #[arg(value_name = "HOME")]
+        node: Option<String>,
         /// Net worth: the latest balances summed by currency, never stored (§8.3, I1).
         #[arg(long = "net")]
         net: bool,
+        /// Fold this node alone, not its subtree (§7.2).
+        #[arg(short = 'l', long = "here")]
+        here: bool,
     },
     /// One holding by slug, with its derived latest balance (§7.2, I1).
     Get { slug: String },
@@ -285,7 +292,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
         Cmd::Move { slug, to } => cmd_move(cli, slug, to),
         Cmd::Rm { slug } => cmd_rm(cli, slug),
-        Cmd::List { net } => cmd_list(cli, *net),
+        Cmd::List { net, node, here } => cmd_list(cli, *net, node.as_deref(), *here),
         Cmd::Get { slug } => cmd_get(cli, slug),
         Cmd::Series { tokens, from, to } => cmd_series(cli, tokens, from.as_deref(), to.as_deref()),
         Cmd::Where { slug } => cmd_where(cli, slug),
@@ -788,17 +795,23 @@ fn rm_reading(cli: &Cli, ctx: &Ctx, slug: &str, at: &str) -> Result<Response> {
 
 /// Every holding across the subtree, each carrying its **derived** latest balance
 /// (§7.2, I1) — or, with `--net`, those balances folded to net worth.
-fn cmd_list(cli: &Cli, net: bool) -> Result<Response> {
+fn cmd_list(cli: &Cli, net: bool, node: Option<&str>, here: bool) -> Result<Response> {
     let ctx = Ctx::open(cli)?;
-    let locus = ctx.locus();
-    let holdings = ctx
-        .store
-        .fold_entities(locus.as_ref(), ctx.filter_kind()?)?;
-    // One walk for every balance series under the locus, each folded to the line at
-    // its latest key — which *is* the present (I1). A stranded series answers to no
-    // holding and simply joins to nothing here; `pan validate` is what reports it
-    // (§10.2).
-    let balances = ctx.store.fold(locus.as_ref(), Some(Rationes::BALANCE))?;
+    // One walk for the holdings, one for every balance series under the same scope, each
+    // folded to the line at its latest key — which *is* the present (I1). A stranded
+    // series answers to no holding and simply joins to nothing here; `pan validate` is
+    // what reports it (§10.2).
+    let (holdings, balances) =
+        match contract::list_scope(&ctx.root, cli.home.as_deref(), node, here)? {
+            contract::ListScope::Subtree(at) => (
+                ctx.store.fold_entities(at.as_ref(), ctx.filter_kind()?)?,
+                ctx.store.fold(at.as_ref(), Some(Rationes::BALANCE))?,
+            ),
+            contract::ListScope::Local(code) => (
+                ctx.store.fold_entities_local(&code, ctx.filter_kind()?)?,
+                ctx.store.fold_local(&code, Some(Rationes::BALANCE))?,
+            ),
+        };
 
     if net {
         return Ok(Response::Json(net_worth_json(&holdings, &balances)?));
@@ -1112,15 +1125,6 @@ impl Ctx {
     /// directories.
     fn scope(&self) -> Option<Code> {
         self.home.clone()
-    }
-
-    /// What a fold is scoped to. Unlike a lookup this *is* the locus: `cd
-    /// c_r_res/ && rat ls` lists the holdings filed there (§7.3). Outside the tree
-    /// there is nothing to narrow by, so the fold spans the forest.
-    fn locus(&self) -> Option<Code> {
-        self.home
-            .clone()
-            .or_else(|| contract::code_at_path(&self.root, None).ok())
     }
 }
 

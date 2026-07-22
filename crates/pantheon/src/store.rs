@@ -1039,6 +1039,21 @@ impl<C: Core> Store<C> {
         Ok(out)
     }
 
+    /// The entities filed **at** `at` alone, each read to its object — the node-local
+    /// counterpart to [`fold_entities`], for `list --here` (§7.2).
+    pub fn fold_entities_local(
+        &self,
+        at: &Code,
+        kind: Option<&str>,
+    ) -> Result<Vec<(EntityRef, Entity<C::Record>)>> {
+        let mut out = Vec::new();
+        for eref in self.find_entities_local(at, kind, None)? {
+            let entity = self.read_entity(&eref)?;
+            out.push((eref, entity));
+        }
+        Ok(out)
+    }
+
     /// This core's entities filed **at** `at`, not under it — the node-local counterpart
     /// to [`find_entities`] (§5.0). One meta-dir `read_dir` and no file reads, which is
     /// all a per-node count needs (P§6): each entity is one file, so the ref set *is* the
@@ -1195,6 +1210,19 @@ impl<C: Core> Store<C> {
     pub fn find_documents_local(&self, at: &Code, slug: Option<&str>) -> Result<Vec<DocumentRef>> {
         let mut out = Vec::new();
         Self::collect_documents(&self.leaf_node(at)?, slug, &mut out)?;
+        Ok(out)
+    }
+
+    /// The documents filed **at** `at` alone, each with its frontmatter fold — the
+    /// node-local counterpart to [`fold_documents`], for `list --here` (§7.2). A fold
+    /// never reads bodies (§7.1).
+    pub fn fold_documents_local(&self, at: &Code) -> Result<Vec<(DocumentRef, Frontmatter)>> {
+        let mut out = Vec::new();
+        for dref in self.find_documents_local(at, None)? {
+            let frontmatter = crate::document::read_frontmatter(&dref.path)
+                .map_err(|e| Error::validation(format!("{}: {e}", dref.path.display())))?;
+            out.push((dref, frontmatter));
+        }
         Ok(out)
     }
 

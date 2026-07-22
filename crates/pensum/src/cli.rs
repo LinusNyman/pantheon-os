@@ -137,12 +137,19 @@ enum Cmd {
     },
     /// Remove a task by its key — irreversible (§7.2, §18).
     Rm { tokens: Vec<String> },
-    /// Every open task across the subtree (§7.2). `--all` includes the done ones.
+    /// Every open task across the subtree, or one node with `--here` (§7.2). `--all`
+    /// includes the done ones.
     #[command(alias = "ls")]
     List {
+        /// The node to fold, as a bare code — sugar for `-H` (§7.3).
+        #[arg(value_name = "HOME")]
+        node: Option<String>,
         /// Include tasks already done.
         #[arg(long = "all")]
         all: bool,
+        /// Fold this node alone, not its subtree (§7.2).
+        #[arg(short = 'l', long = "here")]
+        here: bool,
     },
     /// One task, found by its key anywhere in the tree (§5.4, §7.2).
     Get { tokens: Vec<String> },
@@ -257,7 +264,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Rename { tokens } => cmd_rename(cli, tokens),
         Cmd::Move { tokens, to } => cmd_move(cli, tokens, to),
         Cmd::Rm { tokens } => cmd_rm(cli, tokens),
-        Cmd::List { all } => cmd_list(cli, *all),
+        Cmd::List { all, node, here } => cmd_list(cli, *all, node.as_deref(), *here),
         Cmd::Get { tokens } => cmd_get(cli, tokens),
         Cmd::Series { tokens, from, to } => cmd_series(cli, tokens, from.as_deref(), to.as_deref()),
         Cmd::Where { tokens } => cmd_where(cli, tokens),
@@ -483,14 +490,12 @@ fn cmd_rm(cli: &Cli, tokens: &[String]) -> Result<Response> {
 /// The fold across the subtree (§7.2). Every task is its own present — a name-keyed
 /// line is a record, not a sample (I1, §5.4) — so this is every one of them, minus
 /// the done unless `--all` asks for them: a task list is what is not yet done.
-fn cmd_list(cli: &Cli, all: bool) -> Result<Response> {
+fn cmd_list(cli: &Cli, all: bool, node: Option<&str>, here: bool) -> Result<Response> {
     let ctx = Ctx::open(cli)?;
-    // The locus is $PWD (§7.3); outside the tree there is nothing to narrow by.
-    let home = match cli.home.as_deref() {
-        Some(code) => Some(Code::parse(code)?),
-        None => contract::code_at_path(&ctx.root, None).ok(),
+    let mut folded = match contract::list_scope(&ctx.root, cli.home.as_deref(), node, here)? {
+        contract::ListScope::Subtree(at) => ctx.store.fold(at.as_ref(), Some(&ctx.kind))?,
+        contract::ListScope::Local(code) => ctx.store.fold_local(&code, Some(&ctx.kind))?,
     };
-    let mut folded = ctx.store.fold(home.as_ref(), Some(&ctx.kind))?;
     if !all {
         folded.retain(|present| present.line.data.done.is_none());
     }

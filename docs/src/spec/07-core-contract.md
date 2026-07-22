@@ -44,7 +44,7 @@ Every core binary exposes the same verbs. stdout is JSON when piped, a table on 
 | `rename <slug> <new>` | the renamed record | change a record's name; renames the file and cascades its refs (§5.4) |
 | `move <slug> --to CODE` | the moved record | re-home an entity or a document to another node |
 | `rm <key>` | `{deleted: key}` | remove a record — an entity file, a document, or a series line (irreversible) |
-| `list [--home CODE] [--kind K]` | array | folded present across the subtree |
+| `list [HOME] [--home CODE] [--here] [--kind K]` | array | folded present across the subtree, or one node alone with `--here` |
 | `get <slug>` | one record | current state — an entity, or a document with its body |
 | `series [name] [--from D] [--to D]` | array | every record in a collection (the trend across keys), optionally windowed |
 | `schema` | JSON Schema | self-description: name, primitive, tokens and their shapes, record schema, format version — the surface the spine's PATH discovery reads (§5.0, §7.1) |
@@ -101,6 +101,7 @@ Implicit for the common case:
 | `-V` | `--version` | version |
 | `-n` | `--dry-run` | validate, print what would change (with plan token), write nothing |
 | `-H` | `--home CODE` | state the home explicitly |
+| `-l` | `--here` | fold this node alone, not its subtree — a `list` read only (§7.2) |
 | `-k` | `--kind K` | which of the core's tokens (§7.1) — within the shape the form already picks on a write, any token when filtering a read (§7.2) |
 | `-c` | `--create` | mint the series before `add` writes the first reading; refused on an inference form (§7.3) |
 | `-a` | `--at YYMMDD` \| `YYMMDDThhmm` \| `hhmm` | the reading's date, date and time, or a time today — the key is what you give (§7.3) |
@@ -110,6 +111,8 @@ Implicit for the common case:
 | `-y` | `--yes` | skip the confirm on a mutation |
 | `-p` | `--plan TOKEN` | confirm the exact change a prior `--dry-run` computed (guards against a stale review) |
 | `-q` / `-v` | `--quiet` / `--verbose` | |
+
+**`list` names its node three ways, and the default is unchanged.** With no home it folds the `$PWD` locus's subtree (above) — the shell's location narrows the read, or the fold spans the forest from outside the tree. A **bare positional** names the node instead (`alb ls csa` = `alb ls -H csa`); giving both a positional and `-H` is a usage error (exit `2`). **`--here` (`-l`)** folds that node *alone*, its descendants excluded — the read counterpart of the rail's per-node count (§7.2, P§6) — and needs a concrete node (the named one, else the locus), a usage error with neither. This adds levers; it does not move the locus.
 
 **Format follows the hand (I8).** stdout to a TTY → table; piped → JSON. Same data, same code path; `-f` forces either.
 

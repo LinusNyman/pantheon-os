@@ -370,6 +370,51 @@ fn verbs_read() {
     insta::assert_snapshot!("verbs_read", out);
 }
 
+/// L1: `list` node addressing on a document core — a bare positional home, `--here`
+/// node-local, and the double-home refusal. The row *sets* are the contract, not a
+/// snapshot. A fold never reads bodies (§7.1), local or not.
+#[test]
+fn list_node_addressing() {
+    let root = fresh_root();
+    assert_eq!(
+        tab(&root, &["e", "note_at_e", "body one", "--type", "note"]).0,
+        0
+    );
+    assert_eq!(
+        tab(&root, &["eam", "note_at_eam", "body two", "--type", "note"]).0,
+        0
+    );
+
+    let slugs = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["slug"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // A bare positional home is sugar for `-H`.
+    let (pc, pos) = tab(&root, &["ls", "e"]);
+    let (fc, flag) = tab(&root, &["ls", "-H", "e"]);
+    assert_eq!((pc, fc), (0, 0));
+    assert_eq!(pos, flag, "a positional home equals -H");
+    let subtree = slugs(&pos);
+    assert!(subtree.contains(&"note_at_e".to_owned()));
+    assert!(
+        subtree.contains(&"note_at_eam".to_owned()),
+        "the subtree reaches the descendant"
+    );
+
+    // `--here` folds the node alone.
+    let (hc, here) = tab(&root, &["ls", "--here", "e"]);
+    assert_eq!(hc, 0);
+    assert_eq!(slugs(&here), ["note_at_e"], "--here excludes descendants");
+
+    // The home given twice is a usage error (§7.3).
+    let (dup, _) = tab(&root, &["ls", "-H", "e", "eam"]);
+    assert_eq!(dup, 2);
+}
+
 /// `-f raw` emits the bare body — the `cat` case, for a pager or `$EDITOR` (§7.2).
 /// Byte-for-byte the prose: no frontmatter, and no newline added.
 #[test]

@@ -884,6 +884,53 @@ pub fn code_at_path(root: &Path, pwd: Option<&Path>) -> Result<Code> {
     here.ok_or_else(|| Error::usage("no node at $PWD; name the home with -H (§7.3)"))
 }
 
+/// The scope of a `list` fold (§7.2): a node's whole subtree, or that node alone.
+pub enum ListScope {
+    /// Fold the subtree under `Some(code)`, or the whole forest when `None` — outside
+    /// the tree there is nothing to narrow by, so the fold spans it all (§7.3).
+    Subtree(Option<Code>),
+    /// Fold this node alone, its descendants excluded — the `--here`/`-l` reading.
+    Local(Code),
+}
+
+/// Resolve a `list` scope from its home levers (§7.2, §7.3): the home as a bare
+/// positional or `-H` (given once, never both), and `--here` for the node-local read.
+///
+/// The default locus is `$PWD` (§7.3), unchanged: with no home named, a subtree fold
+/// still narrows to the node the shell sits in, or spans the forest from outside the
+/// tree. `--here` needs a concrete node — the named one, else the `$PWD` locus — and is
+/// a usage error with neither.
+pub fn list_scope(
+    root: &Path,
+    home_flag: Option<&str>,
+    home_pos: Option<&str>,
+    here: bool,
+) -> Result<ListScope> {
+    let named = match (home_flag, home_pos) {
+        (Some(_), Some(_)) => {
+            return Err(Error::usage(
+                "home given twice — as -H and as a positional; give it once (§7.3)",
+            ));
+        }
+        (Some(code), None) | (None, Some(code)) => Some(Code::parse(code)?),
+        (None, None) => None,
+    };
+    if here {
+        let code = named
+            .or_else(|| code_at_path(root, None).ok())
+            .ok_or_else(|| {
+                Error::usage(
+                    "--here needs a node; name it with -H or a bare code, or cd into one (§7.3)",
+                )
+            })?;
+        Ok(ListScope::Local(code))
+    } else {
+        Ok(ListScope::Subtree(
+            named.or_else(|| code_at_path(root, None).ok()),
+        ))
+    }
+}
+
 fn join<'a>(items: impl Iterator<Item = &'a str>) -> String {
     items.collect::<Vec<_>>().join(", ")
 }

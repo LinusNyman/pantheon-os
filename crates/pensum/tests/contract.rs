@@ -283,6 +283,46 @@ fn the_read_verbs() {
     insta::assert_snapshot!("read_verbs", out);
 }
 
+/// L1: `list` node addressing — a bare positional home, `--here` node-local, and the
+/// refusals. Not a snapshot: the row *sets* are the contract here, and the default
+/// `$PWD` locus is unchanged (tested elsewhere).
+#[test]
+fn list_node_addressing() {
+    let root = fresh_root();
+    pen(&root, &["a", "task_at_a"]); // a task at node `a` itself
+    pen(&root, &["acm", "task_at_acm"]); // a task under `a`, at a descendant
+
+    // A bare positional home is sugar for `-H`.
+    let (pc, pos) = pen(&root, &["ls", "a"]);
+    let (fc, flag) = pen(&root, &["ls", "-H", "a"]);
+    assert_eq!((pc, fc), (0, 0));
+    assert_eq!(pos, flag, "a positional home equals -H");
+    assert_eq!(
+        pos.as_array().unwrap().len(),
+        2,
+        "the subtree of `a` folds both tasks"
+    );
+
+    // `--here` folds the node alone — the task at `a`, never the descendant's.
+    let (hc, here) = pen(&root, &["ls", "--here", "a"]);
+    assert_eq!(hc, 0);
+    let keys: Vec<&str> = here
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["task_at_a"], "--here excludes descendants");
+
+    // The home given twice is a usage error (§7.3).
+    let (dup, _) = pen(&root, &["ls", "-H", "a", "ao"]);
+    assert_eq!(dup, 2, "a positional home beside -H is refused");
+
+    // `--here` with no node to scope to (outside the tree, no home) is a usage error.
+    let (bare, _) = pen(&root, &["ls", "--here"]);
+    assert_eq!(bare, 2, "--here needs a concrete node");
+}
+
 #[test]
 fn the_leading_token_is_probed_for_a_node_code() {
     let root = fresh_root();

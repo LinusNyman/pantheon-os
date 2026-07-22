@@ -170,9 +170,16 @@ enum Cmd {
     },
     /// Remove a place by slug — irreversible (§7.2, §18).
     Rm { slug: String },
-    /// Every place across the subtree (§7.2). `-k` filters.
+    /// Every place across the subtree, or one node with `--here` (§7.2). `-k` filters.
     #[command(alias = "ls")]
-    List,
+    List {
+        /// The node to fold, as a bare code — sugar for `-H` (§7.3).
+        #[arg(value_name = "HOME")]
+        node: Option<String>,
+        /// Fold this node alone, not its subtree (§7.2).
+        #[arg(short = 'l', long = "here")]
+        here: bool,
+    },
     /// One place by slug (§7.2).
     Get { slug: String },
     /// Accepted and refused: Mappa's tokens are both partitioned (§7.1).
@@ -277,7 +284,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
         Cmd::Move { slug, to } => cmd_move(cli, slug, to),
         Cmd::Rm { slug } => cmd_rm(cli, slug),
-        Cmd::List => cmd_list(cli),
+        Cmd::List { node, here } => cmd_list(cli, node.as_deref(), *here),
         Cmd::Get { slug } => cmd_get(cli, slug),
         Cmd::Series { .. } => Err(Error::usage(
             "mappa keeps no series: its tokens are both partitioned, so a place is read \
@@ -545,11 +552,16 @@ fn cmd_rm(cli: &Cli, slug: &str) -> Result<Response> {
     Ok(Response::Json(json!({ "deleted": eref.slug })))
 }
 
-fn cmd_list(cli: &Cli) -> Result<Response> {
+fn cmd_list(cli: &Cli, node: Option<&str>, here: bool) -> Result<Response> {
     let ctx = Ctx::open(cli)?;
-    let folded = ctx
-        .store
-        .fold_entities(ctx.locus().as_ref(), ctx.filter_kind())?;
+    let folded = match contract::list_scope(&ctx.root, cli.home.as_deref(), node, here)? {
+        contract::ListScope::Subtree(at) => {
+            ctx.store.fold_entities(at.as_ref(), ctx.filter_kind())?
+        }
+        contract::ListScope::Local(code) => {
+            ctx.store.fold_entities_local(&code, ctx.filter_kind())?
+        }
+    };
     Ok(Response::Json(contract::entity_fold_json(
         Mappa::NAME,
         &folded,
@@ -645,15 +657,6 @@ impl Ctx {
     /// $PWD would make `map get home` mean a different place in each directory.
     fn scope(&self) -> Option<Code> {
         self.home.clone()
-    }
-
-    /// What a fold is scoped to. Unlike a lookup this *is* the locus: `cd
-    /// cl_u_urbs/ && map ls` lists the places filed there (§7.3). Outside the tree
-    /// there is nothing to narrow by, so the fold spans the forest.
-    fn locus(&self) -> Option<Code> {
-        self.home
-            .clone()
-            .or_else(|| contract::code_at_path(&self.root, None).ok())
     }
 }
 
