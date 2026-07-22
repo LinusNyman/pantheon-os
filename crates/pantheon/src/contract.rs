@@ -63,6 +63,20 @@ pub fn emit(value: &Value, as_json: bool) {
     }
 }
 
+/// Print a failure the way the hand reads it (§7.3, I8): the `{"error":{…}}` envelope
+/// down a pipe, a plain `error: <msg>` line at a TTY. Format follows the hand for a
+/// failure exactly as it does for a result — the same `as_json` split, one place — and
+/// the process exit code is the verb's regardless (§7.3). Every core, `pan`, and `aus`
+/// end here.
+pub fn emit_error(e: &Error, as_json: bool) -> std::process::ExitCode {
+    if as_json {
+        eprintln!("{}", e.to_error_json());
+    } else {
+        eprintln!("error: {e}");
+    }
+    std::process::ExitCode::from(e.exit_code().as_u8())
+}
+
 /// The whole tail of a core's `main`: render what the verb produced and return the
 /// process exit code, printing the `{"error":{…}}` envelope to stderr on a failure
 /// (§7.3). Every core ends identically.
@@ -87,10 +101,7 @@ pub fn dispatch(outcome: Result<Response>, as_json: bool) -> std::process::ExitC
             print!("{text}");
             std::process::ExitCode::from(0)
         }
-        Err(e) => {
-            eprintln!("{}", e.to_error_json());
-            std::process::ExitCode::from(e.exit_code().as_u8())
-        }
+        Err(e) => emit_error(&e, as_json),
     };
     crate::hook::wake_if_noted();
     code

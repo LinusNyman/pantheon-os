@@ -40,6 +40,26 @@ fn a_piped_bare_short_emits_the_surface_as_json() {
     );
 }
 
+/// L3: `pan`'s errors follow the hand too (§7.3, I8) — it routes through the spine's
+/// `emit_error` like a core. Down a pipe (`-f json`) it is the `{"error":{…}}` envelope;
+/// on the human path (`-f table`) it is a plain `error: <msg>` line. Same exit either way.
+#[test]
+fn errors_follow_the_hand() {
+    // `validate` with no root named is a usage error (exit 2, §6.2) — no fixture needed.
+    let (json_code, _, json_err) = pan(&["validate", "-f", "json"]);
+    assert_eq!(json_code, 2);
+    let envelope: Value = serde_json::from_str(json_err.trim()).unwrap();
+    assert_eq!(envelope["error"]["code"], 2);
+
+    let (tty_code, _, tty_err) = pan(&["validate", "-f", "table"]);
+    assert_eq!(tty_code, 2);
+    assert!(
+        tty_err.starts_with("error: "),
+        "a human error line, got {tty_err:?}"
+    );
+    assert!(!tty_err.contains('{'), "no JSON envelope on the human path");
+}
+
 /// The seven placement rules (§2), emitted so a human and an LLM file alike (§5.5, I8).
 #[test]
 fn constitution_emits_the_seven_rules() {

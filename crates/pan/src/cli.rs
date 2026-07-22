@@ -227,10 +227,7 @@ pub fn run_cli() -> ExitCode {
             print!("{text}");
             ExitCode::from(0)
         }
-        Err(e) => {
-            eprintln!("{}", e.to_error_json());
-            ExitCode::from(e.exit_code().as_u8())
-        }
+        Err(e) => pantheon::contract::emit_error(&e, as_json(&cli)),
     }
 }
 

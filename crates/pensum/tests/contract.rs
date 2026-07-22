@@ -323,6 +323,28 @@ fn list_node_addressing() {
     assert_eq!(bare, 2, "--here needs a concrete node");
 }
 
+/// L3: an error follows the hand (§7.3, I8). Down a pipe (`-f json`) it is the frozen
+/// `{"error":{…}}` envelope; on the human path (`-f table`, which forces it even down a
+/// pipe) it is a plain `error: <msg>` line. The exit code is the same either way.
+#[test]
+fn errors_follow_the_hand() {
+    let root = fresh_root();
+
+    // Forced to JSON: the envelope on stderr, exit 4 (not found).
+    let ((json_code, envelope), _) = pen_env(&root, &["get", "never_written", "-f", "json"], &[]);
+    assert_eq!(json_code, 4);
+    assert_eq!(envelope["error"]["code"], 4);
+
+    // The human path: a bare `error: <msg>` line, no envelope, the same exit.
+    let ((tty_code, _), stderr) = pen_env(&root, &["get", "never_written", "-f", "table"], &[]);
+    assert_eq!(tty_code, 4);
+    assert!(
+        stderr.starts_with("error: "),
+        "a human error line, got {stderr:?}"
+    );
+    assert!(!stderr.contains('{'), "no JSON envelope on the human path");
+}
+
 #[test]
 fn the_leading_token_is_probed_for_a_node_code() {
     let root = fresh_root();

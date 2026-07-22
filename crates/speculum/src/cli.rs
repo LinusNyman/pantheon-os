@@ -82,10 +82,9 @@ pub fn run_cli() -> ExitCode {
             ExitCode::from(0)
         }
         Ok(None) => ExitCode::from(0),
-        Err(e) => {
-            eprintln!(r#"{{"error":{{"code":1,"msg":{}}}}}"#, json!(e.to_string()));
-            ExitCode::from(1)
-        }
+        // A lens owns no records, so any failure is a runtime one (exit 1); route it
+        // through the spine so the format follows the hand (§7.3, I8) like a core's.
+        Err(e) => contract::emit_error(&pantheon::Error::runtime(e.to_string()), as_json),
     }
 }
 
