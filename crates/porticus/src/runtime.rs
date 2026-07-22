@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use crate::action::{Action, FieldSpec, Invocation, RecordRef, Relayed, Target, Writer};
 use crate::app::App;
 use crate::keymap::{self, Chrome};
-use crate::overlay::{Overlay, Pending, Prompt};
+use crate::overlay::{Overlay, Pending, Picking, Prompt};
 use crate::rail::Rail;
 use crate::term::Screen;
 use crate::theme::Theme;
@@ -248,7 +248,9 @@ fn draw(
         match top {
             // The pick-a-home modal paints the tree itself, so it needs the app to ask
             // each node its presence — a different render path from the line overlays.
-            Overlay::Tree { rail } => draw_tree_modal(frame, rail, app, theme, area),
+            Overlay::Tree { rail, picking } => {
+                draw_tree_modal(frame, rail, picking, app, theme, area);
+            }
             // The Title splash paints a full-page banner, not a small line box (P§8, C7).
             Overlay::Title => draw_title(frame, ident, theme, area),
             other => draw_overlay(frame, other, theme, area),
@@ -258,13 +260,24 @@ fn draw(
 
 /// The pick-a-home modal (P§4): a bordered box painting its own rail, so a quick add
 /// picks a node the same way the main tree is browsed.
-fn draw_tree_modal(frame: &mut Frame, rail: &Rail, app: &mut impl App, theme: Theme, area: Rect) {
+fn draw_tree_modal(
+    frame: &mut Frame,
+    rail: &Rail,
+    picking: &Picking,
+    app: &mut impl App,
+    theme: Theme,
+    area: Rect,
+) {
     let box_area = centred(area, 72, area.height.saturating_sub(2));
     frame.render_widget(Clear, box_area);
+    let title = match picking {
+        Picking::Home => "pick a node",
+        Picking::Destination(_) => "move to",
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.chrome())
-        .title("pick a node")
+        .title(title)
         .style(theme.text());
     let inner = block.inner(box_area);
     block.render(box_area, frame.buffer_mut());
@@ -858,7 +871,7 @@ fn handle_char(
     }
 
     if let Some(chrome) = keymap::chrome(c) {
-        return handle_chrome(state, chrome);
+        return handle_chrome(app, state, chrome);
     }
     if let Some(action) = keymap::action(c) {
         return begin(screen, app, state, action);
@@ -873,8 +886,9 @@ fn handle_char(
     Ok(())
 }
 
-fn handle_chrome(state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
+fn handle_chrome(app: &mut impl App, state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
     match chrome {
+        Chrome::Follow => return follow_ref(app, state),
         Chrome::Quit => state.quit = true,
         Chrome::Help => state.overlays.push(Overlay::Help),
         Chrome::Title => state.overlays.push(Overlay::Title),
@@ -915,6 +929,62 @@ fn handle_chrome(state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
         Chrome::CyclePane | Chrome::Enter | Chrome::Escape => {}
     }
     Ok(())
+}
+
+/// `f` — follow the reference the view's cursor is on (P§3, G5).
+///
+/// **The jump is same-core, and that is a law and not a limit** (I5). The running
+/// instrument links exactly one core, so a card for another core's record is one it cannot
+/// draw; a chip naming another core is answered with where to go instead, never with
+/// nothing. The check needs no core linked — the registry maps a core's name to the binary
+/// that owns it, and `ident().short` says which binary this is.
+///
+/// Everything after that is the ordinary drill: resolve the token through the spine (the
+/// hub resolves, §5.4), take the tree to the record's node, and pin it in the detail view
+/// exactly as `Enter` on a row would. `Esc` unwinds it the same way.
+fn follow_ref(app: &mut impl App, state: &mut State) -> anyhow::Result<()> {
+    let Some(token) = state.views[state.active].focused_ref() else {
+        return Ok(());
+    };
+    let Ok(reference) = pantheon::Ref::parse(&token) else {
+        state.status = Status::Notice(format!("{token} is not a `core:slug` reference"));
+        return Ok(());
+    };
+
+    let registry = pantheon::CoreRegistry::discover();
+    let short = registry
+        .cores()
+        .iter()
+        .find(|c| c.name == reference.core)
+        .map(|c| c.short.clone());
+    if short.as_deref() != Some(app.ident().short) {
+        // Honest about the boundary rather than silent: the record exists, and this is
+        // not the instrument that renders it (I4, I5).
+        state.status = Status::Notice(match short {
+            Some(short) => format!("{token} is {short}'s — open it there"),
+            None => format!("{token} belongs to no installed core"),
+        });
+        return Ok(());
+    }
+
+    let outcomes = pantheon::resolve_all(&state.root, &registry, std::slice::from_ref(&reference))?;
+    let Some(pantheon::RefOutcome::Resolved(resolution)) = outcomes.into_iter().next() else {
+        // Unresolved or ambiguous: §5.4 lists candidates rather than guessing, and a
+        // follow that guessed would be the one place the suite did.
+        state.status = Status::Notice(format!("{token} resolves to no single record"));
+        return Ok(());
+    };
+
+    let Some(detail) = state.views.iter().position(|v| v.is_detail()) else {
+        return Ok(());
+    };
+    let record = RecordRef::new(resolution.home.clone(), resolution.reference.slug.clone());
+    state.rail.reveal(&resolution.home);
+    state.pinned = Some((record.clone(), state.active));
+    state.views[detail].pin(Some(record));
+    state.active = detail;
+    state.focus = Focus::Content;
+    refresh(state)
 }
 
 /// `Enter` on a content row — **activate** (P§3, P§5).
@@ -1039,12 +1109,22 @@ fn begin(
         return Ok(());
     }
 
-    // `r` and `m` take a line prompt before there is anything to confirm (P§5).
+    // `r` and `m` each name something that does not exist yet, so both ask before there
+    // is anything to confirm (P§5). A new *name* is typed; a new *home* is picked off the
+    // tree — the destination is a node, and a node has one legible form and a hand should
+    // not have to spell its code.
     if action == Action::Rename {
         state.overlays.push(Overlay::Line {
             prompt: Prompt::Rename(target),
             label: "rename to".into(),
             buffer: String::new(),
+        });
+        return Ok(());
+    }
+    if action == Action::Move {
+        state.overlays.push(Overlay::Tree {
+            rail: Rail::new(&state.root)?,
+            picking: Picking::Destination(target),
         });
         return Ok(());
     }
@@ -1054,6 +1134,7 @@ fn begin(
     if action == Action::QuickAdd {
         state.overlays.push(Overlay::Tree {
             rail: Rail::new(&state.root)?,
+            picking: Picking::Home,
         });
         return Ok(());
     }
@@ -1362,11 +1443,11 @@ fn handle_overlay(
     if matches!(state.overlays.last(), Some(Overlay::Form { .. })) {
         return handle_form_key(screen, app, state, key);
     }
-    // The pick-a-home modal navigates its own tree (P§4). It only opens an overlay, so
-    // it needs no `screen` to relay through and cannot fail.
+    // The pick-a-node modal navigates its own tree (P§4). A picked *home* opens the add
+    // form; a picked *destination* completes a move, which relays — so it takes the
+    // screen like every other write path.
     if matches!(state.overlays.last(), Some(Overlay::Tree { .. })) {
-        handle_tree_key(app, state, key);
-        return Ok(());
+        return handle_tree_key(screen, app, state, key);
     }
 
     match key.code {
@@ -1541,49 +1622,92 @@ fn open_add_form(app: &mut impl App, state: &mut State, target: Target) {
     });
 }
 
-/// The pick-a-home modal's keys (P§4): arrows and `hjkl` walk its own tree, `Enter` opens
-/// the add form at the node under its cursor, `Esc` cancels.
-fn handle_tree_key(app: &mut impl App, state: &mut State, key: KeyEvent) {
+/// The pick-a-node modal's keys (P§4): arrows and `hjkl` walk its own tree, `Enter` takes
+/// the node under its cursor, `Esc` cancels.
+///
+/// What `Enter` *does* with the node is [`Picking`]'s: a home opens the add form there, a
+/// destination completes the move the base view began.
+fn handle_tree_key(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    key: KeyEvent,
+) -> anyhow::Result<()> {
     match key.code {
         KeyCode::Esc => {
             state.overlays.pop();
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.up();
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.down();
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.left();
             }
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.right();
             }
         }
         KeyCode::Enter => {
-            let node = match state.overlays.last() {
-                Some(Overlay::Tree { rail }) => rail.selected(),
+            let picked = match state.overlays.last() {
+                Some(Overlay::Tree { rail, picking }) => {
+                    rail.selected().map(|node| (node, picking.clone()))
+                }
                 _ => None,
             };
             state.overlays.pop();
-            if let Some(node) = node {
-                // The home is the modal's; the core and the date are still the view's —
-                // `A` differs from `a` only in how the node is chosen (P§4).
-                let core = view_core(state);
-                let at = view_at(state);
-                open_add_form(app, state, Target::Node { node, at, core });
+            let Some((node, picking)) = picked else {
+                return Ok(());
+            };
+            match picking {
+                Picking::Home => {
+                    // The home is the modal's; the core and the date are still the
+                    // view's — `A` differs from `a` only in how the node is chosen (P§4).
+                    let core = view_core(state);
+                    let at = view_at(state);
+                    open_add_form(app, state, Target::Node { node, at, core });
+                }
+                // The app built `<tool> mv <what> --to` for the target; the picked node
+                // is the value, appended exactly as a line prompt's typed text is, so the
+                // app still authors the whole write (I2, P-II).
+                Picking::Destination(target) => {
+                    return complete_move(screen, app, state, &target, &node);
+                }
             }
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// Finish an `m` once its destination is picked: ask the app for the invocation, append
+/// the node, and run the ordinary confirm policy over it (P§7).
+fn complete_move(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    target: &Target,
+    node: &Code,
+) -> anyhow::Result<()> {
+    let Some(mut invocation) = app.on_action(Action::Move, target) else {
+        state.status = Status::Notice(format!("{} does not apply here", Action::Move.label()));
+        return Ok(());
+    };
+    invocation.args.push(node.as_str().to_owned());
+    if let Some(short) = state.missing.iter().find(|s| **s == invocation.short) {
+        state.status = Status::Notice(format!("{short} is not on PATH"));
+        return Ok(());
+    }
+    commit_or_confirm(screen, app, state, Action::Move, invocation)
 }
 
 /// Search matches live (P§6, C4): each keystroke narrows and ranks the content row list,
@@ -1818,13 +1942,19 @@ pub fn drive(
     };
     let ident = app.ident();
     let theme = Theme::of(&ident);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))?;
+    // **Draw before each key, as the loop does.** `run` renders and *then* waits, so a
+    // view that establishes something while painting — an `EntityCard`'s chip strip, the
+    // one cursor a card has — has established it before the next keystroke arrives.
+    // Driving keys with a single trailing draw skipped that, and a screen only reachable
+    // after a frame was a screen no test could reach.
     for key in keys {
+        terminal.draw(|frame| draw(frame, app, &mut state, theme, &ident))?;
         if state.quit {
             break;
         }
         handle(None, app, &mut state, *key)?;
     }
-    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))?;
     terminal.draw(|frame| draw(frame, app, &mut state, theme, &ident))?;
     Ok(as_text(terminal.backend().buffer()))
 }

@@ -25,12 +25,17 @@ pub struct Finding {
     /// The single legal correction, as the `pan` command that applies it — surfaced for
     /// a hand to review and run (§10.2). `Some` only where the fix is unambiguous (a name
     /// out of normal form has exactly one answer, §5.1); a finding with a genuine choice,
-    /// or none, carries `None`.
-    ///
-    /// This is **display only** for now: `pan validate` shows the command, but *applying*
-    /// it from the screen needs `pan`'s structural mutators (§10.1), which are still
-    /// stubbed. Genuine-choice candidates land with them.
+    /// or none, carries `None` and answers in [`candidates`](Finding::candidates)
+    /// instead.
     pub fix: Option<String>,
+    /// The **genuine choice**: several legal corrections, none of them the tools' to pick
+    /// (§10.2). A slug held at two nodes is fixed by giving *one* of them a fuller name,
+    /// and which one is the hand's call — so the spine enumerates the commands and stops
+    /// there. Empty where the finding has one answer, or none.
+    ///
+    /// Each entry is a whole `pan` command, so a screen can offer it without knowing what
+    /// shape produced it, and a hand can copy it out of the JSON and type it (I8).
+    pub candidates: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -101,6 +106,9 @@ impl Finding {
         if let Some(fix) = &self.fix {
             value["fix"] = json!(fix);
         }
+        if !self.candidates.is_empty() {
+            value["candidates"] = json!(self.candidates);
+        }
         value
     }
 }
@@ -125,6 +133,11 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
     // and it stays a warning. Every file holding the name is named, since the fix is
     // made at the source: give one of them a fuller name (§5.4, §18).
     for duplicate in &identifiers.duplicates {
+        // The genuine choice, enumerated once for the whole clash: one command per
+        // holder that could take the fuller name (§10.2). Every finding this clash
+        // raises carries the same list, because the choice is between the holders and
+        // not a property of the one you happen to be looking at.
+        let candidates = fuller_name_candidates(duplicate);
         for here in &duplicate.at {
             let others = duplicate
                 .at
@@ -142,9 +155,10 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
                      rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
                     duplicate.reference.to_token()
                 ),
-                // A genuine choice — which record takes the fuller name is the hand's, so
-                // there is no single legal correction to offer (§10.2).
+                // No *single* legal correction: which record takes the fuller name is
+                // the hand's, so the choice is offered as candidates instead (§10.2).
                 fix: None,
+                candidates: candidates.clone(),
             });
         }
     }
@@ -413,6 +427,45 @@ fn check_collisions(siblings: &[(NodeName, PathBuf)], root: &Path, findings: &mu
     }
 }
 
+/// The commands that would end a cross-node slug clash, one per holder (§5.4, §10.2).
+///
+/// §5.4's remedy is *"give one of them a fuller name"*, and the fuller name here is the
+/// slug plus the node holding it — deterministic, already in normal form (§5.1, a code is
+/// lowercase alphanumeric), and legible as "the `alex` at `csa`". Which holder gets it is
+/// the choice, so every holder that *could* take it is listed and none is preferred.
+///
+/// Only an identity carried **in a filename** is offered: a partitioned entity's slug and
+/// a hand-named series' name are what `rename-pattern` rewrites (§10.1). An
+/// entity-as-node's slug is its *node's* definition (§5.2), so renaming it is
+/// `pan rename --def` — a change of node identity, not of a record's name — and it is
+/// deliberately not offered as a way to settle a clash between records.
+///
+/// The command is a scoped literal substitution, so it is exact for the clashing slug and
+/// would also touch a sibling slug at that node *containing* it. That is
+/// `rename-pattern`'s documented nature; the command is shown in full before it is run.
+fn fuller_name_candidates(duplicate: &crate::resolve::DuplicateIdentifier) -> Vec<String> {
+    let slug = &duplicate.reference.slug;
+    duplicate
+        .at
+        .iter()
+        .filter(|holder| {
+            let name = holder
+                .rel_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            matches!(
+                classify(&name, false, &holder.home),
+                FileClass::Partitioned { .. } | FileClass::NamedSeries { .. }
+            )
+        })
+        .map(|holder| {
+            let home = holder.home.as_str();
+            format!("pan rename-pattern {slug} {slug}_{home} {home}")
+        })
+        .collect()
+}
+
 fn push(
     findings: &mut Vec<Finding>,
     code: FindingCode,
@@ -441,5 +494,6 @@ fn push_fix(
         rel_path,
         msg: msg.into(),
         fix,
+        candidates: Vec::new(),
     });
 }

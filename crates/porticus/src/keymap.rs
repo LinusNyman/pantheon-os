@@ -19,6 +19,8 @@ pub enum Chrome {
     Search,
     /// `.` — collapse the tree to nodes this instrument files at (P§6).
     RecordsOnly,
+    /// `f` — follow the reference the view's cursor is on, within this core (P§3, G5).
+    Follow,
     /// `1`–`9` — switch to view *n*, zero-indexed here.
     Switch(usize),
     /// `Tab` — cycle pane on a Rail view; inert on a Full view, which has one pane.
@@ -38,6 +40,7 @@ pub fn chrome(key: char) -> Option<Chrome> {
         '+' => Some(Chrome::Title),
         '/' => Some(Chrome::Search),
         '.' => Some(Chrome::RecordsOnly),
+        'f' => Some(Chrome::Follow),
         'q' => Some(Chrome::Quit),
         '1'..='9' => Some(Chrome::Switch(key as usize - '1' as usize)),
         _ => None,
@@ -102,6 +105,7 @@ pub const CHROME_HELP: &[(&str, &str)] = &[
     ("+", "title"),
     ("/", "search"),
     (".", "records-only tree"),
+    ("f", "follow ref"),
     ("1-9", "switch view"),
     ("Tab", "cycle pane"),
     ("←↑↓→ · hjkl", "navigate"),

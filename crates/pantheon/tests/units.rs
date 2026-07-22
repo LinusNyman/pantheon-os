@@ -652,6 +652,21 @@ fn validate_reports_a_cross_node_duplicate_softly() {
             .all(|f| f.severity == pantheon::Severity::Warning)
     );
     assert!(dupes[0].msg.contains("album:alex"), "{:?}", dupes[0].msg);
+    // **The genuine choice is enumerated, never made** (§10.2). No single legal
+    // correction, so `fix` is absent; one candidate per holder that could take the
+    // fuller name, and both findings carry the same list because the choice is between
+    // the holders rather than a property of the file you are looking at.
+    for dupe in &dupes {
+        assert!(dupe.fix.is_none(), "no single answer here: {dupe:?}");
+        assert_eq!(
+            dupe.candidates,
+            vec![
+                "pan rename-pattern alex alex_csa csa".to_string(),
+                "pan rename-pattern alex alex_cso cso".to_string(),
+            ],
+            "one command per holder, in tree order: {dupe:?}"
+        );
+    }
     // Soft: a warning is not a validation failure (§5.4, §18).
     assert!(
         !findings

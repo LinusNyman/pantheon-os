@@ -126,19 +126,29 @@ fn d_on_the_validate_tab_applies_a_finding_fix() {
     assert!(!root.join("a_actio/a_x_bad-label").exists());
 }
 
-/// **`m` (move) stays dark — a no-op, not a relay that fails.**
+/// **`m` re-homes a node against the tree modal, on disk (§10.1, P§4).**
 ///
-/// Porticus has no destination prompt for a node move yet, so `pan` does not offer the
-/// action; the key draws nothing and touches nothing (P§7).
+/// A move names a *node*, so its destination is picked off a tree rather than typed as a
+/// code — the same modal `A` opens, asking a different question. `<down>` selects `ac
+/// cura`, `m` opens the modal, its own cursor walks to `c contextus`, `Enter` takes it,
+/// and the move confirms like every other structural write (P§5).
 #[test]
-fn move_stays_dark() {
+fn m_moves_a_node_to_the_picked_destination() {
     let root = fresh_root();
-    let before = frame(&root, "");
-    let after = frame(&root, "<down>m");
-    assert_eq!(
-        before.lines().count(),
-        after.lines().count(),
-        "a dark key draws no overlay: {after}"
+
+    frame(&root, "<down>m<down><down><enter>y");
+
+    assert!(
+        root.join("c_contextus/c_c_cura").is_dir(),
+        "`m` must re-home the node on disk, under the picked destination"
     );
+    assert!(!root.join("a_actio/a_c_cura").exists());
+}
+
+/// The modal is a **question, not a commitment**: `Esc` leaves the tree untouched (P§4).
+#[test]
+fn escaping_the_move_modal_moves_nothing() {
+    let root = fresh_root();
+    frame(&root, "<down>m<down><down><esc>");
     assert!(root.join("a_actio/a_c_cura").is_dir(), "nothing moved");
 }

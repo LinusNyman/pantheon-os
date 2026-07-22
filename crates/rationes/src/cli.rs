@@ -1313,6 +1313,10 @@ fn warn_duplicates(ctx: &Ctx, written: &EntityRef) -> Result<()> {
             // A cross-node duplicate is a genuine choice — which record takes the
             // fuller name is the hand's — so there is no single legal correction (§10.2).
             fix: None,
+            // Nor are the choices enumerated here: listing them means knowing every
+            // holder, which is the tree walk this warning exists to avoid (§5.4, §18).
+            // `pan validate` pays that walk and offers the candidates.
+            candidates: Vec::new(),
         })
         .collect();
     eprintln!("{}", findings_json(&findings));

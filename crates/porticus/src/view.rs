@@ -166,6 +166,18 @@ pub trait View {
         Handled::No
     }
 
+    /// The `core:slug` reference the view's own cursor is sitting on, where it has one
+    /// (P§3) — an [`EntityCard`](crate::views::EntityCard)'s focused chip.
+    ///
+    /// The view says *which reference*; Porticus resolves it, decides whether it can be
+    /// followed here, and moves the tree and the pin (P-II). A view therefore never
+    /// resolves an address, never reaches for a core, and cannot follow a chip into a
+    /// core it does not link (I5) — which is the whole reason the answer is a token and
+    /// not a record.
+    fn focused_ref(&self) -> Option<String> {
+        None
+    }
+
     /// What a Full view names in the header where a Rail view shows the path bar
     /// (P§4): a Calendar's month, a Timeline's range. Defaults to the view's id.
     fn locator(&self) -> Option<String> {
