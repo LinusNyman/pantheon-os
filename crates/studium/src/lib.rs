@@ -26,6 +26,8 @@ mod fold;
 #[cfg(feature = "tui")]
 mod mosaic;
 #[cfg(feature = "tui")]
+mod scope;
+#[cfg(feature = "tui")]
 mod screen;
 
 pub use cli::run_cli;

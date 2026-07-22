@@ -207,6 +207,11 @@ fn seed(root: &Path) {
             "fasti:flervariabel",
         ],
     );
+    // Two tasks: one inside the programme's subtree, one outside it entirely. The
+    // programme switch is what tells them apart (N2, §19.6).
+    run(root, "pen", &["add", "-H", "asd", "read_chapter", "-y"]);
+    run(root, "pen", &["add", "-H", "a", "buy_milk", "-y"]);
+
     // A study-time log — named for no course, so it is time, not a grade (§19.2, §19.6).
     run(
         root,
@@ -325,6 +330,71 @@ fn records_a_grade_through_the_lens(root: &Path) {
     );
 }
 
+/// **N2 — the studies are folded one programme at a time** (§19.4, §19.6).
+///
+/// Studium folded the whole tree: a study screen showed the shopping, because `pen list`
+/// ran with no `-H` at all. The scope is now the node a curriculum governs — discovered,
+/// never declared (§19.3) — and `]`/`[`/`p` step through the programmes as view state,
+/// stored nowhere (§19.4, §18).
+fn the_switch_scopes_the_studies(root: &Path) {
+    let drive = |script: &str| {
+        porticus::drive(
+            &mut Studium::new(root),
+            root,
+            &porticus::keys(script),
+            100,
+            24,
+        )
+        .expect("the lens drives")
+    };
+
+    // Unscoped, the agenda is every open task — the tree-wide fold this always was.
+    let all = drive("3");
+    assert!(
+        all.contains("read chapter") && all.contains("buy milk"),
+        "all the studies is the whole tree: {all}"
+    );
+    assert!(
+        all.contains("all studies"),
+        "and the header says which scope that is: {all}"
+    );
+
+    // `]` steps onto the one discovered programme — the node `asd_curriculum.toml`
+    // governs — and the agenda narrows to its subtree.
+    let scoped = drive("3]");
+    assert!(
+        scoped.contains("read chapter"),
+        "the programme's own task stays: {scoped}"
+    );
+    assert!(
+        !scoped.contains("buy milk"),
+        "a task outside the programme is out of scope (N2): {scoped}"
+    );
+    assert!(
+        scoped.contains("disciplina") && scoped.contains("asd"),
+        "the header names the programme being folded (P§4): {scoped}"
+    );
+
+    // The switch works from any view, not only the dashboard that owns the figures: the
+    // key is wrapped around every view in the lineup (I3).
+    let from_mosaic = drive("]");
+    assert!(
+        from_mosaic.contains("disciplina"),
+        "the mosaic switches too, and names its scope: {from_mosaic}"
+    );
+
+    // `p` returns to all the studies; `]` past the last programme wraps through it, so
+    // one key reaches every scope a study life has.
+    assert!(
+        drive("3]p").contains("buy milk"),
+        "`p` returns to all the studies"
+    );
+    assert!(
+        drive("3]]").contains("buy milk"),
+        "and the cycle wraps through all, not back to the first programme"
+    );
+}
+
 /// One test on purpose: it mutates `PATH` once (a process-global the harness must not
 /// race), then folds a rich tree, an empty one, and the real screen over that one `PATH`.
 #[test]
@@ -409,6 +479,9 @@ fn the_gpa_folds_across_three_cores_and_the_screen_shows_it() {
 
     // ── C2: `a` on the courses view records a grade (§19.8, §12) ──────────────
     records_a_grade_through_the_lens(&root);
+
+    // ── N2: the programme switch scopes the screen (§19.4, §19.6) ─────────────
+    the_switch_scopes_the_studies(&root);
 
     // ── an empty scope is no GPA, not a zero (§19.4) ─────────────────────────
     // A studies life with no grade fact yet: the fold ran and found nothing to weigh, so

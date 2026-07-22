@@ -15,6 +15,7 @@ use porticus::{Action, App, FieldSpec, Ident, Invocation, RecordRef, Target, Wri
 use serde_json::Value;
 
 use crate::mosaic::Mosaic;
+use crate::scope::{Scope, Studies, Switch};
 
 /// The cores Studium reaches (§19.6). Discovered, never required: a figure whose core is
 /// off `PATH` is absent, and so is the relay that would have written to it (§12).
@@ -62,21 +63,27 @@ impl App for Studium {
     }
 
     fn lineup(&mut self) -> Vec<Box<dyn View>> {
+        // The scope is discovered once per launch and shared by every view (N2, §19.4).
+        // Nothing stores the choice: a fresh launch opens on all the studies again.
+        let scope: Scope = std::rc::Rc::new(std::cell::RefCell::new(Studies::discover(&self.root)));
         let for_tasks = self.root.clone();
+        let for_tasks_scope = Scope::clone(&scope);
         vec![
             // A lens leads with its mosaic — the dashboard, not the tree (P§3).
-            Box::new(Mosaic::of(&self.root)),
+            Box::new(Switch::of(Mosaic::of(&self.root, &scope), &scope)),
             // The enrolments in scope, each with its grade folded from the paired log
             // (§19.2). Read-only for the MVP: a course's writes (close it, grade it) are
             // the relays below, reached with `a`.
-            Box::new(Courses::of(&self.root)),
-            // The day's tasks across the tree, each row carrying its own home so the list
-            // spans nodes and each `d` relays to the right one (§19.6, P§7).
-            Box::new(
-                Agenda::of(move || tasks(&for_tasks))
+            Box::new(Switch::of(Courses::of(&self.root), &scope)),
+            // The day's tasks **within the active programme**, each row carrying its own
+            // home so the list spans nodes and each `d` relays to the right one (§19.6,
+            // P§7). Tree-wide before N2, which is why a study screen showed the shopping.
+            Box::new(Switch::of(
+                Agenda::of(move || tasks(&for_tasks, &for_tasks_scope))
                     .offering(&[Action::Done, Action::Remove])
                     .empty("nothing open"),
-            ),
+                &scope,
+            )),
         ]
     }
 
@@ -231,13 +238,21 @@ impl Courses {
     }
 }
 
-/// The open tasks across the whole tree, as rows (§19.6).
+/// The open tasks **in the active programme's subtree**, as rows (§19.6, N2).
 ///
 /// Read off `pen list`'s JSON and nothing else — the contract is the only thing that
 /// crosses (I4). Each row keeps the home the core reported, which is what lets a
 /// cross-node list relay each `d` to its own node (P§7).
-fn tasks(root: &std::path::Path) -> Vec<Row> {
-    let Some(Value::Array(rows)) = tessera::read(root, PENSUM, &["list"]) else {
+///
+/// The scope is `-H`, the same lever the CLI takes (§6.3): with no programme active it
+/// is absent and the list is every open task, which is what this always was.
+fn tasks(root: &std::path::Path, scope: &Scope) -> Vec<Row> {
+    let home = scope.borrow().home().map(|code| code.as_str().to_owned());
+    let mut args = vec!["list"];
+    if let Some(home) = home.as_deref() {
+        args.extend_from_slice(&["-H", home]);
+    }
+    let Some(Value::Array(rows)) = tessera::read(root, PENSUM, &args) else {
         return Vec::new();
     };
     let labels = porticus::node_labels(root);

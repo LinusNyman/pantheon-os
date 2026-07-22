@@ -20,20 +20,29 @@ use tessera::Face;
 /// The figures behind the dashboard, folded fresh every frame (§19.9).
 pub struct Mosaic {
     root: std::path::PathBuf,
+    /// The programme the figures are folded within — shared with every other view, read
+    /// on the frame it draws and never copied out of (I1, §19.4, N2).
+    scope: crate::scope::Scope,
 }
 
 impl Mosaic {
     #[must_use]
-    pub fn of(root: &std::path::Path) -> Self {
+    pub fn of(root: &std::path::Path, scope: &crate::scope::Scope) -> Self {
         Self {
             root: root.to_path_buf(),
+            scope: std::rc::Rc::clone(scope),
         }
     }
 
     /// The faces the mosaic paints, derived from one fold (§19.9). The GPA leads — it is
     /// the figure that names the lens (§19.4).
+    ///
+    /// The fold is scoped to the active programme: a GPA across two degrees is a figure
+    /// nobody has, and `-H` was always the lever (§19.4) — the screen simply has a hand
+    /// on it now.
     fn faces(&self) -> Vec<Face> {
-        let f = crate::fold::figures(&self.root, None);
+        let scope = self.scope.borrow();
+        let f = crate::fold::figures(&self.root, scope.home().map(Code::as_str));
         vec![
             face("GPA", number(&f["gpa"], ""), "grade point average"),
             face(
@@ -107,6 +116,8 @@ impl View for Mosaic {
     }
 
     fn locator(&self) -> Option<String> {
+        // The scope prefixes this through `scope::Switch`, so the header reads
+        // `disciplina · asd · a study life` (P§4).
         Some("a study life".into())
     }
 }
