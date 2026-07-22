@@ -502,6 +502,42 @@ What a later change must not undo:
   `count_at`-only count model, P§8 banner + palette table). Cite `P§n` from these; they now match
   the code.
 
+### Improvement phase — Wave 4 (the lenses: N1, N2, N3 + G8; IMPROVEMENT-PLAN.md)
+
+The lens wave, plus G8 folded in first because it is what makes a cross-core relay honest.
+What a later change must not undo:
+
+- **A target names its core (G8).** `RecordRef` and `Target::Node` each carry
+  `core: Option<String>`. A **row** is stamped by the fold that built it
+  (`RecordRef::in_core`); a **new** record takes the *view's* declaration (`View::core()`,
+  set through `TreeFile`/`Agenda`/`Horizon`'s `.in_core(short)`), which Porticus stamps in
+  `target_for` and in the pick-a-home modal. `None` stays right for a core's own TUI — it
+  has one core and names it in `on_action` (I5). **Speculum's `core_of` re-read is gone**:
+  routing is by provenance, never by matching home/key against every dated core.
+- **`TreeFile::called(id)`** exists because a lineup's view ids must be unique (P§3) and a
+  lens now stacks several record lists in one lineup.
+- **Atrium relays across `pen`/`alb`/`tab`** with *one* `on_action`: the verb grammar is
+  the shared one (§7.2), so only the core differs and nothing guesses it. `d` stays
+  Pensum's alone. Its `count_at` is now node-local (`--here`) as P§6 requires, and stays
+  one core's question — a badge summing three would spawn three children per visible node
+  per frame.
+- **Studium folds one programme at a time**, and a programme is **a node with a
+  `[code]_curriculum.toml`** — discovered, never declared, so §18 gains no config and
+  §19.3's file gains no key. The choice is **view state** (§19.4 says nothing stores it),
+  held in one `scope::Studies` shared by every view; a fresh launch opens on all the
+  studies. `]`/`[`/`p` are wrapped around **every** view by `scope::Switch` (a full `View`
+  delegate) rather than declared on the mosaic alone — the inner view claims a key first.
+  The scope is applied as `-H` and nothing else, so a screen figure reproduces as
+  `stu -H <code>` (I8).
+- **`FieldSpec::switch(label, flag)`** is a form field whose flag takes **no value** —
+  appended only on a typed yes (`y`/`yes`/`true`/`1`). It exists so minting stays the
+  hand's word: Speculum's `new log` and Studium's `new course log` both relay `-c`, and a
+  lens must **never** infer a mint by reading whether the container exists (a typo would
+  mint a series, and §18 keeps no undo). This closed G3's deferred first-grade mint.
+- **The horizon dates the reading.** `Horizon::target()` names the anchor as `at`, and
+  `target_for` now gives `Action::QuickAdd` the same `at` as `Add` — `A` differs from `a`
+  only in how the *home* is chosen, so a dated view dates both.
+
 ### Step 6's durable rules (the chrome)
 
 - **A view declares intent; Porticus runs the flow** (P-II). A view says which `Action`s it
