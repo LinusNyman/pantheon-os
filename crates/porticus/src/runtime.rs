@@ -1267,21 +1267,29 @@ fn target_for(state: &mut State, action: Action) -> Option<Target> {
     let node = state.rail.selected()?;
     let core = view_core(state);
     match action {
-        Action::Add => {
-            // A dated Full view fills the `at` from its own cell, so `a` on a calendar
-            // keeps the day you pointed at rather than defaulting to today (§7.3, P§7).
-            let at = match state.views[state.active].target() {
-                Some(Target::Node { at, .. }) => at,
-                _ => None,
-            };
-            Some(Target::Node { node, at, core })
-        }
-        Action::DoneAll | Action::RemoveAll | Action::QuickAdd => Some(Target::Node {
+        // A dated Full view fills the `at` from its own cell, so `a` on a calendar — or
+        // `A` from anywhere on it — keeps the day you pointed at rather than defaulting
+        // to today (§7.3, P§7). `A` differs from `a` only in how the *home* is chosen,
+        // so the date it carries is the same one.
+        Action::Add | Action::QuickAdd => Some(Target::Node {
+            node,
+            at: view_at(state),
+            core,
+        }),
+        Action::DoneAll | Action::RemoveAll => Some(Target::Node {
             node,
             at: None,
             core,
         }),
         _ => current_target(state),
+    }
+}
+
+/// The active view's own date, where it names one (a Calendar cell, a horizon anchor).
+fn view_at(state: &mut State) -> Option<String> {
+    match state.views[state.active].target() {
+        Some(Target::Node { at, .. }) => at,
+        _ => None,
     }
 }
 
@@ -1497,6 +1505,13 @@ fn submit_form(
         }
         match spec.flag {
             None => invocation.args.push(value.to_owned()),
+            // A switch's flag takes no value: a yes appends the flag alone, anything
+            // else leaves it off entirely (P§7).
+            Some(flag) if spec.switch => {
+                if FieldSpec::is_yes(value) {
+                    invocation.args.push(flag.to_owned());
+                }
+            }
             Some(flag) => {
                 invocation.args.push(flag.to_owned());
                 invocation.args.push(value.to_owned());
@@ -1560,18 +1575,11 @@ fn handle_tree_key(app: &mut impl App, state: &mut State, key: KeyEvent) {
             };
             state.overlays.pop();
             if let Some(node) = node {
-                // The home is the modal's, the core is still the view's: `A` differs
-                // from `a` only in how the node is chosen (P§4).
+                // The home is the modal's; the core and the date are still the view's —
+                // `A` differs from `a` only in how the node is chosen (P§4).
                 let core = view_core(state);
-                open_add_form(
-                    app,
-                    state,
-                    Target::Node {
-                        node,
-                        at: None,
-                        core,
-                    },
-                );
+                let at = view_at(state);
+                open_add_form(app, state, Target::Node { node, at, core });
             }
         }
         _ => {}

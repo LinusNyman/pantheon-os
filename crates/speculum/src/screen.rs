@@ -7,7 +7,9 @@
 //! and reviews through the [`Horizon`], a dated cross-core list the hand widens and
 //! narrows. It relays a human write (I2, §12) by shelling out to the same verb a hand
 //! would type: `e` fixes a reading in place (the editor form — a balance corrected,
-//! §8.3), `x` drops one. The write crosses the JSON boundary over `PATH` (I4, I5).
+//! §8.3), `x` drops one, and `a`/`A` **log** one — surveying yourself is an Annales
+//! reading (§8.6), dated by the window you are reviewing. The write crosses the JSON
+//! boundary over `PATH` (I4, I5).
 
 use pantheon::Code;
 use porticus::view::Row;
@@ -100,9 +102,12 @@ impl App for Speculum {
             // The review: dated points across every core, on a window the hand widens
             // and narrows. Each row carries its own home so a relay reaches the right
             // node, and `e`/`x` fix or drop a reading in place (P§3, P§7).
+            // `a` logs a reading at the tree cursor, `A` picks the node first; both are
+            // dated by the window you are looking at (N3, §8.6).
             Box::new(
                 Horizon::of(move || dated_rows(&for_horizon))
-                    .offering(&[Action::Edit, Action::Remove]),
+                    .offering(&[Action::Edit, Action::Remove, Action::Add, Action::QuickAdd])
+                    .in_core(ANNALES),
             ),
         ]
     }
@@ -137,12 +142,45 @@ impl App for Speculum {
         DATED.iter().map(|short| (*short).to_string()).collect()
     }
 
+    /// The survey form (N3, §8.6): `ann add -H <node> <log> <value> --at <date>`.
+    ///
+    /// **Surveying yourself is logging a reading**, and a reading is Annales's record —
+    /// the mirror only carries the ask (I2, §12). So the fields are the log's name, the
+    /// value, and an optional note; the *date* is not a field, because the horizon you
+    /// are looking at already names it (see `Horizon::target`).
+    ///
+    /// `new log` mints the series the reading goes into, since `add` fills a container
+    /// and never mints one (§7.3). It is a switch the hand sets rather than something
+    /// the lens infers from whether the log exists: inferring it would mint a series on
+    /// a typo, and §18 keeps no undo.
+    fn add_form(&self) -> Vec<porticus::FieldSpec> {
+        vec![
+            porticus::FieldSpec::positional("log"),
+            porticus::FieldSpec::positional("value"),
+            porticus::FieldSpec::field("note", "--note"),
+            porticus::FieldSpec::switch("new log", "-c"),
+        ]
+    }
+
     fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {
         // Only the app knows its verb grammar, because only the app authors the write
         // (I2). Porticus owns the confirm and the relay and knows none of this.
         let Target::Row(RecordRef { home, key, core }) = target else {
-            // Speculum adds nothing: it owns no primitive, so a new record is a core's
-            // to create, not a mirror's (§12).
+            // A **new reading** is the one thing a mirror adds — and it adds nothing:
+            // the write is `ann add`, the same command a hand would type, carrying the
+            // horizon's own date so a reading logged while reviewing last week lands in
+            // last week (§8.6, §12, N3).
+            if let Target::Node { node, at, core } = target
+                && matches!(action, Action::Add | Action::QuickAdd)
+            {
+                let short = core.as_deref()?;
+                let mut args = vec!["add".to_owned(), "-H".to_owned(), node.as_str().to_owned()];
+                if let Some(at) = at {
+                    args.push("--at".to_owned());
+                    args.push(at.clone());
+                }
+                return Some(Invocation::new(short, args));
+            }
             return None;
         };
         // The row *says* which core it came from (G8): the fold that built it read that

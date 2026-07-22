@@ -113,26 +113,20 @@ impl App for Studium {
     ///
     /// Porticus renders the fields and assembles the invocation from the base
     /// [`on_action`](App::on_action) gives it, so Annales still authors the write (I2) and
-    /// owns which fields exist (I5). The course names an **existing** log — a first grade's
-    /// `-c` mint is deferred — so this records a retake or corrects a mark.
+    /// owns which fields exist (I5).
+    ///
+    /// The **first** grade on a course needs the log minted first — `add` fills a
+    /// container and never mints one (§7.3) — which is why recording one was deferred to
+    /// a typed command. The `new course log` switch is that mint, made explicit: the hand
+    /// says so, rather than the lens inferring it by checking whether the log exists and
+    /// silently creating one on a typo (I2, §18 keeps no undo).
     fn add_form(&self) -> Vec<FieldSpec> {
         vec![
-            FieldSpec {
-                label: "course",
-                flag: None,
-                required: true,
-            },
-            FieldSpec {
-                label: "grade",
-                flag: None,
-                required: true,
-            },
-            FieldSpec {
-                label: "credits",
-                flag: None,
-                required: true,
-            },
+            FieldSpec::positional("course"),
+            FieldSpec::positional("grade"),
+            FieldSpec::positional("credits"),
             FieldSpec::field("date", "--at"),
+            FieldSpec::switch("new course log", "-c"),
         ]
     }
 

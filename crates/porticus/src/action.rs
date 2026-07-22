@@ -267,6 +267,14 @@ pub struct FieldSpec {
     pub flag: Option<&'static str>,
     /// A required field must be non-empty before the form will submit.
     pub required: bool,
+    /// A **switch**: the flag takes no value, so a yes here appends the flag alone.
+    ///
+    /// It exists so a form can offer a decision that has no value to type — Annales's
+    /// `-c`, which mints the series a reading goes into (§7.3). The alternative was for
+    /// the relaying app to *infer* the flag by reading whether the container existed,
+    /// which is exactly the small authorship I2 keeps out of a lens: a typo would then
+    /// silently mint a record nobody asked for, and §18 keeps no undo.
+    pub switch: bool,
 }
 
 impl FieldSpec {
@@ -278,6 +286,19 @@ impl FieldSpec {
             label: "name",
             flag: None,
             required: true,
+            switch: false,
+        }
+    }
+
+    /// A required positional, for a core whose `add` takes more than a name — Annales's
+    /// series and its values (§8.6).
+    #[must_use]
+    pub fn positional(label: &'static str) -> Self {
+        Self {
+            label,
+            flag: None,
+            required: true,
+            switch: false,
         }
     }
 
@@ -288,7 +309,32 @@ impl FieldSpec {
             label,
             flag: Some(flag),
             required: false,
+            switch: false,
         }
+    }
+
+    /// A yes/no field whose flag carries no value (`-c`).
+    ///
+    /// The hand types `y` (or `yes`, `true`, `1`); anything else, blank included, leaves
+    /// the flag off. Deliberately opt-in rather than opt-out: the flags worth a switch
+    /// are the ones that *create* something.
+    #[must_use]
+    pub fn switch(label: &'static str, flag: &'static str) -> Self {
+        Self {
+            label,
+            flag: Some(flag),
+            required: false,
+            switch: true,
+        }
+    }
+
+    /// Whether a typed value reads as yes (see [`FieldSpec::switch`]).
+    #[must_use]
+    pub fn is_yes(value: &str) -> bool {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes" | "true" | "1"
+        )
     }
 }
 

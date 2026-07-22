@@ -98,7 +98,7 @@ fn x_on_a_speculum_row_removes_a_reading_in_another_process() {
     // Remove it: `2` → horizon, `x` → the Confirm overlay (over a `--dry-run` relay),
     // `y` → commit. The write leaves this process entirely: Porticus builds `ann rm
     // -H ac <key>`, adds `-C`, `-y` and the plan token, and spawns it (P§7). Speculum
-    // resolved *which* core from nothing but the row's home and key (I5).
+    // routed it by the core the row remembers being folded from (G8, I5).
     let _ = porticus::drive(
         &mut Speculum::new(&root),
         &root,
@@ -116,5 +116,84 @@ fn x_on_a_speculum_row_removes_a_reading_in_another_process() {
         empty,
         "`x` in the lens must reach the file through `ann`: {}",
         String::from_utf8_lossy(&out.stdout)
+    );
+
+    // ── N3: survey yourself — log a reading from the mirror ──────────────────
+    a_reading_is_logged_through_annales(&root);
+}
+
+/// **N3 — the mirror logs a reading** (§8.6, §12).
+///
+/// Speculum could fix and drop readings and mint none, so "survey myself" had no key at
+/// all: `on_action` matched only a row. Logging is a relay like any other — the hand
+/// asks, Annales writes — and the two things it needs beyond a row are the core (the
+/// view declares it) and the *date*, which the horizon already names: a reading logged
+/// while reviewing a window belongs to that window, exactly as a Calendar cell dates its
+/// add (§7.3).
+fn a_reading_is_logged_through_annales(root: &Path) {
+    // `2` → the horizon; `A` → the pick-a-home modal, `<down>` onto `ac`, `<enter>` to
+    // take it; then the survey form: log · value · note · new log. The log does not
+    // exist yet, so `y` on the switch mints it — `add` fills a container and never mints
+    // one (§7.3), and the hand says so rather than the lens inferring it.
+    let form = porticus::drive(
+        &mut Speculum::new(root),
+        root,
+        &porticus::keys("2A<down><enter>"),
+        100,
+        24,
+    )
+    .expect("the lens drives");
+    assert!(
+        form.contains("log") && form.contains("new log"),
+        "the survey form opens with the log, its value, and the mint switch: {form}"
+    );
+
+    porticus::drive(
+        &mut Speculum::new(root),
+        root,
+        &porticus::keys("2A<down><enter>mood<tab>7<tab><tab>y<enter>"),
+        100,
+        24,
+    )
+    .expect("the lens drives the log");
+
+    // Read it back through the core: the reading is filed at `ac`, in a log the relay
+    // minted, keyed by the horizon's own anchor — today, on a freshly opened screen.
+    let out = ann(root, &["series", "mood", "-H", "ac"]);
+    let listed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    let logged = listed.as_array().is_some_and(|lines| {
+        lines
+            .iter()
+            .any(|line| line["data"]["values"][0].as_str() == Some("7"))
+    });
+    assert!(
+        logged,
+        "`a` in the mirror must log the reading through `ann`: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    let today = jiff::Zoned::now().strftime("%y%m%d").to_string();
+    let dated = listed
+        .as_array()
+        .and_then(|lines| lines.first())
+        .and_then(|line| line["key"].as_str().map(str::to_owned));
+    assert_eq!(
+        dated.as_deref(),
+        Some(today.as_str()),
+        "the horizon's window dates the reading (§7.3): {listed}"
+    );
+
+    // And it folds straight back onto the horizon it was logged from (I1).
+    let after = porticus::drive(
+        &mut Speculum::new(root),
+        root,
+        &porticus::keys("2"),
+        100,
+        24,
+    )
+    .expect("the lens drives");
+    assert!(
+        after.contains("mood"),
+        "the new reading is on the horizon: {after}"
     );
 }
