@@ -68,23 +68,15 @@ impl Rule {
     }
 }
 
-/// A rule's declaration (§9.2), read without executing it.
+/// A rule's declaration (§9.2). **The spine's**, not Auspex's own.
 ///
-/// **`writes` is default-deny.** A rule declaring nothing is read-only: it may
-/// propose, but nothing it proposes lands. Capabilities are kept here in their header
-/// form — `core@home[/series]:verbs` — because that is what a hand reads before
-/// granting, and what `ls` must show back unchanged. Parsing them into a structure is
-/// the enforcing verb's job (§9.5), not the browser's.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Header {
-    pub watch: Vec<String>,
-    pub writes: Vec<String>,
-    pub desc: Option<String>,
-    /// Why the header did not parse, where it did not. A rule whose declaration is
-    /// unreadable keeps its default-deny `writes` — the safe reading — and says so
-    /// rather than being silently dropped from the listing.
-    pub error: Option<String>,
-}
+/// The header grammar is a *structural* fact about the tree, and two things outside this
+/// crate need it: `pan`'s node cascade rewrites the `writes=core@home` grants a recode
+/// invalidates (§10.1), and `pan validate` reports one naming a node that is not there
+/// (§10.2). The spine cannot ask Auspex anything (I5), so the grammar lives there and is
+/// read from the hub here like everyone else. What stays here is the *enforcement* — a
+/// capability parsed into the thing a proposal is checked against, in [`grant`] (§9.5).
+pub(crate) use pantheon::rule::Header;
 
 /// Every rule in scope, in tree order (§9.1).
 ///
@@ -145,83 +137,7 @@ fn rule_at(node: &Node, declared: &Code, name: String, path: PathBuf) -> Rule {
         scope: node.code.clone(),
         name,
         declared: mismatch.then(|| declared.as_str().to_string()),
-        header: read_header(&path),
+        header: pantheon::rule::read_header(&path),
         path,
     }
-}
-
-/// The `auspex:` comment header, from the first line — or the second, when a shebang
-/// takes the first, **and no further** (§9.2).
-///
-/// A file with no header is a legal rule: it declares nothing, so it is read-only by
-/// the default-deny rule and proposes into the void until a grant is written.
-fn read_header(path: &Path) -> Header {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        // §9.2: a rule is always text. One that is not is malformed, not missing.
-        return Header {
-            error: Some("not readable as UTF-8 text (§9.2)".to_string()),
-            ..Header::default()
-        };
-    };
-    let mut lines = text.lines();
-    let Some(first) = lines.next() else {
-        return Header::default();
-    };
-    let candidate = if first.starts_with("#!") {
-        lines.next().unwrap_or_default()
-    } else {
-        first
-    };
-    parse_header(candidate)
-}
-
-/// One header line into its three keys. `#` for Python/shell/Ruby, `//` for JS/Rust
-/// (§9.2) — the comment leader is the language's, and Auspex reads both.
-///
-/// **`desc=` takes the rest of the line and so must come last.** §9.2 calls it a
-/// "one-line human description", which a whitespace-separated field cannot hold: the
-/// alternative is quoting, and a header a hand must escape to write is worse than one
-/// with an ordering rule. `watch` and `writes` are single tokens by construction —
-/// comma- and semicolon-separated — so nothing else wants the space.
-fn parse_header(line: &str) -> Header {
-    let body = line.trim_start();
-    let body = body
-        .strip_prefix("//")
-        .or_else(|| body.strip_prefix('#'))
-        .map(str::trim_start);
-    let Some(body) = body.and_then(|b| b.strip_prefix("auspex:")) else {
-        // Not a declaration — a plain comment, or code. Read-only by default-deny.
-        return Header::default();
-    };
-
-    let mut header = Header::default();
-    let fields = match body.split_once("desc=") {
-        Some((before, rest)) => {
-            let rest = rest.trim();
-            header.desc = (!rest.is_empty()).then(|| rest.to_string());
-            before
-        }
-        None => body,
-    };
-    for field in fields.split_whitespace() {
-        let Some((key, value)) = field.split_once('=') else {
-            header.error = Some(format!("{field:?} is not a key=value field (§9.2)"));
-            continue;
-        };
-        match key {
-            "watch" => header.watch = split_list(value, ','),
-            "writes" => header.writes = split_list(value, ';'),
-            _ => header.error = Some(format!("unknown header key {key:?} (§9.2)")),
-        }
-    }
-    header
-}
-
-fn split_list(value: &str, sep: char) -> Vec<String> {
-    value
-        .split(sep)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect()
 }

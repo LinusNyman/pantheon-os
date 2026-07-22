@@ -1879,3 +1879,153 @@ fn a_rewrite_keeps_the_files_own_line_endings() {
     );
     assert!(out.ends_with("Prose.\r\n"), "body altered:\n{out:?}");
 }
+
+// ── G4: the grant cascade and the dead grant (§9.2, §10.1, §10.2) ────────────
+
+/// Write a rule file at a node's meta dir. **`pan new` mints no meta dir** — one appears
+/// on first write — so a fixture placing a rule has to `create_dir_all` it.
+fn write_rule(root: &Path, code: &str, name: &str, contents: &str) {
+    write_record(
+        root,
+        code,
+        &format!("{code}__function__{name}.sh"),
+        contents,
+    );
+}
+
+/// **A recode re-homes the grants that named the branch** (§9.2, §10.1).
+///
+/// `writes=core@home` names a *node*, and a rename changes what the node is called. A
+/// grant left behind points at a code nothing carries, and since the grant is the whole
+/// guard (§9.5) it would go on authorizing nothing in silence — so the rename cascades it
+/// exactly as it cascades a ref.
+///
+/// Both halves are proved at once: a rule **inside** the branch (whose own file moves) and
+/// one **outside** it (which does not), because a rule may grant writes at any node, not
+/// only the one it sits at.
+#[test]
+fn a_rename_cascades_the_writes_grants_that_named_the_branch() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "root", triple("a", "actio"));
+
+    // Inside the branch: the rule's own file is renamed by the recode too.
+    write_rule(
+        &root,
+        "csa",
+        "nudge",
+        "#!/bin/sh\n# auspex: watch=pensum writes=pensum@csa:add;annales@csa/hours:add \
+         desc=csa in the prose stays\necho '{}'\n",
+    );
+    // Outside it: same grant, a file nothing moves.
+    write_rule(
+        &root,
+        "a",
+        "watcher",
+        "#!/bin/sh\n# auspex: writes=pensum@csa:add;album@a:add\necho '{}'\n",
+    );
+
+    // `cs a amicitia` → `cs t amicitia`: the code goes `csa` → `cst` (§5.1).
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("csa").unwrap(), Some("t"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+
+    let inside = std::fs::read_to_string(
+        root.join("c_contextus/c_s_societas/cs_t_amicitia/cst__/cst__function__nudge.sh"),
+    )
+    .expect("the rule moved with its node and kept its name");
+    assert!(
+        inside.contains("writes=pensum@cst:add;annales@cst/hours:add"),
+        "the grant follows the node it named: {inside}"
+    );
+    assert!(
+        inside.contains("desc=csa in the prose stays"),
+        "only the grant went stale — a hand's sentence is not the tools' to edit: {inside}"
+    );
+    assert!(inside.contains("watch=pensum"), "{inside}");
+
+    let outside =
+        std::fs::read_to_string(root.join("a_actio/a__/a__function__watcher.sh")).unwrap();
+    assert!(
+        outside.contains("writes=pensum@cst:add;album@a:add"),
+        "a grant is cascaded wherever the rule sits, and only the entry that moved: {outside}"
+    );
+}
+
+/// A label-only rename moves a directory and no code, so **no grant went stale**.
+#[test]
+fn a_label_rename_leaves_every_grant_alone() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    write_rule(
+        &root,
+        "c",
+        "nudge",
+        "#!/bin/sh\n# auspex: writes=pensum@c:add\necho '{}'\n",
+    );
+
+    let (plan, _) = plan_rename(
+        &root,
+        &Code::parse("c").unwrap(),
+        None,
+        Some("communitas"),
+        None,
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    let text =
+        std::fs::read_to_string(root.join("c_communitas/c__/c__function__nudge.sh")).unwrap();
+    assert!(text.contains("writes=pensum@c:add"), "{text}");
+}
+
+/// **A grant naming no node is reported, never honoured** (§9.2, §10.2).
+///
+/// The guard's own declaration having gone dead is exactly the failure nothing else would
+/// surface: the rule runs, proposes, and every proposal is refused, with no error to read.
+/// A warning, because the *tree* is consistent — and failing closed is the safe direction.
+#[test]
+fn validate_reports_a_grant_naming_no_node() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    write_rule(
+        &root,
+        "c",
+        "nudge",
+        "#!/bin/sh\n# auspex: writes=pensum@c:add;annales@zzz:add\necho '{}'\n",
+    );
+
+    let findings = validate(&root, &album_registry()).unwrap();
+    let dead: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == FindingCode::DeadHeaderCode)
+        .collect();
+    assert_eq!(dead.len(), 1, "only the entry naming nothing: {findings:?}");
+    assert_eq!(dead[0].severity, Severity::Warning);
+    assert!(dead[0].msg.contains("zzz"), "{}", dead[0].msg);
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.severity == pantheon::Severity::Error),
+        "a dead grant is not a broken tree: {findings:?}"
+    );
+
+    // And a rule whose grants all name live nodes says nothing.
+    let clean = fresh_root();
+    mint(&clean, "root", triple("c", "contextus"));
+    write_rule(
+        &clean,
+        "c",
+        "nudge",
+        "#!/bin/sh\n# auspex: writes=pensum@c:add\necho '{}'\n",
+    );
+    assert!(
+        !validate(&clean, &album_registry())
+            .unwrap()
+            .iter()
+            .any(|f| f.code == FindingCode::DeadHeaderCode),
+        "a live grant is not a finding"
+    );
+}

@@ -74,6 +74,8 @@ pub enum FindingCode {
     DuplicateSlug,
     /// A typed token not in normal form (§5.1).
     NonNormalizedName,
+    /// A rule's `writes=` grant naming a node that is not in the tree (§9.2).
+    DeadHeaderCode,
 }
 
 impl FindingCode {
@@ -88,6 +90,7 @@ impl FindingCode {
             FindingCode::DanglingRef => "dangling_ref",
             FindingCode::DuplicateSlug => "duplicate_slug",
             FindingCode::NonNormalizedName => "non_normalized_name",
+            FindingCode::DeadHeaderCode => "dead_header_code",
         }
     }
 }
@@ -186,9 +189,18 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
             ),
         }
     }
+    // The codes a rule's grant may legally name (§9.2). Gathered from the walk rather
+    // than checked one at a time, because a header names nodes anywhere in the tree.
+    let codes = live_codes(root)?;
+    let known = Known {
+        reg,
+        ids: &ids,
+        codes: &codes,
+    };
+
     check_collisions(&spheres, root, &mut findings);
     for (nn, path) in &spheres {
-        walk_node(root, &nn.code, &nn.label, path, reg, &ids, &mut findings)?;
+        walk_node(root, &nn.code, &nn.label, path, &known, &mut findings)?;
     }
 
     findings.sort_by(|a, b| {
@@ -198,13 +210,44 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
     Ok(findings)
 }
 
+/// What the whole tree already answered, carried down the walk (§5.0).
+///
+/// One walk indexes the tree; every per-node check then asks *this* rather than the
+/// filesystem — a kind's owner, an identifier a ref may resolve to, a code a grant may
+/// name. Bundled because they travel together and always have.
+struct Known<'a> {
+    reg: &'a CoreRegistry,
+    /// The `(core, slug)` identities a reference can resolve to (§5.4).
+    ids: &'a HashSet<(String, String)>,
+    /// Every node code in the tree — what a rule's grant is checked against (§9.2).
+    codes: &'a HashSet<String>,
+}
+
+/// Every node code in the tree (§9.2).
+fn live_codes(root: &Path) -> Result<HashSet<String>> {
+    fn collect(node: &crate::tree::Node, out: &mut HashSet<String>) {
+        out.insert(node.code.as_str().to_owned());
+        for child in &node.children {
+            collect(child, out);
+        }
+    }
+    let tops = match crate::tree::build_tree(root, None)? {
+        crate::tree::TreeRoot::Forest(nodes) => nodes,
+        crate::tree::TreeRoot::Subtree(node) => vec![node],
+    };
+    let mut out = HashSet::new();
+    for node in &tops {
+        collect(node, &mut out);
+    }
+    Ok(out)
+}
+
 fn walk_node(
     root: &Path,
     node_code: &Code,
     node_label: &str,
     node_path: &Path,
-    reg: &CoreRegistry,
-    ids: &HashSet<(String, String)>,
+    known: &Known<'_>,
     findings: &mut Vec<Finding>,
 ) -> Result<()> {
     if !is_normalized(node_label) {
@@ -234,7 +277,11 @@ fn walk_node(
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             let class = classify(&name, false, node_code);
-            check_record(root, &class, &entry.path(), reg, ids, findings);
+            if matches!(class, FileClass::Rule { .. }) {
+                check_rule_grant(root, &entry.path(), known.codes, findings);
+                continue;
+            }
+            check_record(root, &class, &entry.path(), known, findings);
         }
     }
 
@@ -274,17 +321,54 @@ fn walk_node(
 
     check_collisions(&children, root, findings);
     for (nn, path) in &children {
-        walk_node(root, &nn.code, &nn.label, path, reg, ids, findings)?;
+        walk_node(root, &nn.code, &nn.label, path, known, findings)?;
     }
     Ok(())
+}
+
+/// A rule's `writes=` grant naming a node that is not there (§9.2, §10.2).
+///
+/// **Dead, not merely stale.** A grant is the whole guard on what a rule may write
+/// (§9.5), so one pointing at a code no node carries authorizes nothing and will go on
+/// authorizing nothing silently — the rule proposes and every proposal is refused, with
+/// no error anywhere to read. `pan rename` cascades a grant it moves; this catches the
+/// one nothing moved, a code hand-typed wrong or a node removed underneath.
+///
+/// A **warning**: the tree is consistent, a rule's declaration is not, and a rule failing
+/// closed is the safe direction (§9.2). An entry that will not parse is Auspex's to
+/// report — it reads the header to run it and says so per rule — so this asks only about
+/// entries that parse and name a node.
+fn check_rule_grant(
+    root: &Path,
+    path: &Path,
+    codes: &HashSet<String>,
+    findings: &mut Vec<Finding>,
+) {
+    for entry in &crate::rule::read_header(path).writes {
+        let Some(home) = crate::rule::capability_home(entry) else {
+            continue;
+        };
+        if !codes.contains(home) {
+            push(
+                findings,
+                FindingCode::DeadHeaderCode,
+                Severity::Warning,
+                root,
+                path,
+                format!(
+                    "grant {entry:?} writes at {home:?}, which is no node in this tree — \
+                     the grant is the whole guard, so it authorizes nothing (§9.2, §9.5)"
+                ),
+            );
+        }
+    }
 }
 
 fn check_record(
     root: &Path,
     class: &FileClass,
     path: &Path,
-    reg: &CoreRegistry,
-    ids: &HashSet<(String, String)>,
+    known: &Known<'_>,
     findings: &mut Vec<Finding>,
 ) {
     let (kind, is_series) = match class {
@@ -313,7 +397,7 @@ fn check_record(
         | FileClass::NodeDir { .. } => return,
     };
 
-    if reg.core_of_kind(kind).is_none() {
+    if known.reg.core_of_kind(kind).is_none() {
         push(
             findings,
             FindingCode::KindOwnedByNoCore,
@@ -336,7 +420,7 @@ fn check_record(
         ),
         Ok(refs) => {
             for r in refs {
-                if !ids.contains(&(r.core.clone(), r.slug.clone())) {
+                if !known.ids.contains(&(r.core.clone(), r.slug.clone())) {
                     push(
                         findings,
                         FindingCode::DanglingRef,

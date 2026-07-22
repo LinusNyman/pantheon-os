@@ -402,9 +402,13 @@ pub fn plan_mv_file(root: &Path, file: &Path, to_code: &Code) -> Result<(Plan, V
 /// to `new`. Unlike `rename`, it does *not* touch the scope node's own directory — it
 /// fixes contents, not identity. Scope defaults to the whole tree.
 ///
-/// A code-prefix hit would also cascade the rule headers naming it (§9.2); that is
-/// deferred with Auspex (no header parser exists yet). Codes are not refs, so no
-/// `core:slug` cascade — that is `rename-pattern`'s, for a *slug* hit.
+/// **Deliberately no grant cascade**, though a code-prefix hit names codes a `writes=`
+/// header might too (§9.2). `rename` cascades them because it *is* a recode — one branch,
+/// one old code, one new — and a grant naming that node is unambiguously stale. This verb
+/// is a repair for files carrying a prefix they should never have had (§10.2): the code it
+/// rewrites was wrong, so a grant naming it was already pointing at nothing, and rewriting
+/// the grant would launder the mistake rather than fix it. Codes are not refs either, so
+/// no `core:slug` cascade — that is `rename-pattern`'s, for a *slug* hit.
 pub fn plan_rename_prefix(
     root: &Path,
     old: &str,
@@ -655,8 +659,96 @@ fn plan_recode(
         rel_path(root, &node.path),
         new_top_rel.to_path_buf(),
     );
-    recode_contents(&node, old_code, new_code, new_top_rel, &mut changes)?;
+    let mut rules = Vec::new();
+    recode_contents(
+        &node,
+        old_code,
+        new_code,
+        new_top_rel,
+        &mut changes,
+        &mut rules,
+    )?;
+    // A label-only rename moves a directory and no code, so no grant went stale.
+    if old_code.as_str() != new_code.as_str() {
+        changes.extend(header_cascade(
+            root, old_code, new_code, &node.path, &rules,
+        )?);
+    }
     Ok(changes)
+}
+
+/// The rule headers a recode invalidates (§9.2, §10.1) — the grant cascade, the twin of
+/// the ref cascade one layer down.
+///
+/// A `writes=core@home` grant names a **node**, and a recode renames nodes; a grant left
+/// pointing at a code that no longer exists is not merely stale but *silently wrong*, and
+/// `writes=` is the whole guard (§9.5). So every rule in the tree is read — a rule may
+/// grant writes at any node, not only the one it sits at (§9.1 scopes where it *runs*, not
+/// where it may write) — and one whose header names the branch is rewritten.
+///
+/// `in_branch` carries the rules the recode is itself moving, paired to where they will
+/// be: a change must name the file's path *after* the renames, since that is when it runs.
+fn header_cascade(
+    root: &Path,
+    old_code: &Code,
+    new_code: &Code,
+    branch_abs: &Path,
+    in_branch: &[(PathBuf, PathBuf)],
+) -> Result<Vec<Change>> {
+    let mut changes = Vec::new();
+    let mut push_if_stale = |read_from: &Path, rel: PathBuf| {
+        let Ok(text) = std::fs::read_to_string(read_from) else {
+            return; // not text is not a header; §9.2 leaves it to `aus` to report
+        };
+        if crate::rule::rewrite_writes_homes(&text, old_code, new_code).is_some() {
+            changes.push(Change::RewriteHeader {
+                rel_path: rel,
+                from: old_code.clone(),
+                to: new_code.clone(),
+            });
+        }
+    };
+
+    for (old_abs, new_rel) in in_branch {
+        push_if_stale(old_abs, new_rel.clone());
+    }
+    // The rest of the tree, whose rule files this op does not move.
+    let tops = match build_tree(root, None)? {
+        TreeRoot::Forest(nodes) => nodes,
+        TreeRoot::Subtree(node) => vec![node],
+    };
+    let mut outside = Vec::new();
+    for node in &tops {
+        collect_rule_files(node, branch_abs, &mut outside);
+    }
+    for abs in outside {
+        let rel = rel_path(root, &abs);
+        push_if_stale(&abs, rel);
+    }
+    Ok(changes)
+}
+
+/// Every rule file at or under `node` that is **not** inside `skip`'s branch (§9.1).
+///
+/// This is the second walk in the workspace looking for [`FileClass::Rule`] — no `Store`
+/// walk could ever yield one, since a rule belongs to no core's token set — so it is
+/// built the same way Auspex's is: the tree walk plus a per-node meta-dir `read_dir`.
+fn collect_rule_files(node: &Node, skip: &Path, out: &mut Vec<PathBuf>) {
+    if node.path == skip {
+        return;
+    }
+    let meta = node.path.join(format!("{}__", node.code.as_str()));
+    if let Ok(entries) = std::fs::read_dir(&meta) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if matches!(classify(&name, false, &node.code), FileClass::Rule { .. }) {
+                out.push(entry.path());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_rule_files(child, skip, out);
+    }
 }
 
 /// The meta dir, its files, loose documents, and child node dirs of `node` — renamed to
@@ -669,6 +761,7 @@ fn recode_contents(
     new_code: &Code,
     node_new_rel: &Path,
     changes: &mut Vec<Change>,
+    rules: &mut Vec<(PathBuf, PathBuf)>,
 ) -> Result<()> {
     let node_new_code = recode_code(&node.code, old_code, new_code)?;
     let old_meta = format!("{}__", node.code.as_str());
@@ -690,6 +783,14 @@ fn recode_contents(
                 node_new_rel.join(&new_meta).join(&fname),
                 node_new_rel.join(&new_meta).join(&renamed),
             );
+            // A rule the recode moves: remembered with where it lands, so the grant
+            // cascade can name the path the rewrite will actually find (§9.2, §10.1).
+            if matches!(classify(&fname, false, &node.code), FileClass::Rule { .. }) {
+                rules.push((
+                    meta_abs.join(&fname),
+                    node_new_rel.join(&new_meta).join(&renamed),
+                ));
+            }
         }
     }
 
@@ -725,7 +826,7 @@ fn recode_contents(
             node_new_rel.join(&old_dirname),
             child_new_rel.clone(),
         );
-        recode_contents(child, old_code, new_code, &child_new_rel, changes)?;
+        recode_contents(child, old_code, new_code, &child_new_rel, changes, rules)?;
     }
     Ok(())
 }

@@ -35,6 +35,16 @@ pub enum Change {
         from: String,
         to: String,
     },
+    /// A rule's `writes=` grant, re-homed for a recoded branch (§9.2, §10.1).
+    ///
+    /// The twin of `RewriteRefs` one layer down: a ref names a *record* and a grant names
+    /// a *node*, and a recode invalidates both. `from`/`to` are the branch's old and new
+    /// codes; which entries in the header they touch is the rewrite's to work out.
+    RewriteHeader {
+        rel_path: PathBuf,
+        from: Code,
+        to: Code,
+    },
 }
 
 impl Change {
@@ -53,6 +63,9 @@ impl Change {
                 rel_path, from, to, ..
             } => {
                 json!({ "op": "rewrite_refs", "path": rel_path.to_string_lossy(), "from": from, "to": to })
+            }
+            Change::RewriteHeader { rel_path, from, to } => {
+                json!({ "op": "rewrite_header", "path": rel_path.to_string_lossy(), "from": from.as_str(), "to": to.as_str() })
             }
         }
     }
@@ -134,6 +147,15 @@ impl Plan {
                     let from = crate::envelope::Ref::parse(from)?;
                     let to = crate::envelope::Ref::parse(to)?;
                     crate::cascade::rewrite_refs_in_file(root, rel_path, *is_series, &from, &to)?;
+                }
+                // Likewise after the renames: the rule file has already moved, so this
+                // path is where it is now (§10.1).
+                Change::RewriteHeader { rel_path, from, to } => {
+                    let path = root.join(rel_path);
+                    let text = std::fs::read_to_string(&path)?;
+                    if let Some(rewritten) = crate::rule::rewrite_writes_homes(&text, from, to) {
+                        std::fs::write(&path, rewritten)?;
+                    }
                 }
             }
         }
