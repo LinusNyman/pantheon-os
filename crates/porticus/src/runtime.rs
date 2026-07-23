@@ -1610,8 +1610,11 @@ fn submit_form(
 /// focused on the first. Shared by `a` (the home is the tree cursor) and the pick-a-home
 /// modal (the home is the node selected there).
 fn open_add_form(app: &mut impl App, state: &mut State, target: Target) {
-    let fields = app
+    // The view's form where it declares one, else the app's — a lens's `a` means a
+    // different record on each tab (§19.8), a core's means its one primitive (P§7).
+    let fields = state.views[state.active]
         .add_form()
+        .unwrap_or_else(|| app.add_form())
         .into_iter()
         .map(|spec| (spec, String::new()))
         .collect();

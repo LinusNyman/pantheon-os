@@ -225,6 +225,44 @@ fn seed(root: &Path) {
     run(root, "pen", &["add", "-H", "asd", "read_chapter", "-y"]);
     run(root, "pen", &["add", "-H", "a", "buy_milk", "-y"]);
 
+    // A professor, referenced from a course's grade fact — "contacts" is the fold over the
+    // people a course's records point at (§19.6), never a copy under the course (I3).
+    run(
+        root,
+        "alb",
+        &["-H", "asd", "add", "Ada Prof", "-k", "person"],
+    );
+    run(
+        root,
+        "ann",
+        &[
+            "-H",
+            "asd",
+            "add",
+            "mekanik",
+            "B",
+            "7.5",
+            "-a",
+            "250602",
+            "-r",
+            "album:ada_prof",
+        ],
+    );
+
+    // A reflection — a Tabella document whose `type` is `reflection` (§19.6, §8.7).
+    run(
+        root,
+        "tab",
+        &[
+            "-H",
+            "asd",
+            "add",
+            "Mekanik Retrospective",
+            "--type",
+            "reflection",
+        ],
+    );
+
     // A study-time log — named for no course, so it is time, not a grade (§19.2, §19.6).
     run(
         root,
@@ -408,6 +446,118 @@ fn the_switch_scopes_the_studies(root: &Path) {
     );
 }
 
+/// **G2 — the derivations §19.6 names but nothing read** (people, reflections, the
+/// occurrences ahead), and **G3 — the relays §19.8 lists but nothing wired** (close an
+/// enrolment, log study time, place an exam).
+///
+/// Six tabs, one `on_action`, and the core each write reaches named by the *address* the
+/// row or the view carries (G8) — not guessed from the action.
+fn the_rest_of_a_study_life(root: &Path) {
+    let drive = |script: &str| {
+        porticus::drive(
+            &mut Studium::new(root),
+            root,
+            &porticus::keys(script),
+            100,
+            24,
+        )
+        .expect("the lens drives")
+    };
+
+    // ── the tabs §19.6 asks for ──────────────────────────────────────────────
+    // Reached by their number keys rather than read off the tab strip: seven tabs is more
+    // than 100 columns of strip, so the last one is legitimately clipped on this width and
+    // the switch is what proves it is in the lineup (P§4).
+    for (key, locator) in [
+        ("4", "by date"),
+        ("5", "by date"),
+        ("6", "who this points at"),
+        ("7", "what it wrote about itself"),
+    ] {
+        let frame = drive(key);
+        assert!(
+            frame.contains(locator),
+            "view {key} is in the lineup and names itself: {frame}"
+        );
+    }
+
+    // People is a fold over the *references* a study life's records make (§19.6).
+    let people = drive("6");
+    assert!(
+        people.contains("ada prof"),
+        "the professor a grade fact points at (§19.6): {people}"
+    );
+    // Reflections is a fold over Tabella documents typed `reflection` (§8.7).
+    let reflections = drive("7");
+    assert!(
+        reflections.contains("mekanik retrospective"),
+        "the reflection, from its frontmatter and no further (§6.1): {reflections}"
+    );
+
+    // ── G3: log study time (§19.8) ───────────────────────────────────────────
+    // `5` is the study tab; `a` opens **its own** form, not the app's grade form — a
+    // lens's `a` means a different record on each tab.
+    let form = drive("5a");
+    assert!(
+        form.contains("hours") && !form.contains("credits"),
+        "the study tab's `a` opens the study form, not the grade form: {form}"
+    );
+    drive("5alectures<tab>2.5<tab>250610<tab>y<enter>");
+    let logged = Command::new(bin_dir().join("ann"))
+        .arg("-C")
+        .arg(root)
+        .args(["series", "lectures", "-f", "json"])
+        .output()
+        .expect("ann runs");
+    let lines: Value = serde_json::from_slice(&logged.stdout).unwrap_or_default();
+    assert_eq!(
+        lines[0]["data"]["values"][0].as_str(),
+        Some("2.5"),
+        "`a` on the study tab logged hours through `ann` (§19.8): {lines}"
+    );
+
+    // ── G3: place an exam (§19.8) ────────────────────────────────────────────
+    // `4` is the deadlines tab. Its form is Fasti's: series, what, date, what it
+    // concerns, and the explicit mint — five fields, none of them a grade's.
+    drive("4atentor<tab>mekanik tenta<tab>260315<tab>fasti:mekanik<tab>y<enter>");
+    let placed = Command::new(bin_dir().join("fas"))
+        .arg("-C")
+        .arg(root)
+        .args(["series", "tentor", "-f", "json"])
+        .output()
+        .expect("fas runs");
+    let events: Value = serde_json::from_slice(&placed.stdout).unwrap_or_default();
+    assert_eq!(
+        events[0]["key"].as_str(),
+        Some("260315"),
+        "`a` on the deadlines tab placed a Fasti event (§19.8, §8.4): {events}"
+    );
+    assert_eq!(
+        events[0]["refs"][0].as_str(),
+        Some("fasti:mekanik"),
+        "referencing the enrolment it concerns — what makes a sitting an exam (§8.4)"
+    );
+
+    // ── G3: close an enrolment (§19.8) ───────────────────────────────────────
+    // `e` on a courses row prompts for the day and relays `fas edit <span> --to <date>`.
+    // `kvantfysik` was seeded open; `<down>` past mekanik/elektromagnetism/flervariabel
+    // is fragile, so search picks it out — `/` narrows the rows and ranks the match first.
+    let on_asd = "2<down><right><down>";
+    drive(&format!("{on_asd}<tab>/kvantfysik<enter>e260610<enter>y"));
+    let closed = Command::new(bin_dir().join("fas"))
+        .arg("-C")
+        .arg(root)
+        .args(["get", "kvantfysik", "-f", "json"])
+        .output()
+        .expect("fas runs");
+    let span: Value = serde_json::from_slice(&closed.stdout).unwrap_or_default();
+    assert_eq!(
+        span["data"]["to"].as_str(),
+        Some("260610"),
+        "`e` on a courses row closed the enrolment through `fas` (§19.8): {span}"
+    );
+}
+
 /// One test on purpose: it mutates `PATH` once (a process-global the harness must not
 /// race), then folds a rich tree, an empty one, and the real screen over that one `PATH`.
 #[test]
@@ -512,6 +662,9 @@ fn the_gpa_folds_across_three_cores_and_the_screen_shows_it() {
 
     // ── N2: the programme switch scopes the screen (§19.4, §19.6) ─────────────
     the_switch_scopes_the_studies(&root);
+
+    // ── G2/G3: the rest of §19.6's tabs and §19.8's relays ────────────────────
+    the_rest_of_a_study_life(&root);
 
     // ── an empty scope is no GPA, not a zero (§19.4) ─────────────────────────
     // A studies life with no grade fact yet: the fold ran and found nothing to weigh, so

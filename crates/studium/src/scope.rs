@@ -222,6 +222,14 @@ impl<V: porticus::View> porticus::View for Switch<V> {
         self.inner.prompts_for(action)
     }
 
+    fn add_form(&self) -> Option<Vec<porticus::FieldSpec>> {
+        self.inner.add_form()
+    }
+
+    fn focused_ref(&self) -> Option<String> {
+        self.inner.focused_ref()
+    }
+
     fn is_detail(&self) -> bool {
         self.inner.is_detail()
     }

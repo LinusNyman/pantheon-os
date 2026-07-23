@@ -109,7 +109,10 @@ At a terminal the bare `stu` opens the mosaic; down a pipe it emits the figures 
 
 ```json
 { "gpa": 4.09, "credits_completed": 60.0, "credits_in_progress": 30.0,
-  "open_courses": 4, "study_hours": 128.5, "next_exam": { "date": "260315", "course": "sf1624" } }
+  "open_courses": 4, "study_hours": 128.5, "next_exam": { "date": "260315", "course": "sf1624" },
+  "period": { "label": "P6", "terms": ["ht"] } }
 ```
+
+`period` is where the study life *is*, absolutely (§19.5) — the label today falls in, counted from the programme's start. It is `null` wherever no single programme is in scope, because the count of study years has no answer across two degrees; that is the same reason the screen folds one programme at a time (§19.4), read here as the count-versus-null discipline rather than as a zero.
 
 Each field is a fold, and each obeys the count-versus-null discipline (§12): a core off `PATH` yields `null`, never `0` — an absent Fasti is not a GPA of zero, and no graded course yet is a `gpa` of `null`. Picking one figure out of that object is the caller's, as with any tool declaring no read flags of its own (§8.7). Studium reports its crate and format versions like any app, so `pan doctor` sees it (§5.5, §15.5), and nothing consumes it in turn — no arrow points at a lens (§4). It is a lens like the other two, distinguished only by the domain it folds and the one figure that gives it its name.

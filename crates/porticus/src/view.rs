@@ -16,7 +16,7 @@ use pantheon::Code;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use crate::action::{Action, RecordRef, Target};
+use crate::action::{Action, FieldSpec, RecordRef, Target};
 use crate::theme::Theme;
 
 /// The switcher label and the Help key. Unique within a lineup; the number key is
@@ -181,6 +181,22 @@ pub trait View {
     /// What a Full view names in the header where a Rail view shows the path bar
     /// (P§4): a Calendar's month, a Timeline's range. Defaults to the view's id.
     fn locator(&self) -> Option<String> {
+        None
+    }
+
+    /// The fields `a` collects **on this view**, where they differ from the app's (§7.3,
+    /// P§7).
+    ///
+    /// One instrument, one add form is right for a core: it has one primitive and one
+    /// shape to fill in. A **lens** does not — Studium's `a` records a grade on the
+    /// courses tab, logs hours on the study tab, and places an exam on the deadlines tab,
+    /// three different records in three different cores (§19.8). The form belongs to
+    /// whatever the tab is about, so the view answers where it has an answer and `None`
+    /// falls back to [`App::add_form`](crate::App::add_form).
+    ///
+    /// It stays a *declaration*: the view says which fields exist, and Porticus still
+    /// renders them, assembles the invocation, and runs the confirm (P-II).
+    fn add_form(&self) -> Option<Vec<FieldSpec>> {
         None
     }
 
