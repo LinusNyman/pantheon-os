@@ -457,39 +457,43 @@ An audit swept `crates/` + the spec for every stub, deferral, and spec-claimed-b
 lens breadth* (Studium) and a handful of spec'd-but-unbuilt cascade/chrome features — each documented
 in-place. Split by whether to schedule it.
 
-### Buildable now — schedule these as per-app items
+### Buildable now — **all done**; kept as the record of what each was
 
-- **G1 — Studium §19.5 terms/periods + the "P6" absolute period label.** `curriculum.rs:52-54`
+Every item below is built (G8 landed with Wave 4; G1–G7 in the Wave 6 pass). The three
+stale comments named at the end of this section are corrected. What each settled that a
+later change must not undo is recorded in CLAUDE.md's Wave 6 section, not here.
+
+- **G1 ✅ — Studium §19.5 terms/periods + the "P6" absolute period label.** `curriculum.rs:52-54`
   parses the scales but **silently drops** `periods_per_year`/`terms`/`periods`; none of §19.5 exists
   — no `(study_year−1)×periods_per_year + n` label, no study-year derivation, no multi-period `P3–P4`
   interval read. The data is already in the file; nothing reads it. *studium · M.*
-- **G2 — Studium §19.6 derivations that are absent.** People (an **Album** contacts fold) and
+- **G2 ✅ — Studium §19.6 derivations that are absent.** People (an **Album** contacts fold) and
   Reflections (**Tabella** `type=reflection`) are **entirely unread** — Studium touches only `fas`/`ann`
   (`fold.rs:21`). Deadlines/exams is **partial**: only a single `next_exam` (`fold.rs:208`), no "next
   28 days" list, no Calendar drop, and the exam-vs-deadline split is deferred (`fold.rs:207`). The
   lineup has only three views (`screen.rs:64`) against §19.6's six tabs — no Timeline/Calendar/
   study-time/people/reflections views. *studium · L · pairs with N2.*
-- **G3 — Studium's missing relays + first-grade mint.** §19.8 lists five relays; only two are wired
+- **G3 ✅ — Studium's missing relays + first-grade mint.** §19.8 lists five relays; only two are wired
   (`pen edit --done`, `ann add` — `screen.rs:132`). **Close-enrolment** (`fas edit --to`),
   **log-study-time** (`ann … --at`), and **place-exam** (`fas add` event) are unbuilt, and recording a
   **first** grade is deferred (`screen.rs:110` — only retake/correction today; a first mint needs
   `ann -c` or **X0**'s ingest path). *studium · M · folds into N1/N2; the first-grade mint may wait on X0.*
-- **G4 — Auspex `writes=` rule-header cascade on recode.** `pan`'s node cascade renames rule *files*
+- **G4 ✅ — Auspex `writes=` rule-header cascade on recode.** `pan`'s node cascade renames rule *files*
   by prefix but never rewrites the invalidated `writes=core@home` grant tokens *inside* a header
   (`node_ops.rs:405`), plus the paired "dead code in a header" validate finding is unbuilt. The comment
   says "no header parser exists yet" — **stale**: it does now (`auspex/src/grant.rs:63`), so the parser
   can be reused. *pantheon + pan + auspex · M.*
-- **G5 — Same-core ref-chip follow (P§3).** Chips are display-only (`entity_card.rs:24`, echoed in
+- **G5 ✅ — Same-core ref-chip follow (P§3).** Chips are display-only (`entity_card.rs:24`, echoed in
   every core screen). A **cross-core** follow is barred forever by I5, but a **same-core** jump is "a
   natural later jump." *porticus · S–M.*
-- **G6 — `pan` TUI `m` (move) is dark.** No destination prompt (`pan/src/screen.rs:124`, pinned dark by
+- **G6 ✅ — `pan` TUI `m` (move) is dark.** No destination prompt (`pan/src/screen.rs:124`, pinned dark by
   `pan/tests/screen.rs:129`). The pick-a-home tree modal **now exists** (`runtime.rs:257`, `Overlay::Tree`)
   — wire it to a `pan mv` relay. *pan · S.*
-- **G7 — Validate genuine-choice candidate fixes (§10.2).** The single-fix apply landed (`pan` screen
+- **G7 ✅ — Validate genuine-choice candidate fixes (§10.2).** The single-fix apply landed (`pan` screen
   `d` relays the rename), but the spine emits a fix only for the one unambiguous rename shape;
   **multi-candidate findings carry `None` and offer nothing** (`validate.rs:25`). Needs the spine to
   produce candidate lists. *pantheon + pan · M.*
-- **G8 — `RecordRef` gains a `core` slot.** Speculum re-reads all dated cores to recover which binary
+- **G8 ✅ — `RecordRef` gains a `core` slot.** Speculum re-reads all dated cores to recover which binary
   owns a row (`speculum/src/screen.rs:62`, `core_of`) — a documented Porticus gap; two cores filing the
   same date-key at one node would misroute the relay. Adding a `core` to `RecordRef` hardens it and
   simplifies every lens relay. *porticus + pantheon · M · helps N1/N3.*
@@ -506,17 +510,17 @@ in-place. Split by whether to schedule it.
 ### Already resolved — don't re-file (CLAUDE.md/older notes are stale here)
 
 `Pick` is now the tree-as-modal (`Overlay::Tree`), not a line prompt; the single-fix validate apply
-landed; `Calendar`/`Timeline` exist. Three **stale comments/spec lines** worth a one-line cleanup when
-nearby: `docs/src/spec/19-studium.md:43` still says `curriculum.toml` → `unclassifiable_file` (it now
-routes to `Bulk`); `node_ops.rs:405` says "no header parser exists yet" (it does); `validate.rs:25`
-says the mutators "are still stubbed" (the single-fix path landed).
+landed; `Calendar`/`Timeline` exist. The three **stale comments/spec lines** this section used to
+name are all corrected: `docs/src/spec/19-studium.md` now says a `curriculum.toml` routes to `Bulk`,
+`node_ops.rs` no longer claims "no header parser exists yet" (the spine owns one), and `validate.rs`
+no longer says the mutators "are still stubbed".
 
 ---
 
 ## Suggested order
 
 Wave 0 (C1, C2) → Wave 1 (C3, C4, C5, C6) → Wave 2 (L1, L3; **L2 = just use `rg`**, nothing to build) →
-Wave 3 (P1, P2, P3) → Wave 4 (N1 → N2, N3) → Wave 5 (X0 → X1). **L3** (human errors) and **P3** (drop
+Wave 3 (P1, P2, P3) → Wave 4 (N1 → N2, N3) → **Wave 6 (G1–G8, done)** → Wave 5 (X0 → X1). **L3** (human errors) and **P3** (drop
 redundant columns) are tiny, high-daily-value CLI wins — pull them early with C1/C2 if you want the
 terminal usable first. **Wave 6** items are independent and slot in wherever they fit — G2/G3 alongside
 N2 (all Studium), G8 before N1/N3 (it hardens every lens relay). **C7** (figlet

@@ -538,6 +538,65 @@ What a later change must not undo:
   `target_for` now gives `Action::QuickAdd` the same `at` as `Add` — `A` differs from `a`
   only in how the *home* is chosen, so a dated view dates both.
 
+### Improvement phase — Wave 6 (the audit: G1–G7; IMPROVEMENT-PLAN.md)
+
+The audit wave. **Every Wave-6 item is now built** (G8 landed in Wave 4), so the plan's
+"buildable now" list is empty and its three stale comments are corrected. What a later
+change must not undo:
+
+- **The rule header grammar lives in the spine** (`pantheon::rule`), not in `auspex`. It is
+  a *structural* fact about the tree: `pan`'s node cascade rewrites the `writes=core@home`
+  grants a recode invalidates (§10.1), and `pan validate` reports one naming no node
+  (`dead_header_code`, §10.2). The spine cannot ask Auspex anything (I5), so the grammar is
+  read from the hub and Auspex's copy is gone. **Enforcement stays in `auspex::grant`** —
+  parsing a capability into what a proposal is checked against is §9.5's, not the spine's.
+- **`Change::RewriteHeader` is `RewriteRefs` one layer down**: a ref names a record, a
+  grant names a node, and a recode invalidates both. Emitted for **every rule in the tree**,
+  not only the branch's — a rule may grant writes anywhere (§9.1 scopes where it *runs*).
+  Rules the op moves are named by the path they land at, since the rewrite runs after the
+  renames; the tree walk filters by those paths rather than by directory, or a root-scoped
+  `rename-prefix` would rewrite each moving rule twice, the second time at a path that no
+  longer exists. Only `writes=` is touched — `watch=` names cores, `desc=` is prose.
+  `rename-prefix` cascades too, which §10.2 states outright.
+- **A genuine choice is a row per candidate, never a chooser.** `Finding` carries
+  `candidates: Vec<String>` beside `fix`; a cross-node duplicate slug lists one
+  `pan rename-pattern` per holder. `pan`'s validate tab renders each on its own line and
+  `d` relays **whatever command the focused row carries**, so the tab teaches `pan` no fix
+  shapes and a new one in the spine works there the day it lands.
+- **`Overlay::Tree` carries a `Picking`**: `Home` hands the node to the add form (`A`),
+  `Destination` appends it to the invocation the app built (`m`). A move names a *node*, so
+  it is picked off the tree, never typed as a code.
+- **`f` follows a ref chip, and only within one core** (I5). `View::focused_ref` says
+  *which* reference; Porticus resolves it through the spine, checks the core against
+  `ident().short` via the registry, then `Rail::reveal`s the node and pins the record. A
+  cross-core chip is answered with which binary owns it — never silently ignored, never
+  rendered by an instrument that links no such core. `Rail::reveal` is an *address* seek,
+  distinct from the search jump `Rail::seek` once was (removed in C4).
+- **`porticus::drive` draws before each key**, as `run` does. A view that establishes
+  something while painting — an `EntityCard`'s chip strip, the one cursor a card has — had
+  established nothing by the time a key arrived, so a screen only reachable after a frame
+  was a screen no test could reach.
+- **`View::add_form` overrides the app's.** One instrument one form is right for a *core* —
+  it has one primitive. A **lens** does not: Studium's `a` records a grade, logs hours, or
+  places an occurrence depending on the tab, so the form belongs to what the tab is about.
+- **`list` is the present, not the history** (I1). A core's `list` answers with the *latest*
+  line of each series, so a fold that reads refs or occurrences straight off it hides every
+  earlier reading — a professor named on one grade vanishes the day a retake lands.
+  `fold::series_lines` names the series from `list`, then reads each. **Any cross-core fold
+  over samples owes the same two-step**; only entities (a Fasti `span`) are whole in `list`.
+- **§19.5 is built and its study year anchors on the programme's start**, which is what
+  §19.5 says. Anchoring on the first period's date looks equivalent and is not: a programme
+  beginning 1 August against a P1 opening on the 26th would read its own first spring as
+  year two. A period may also *wrap* the new year (KTH's P2 runs into January), so each
+  year-less anchor is materialised per calendar year from the one before the span opens.
+- **Studium is §19.6's seven tabs and §19.8's five relays, on one `on_action`.** That works
+  because the verb grammar is shared (§7.2) and only the core differs — read off the
+  *address* (G8), never guessed from the action. **People and reflections stay read-only**:
+  §19.8 lists no relay for either, and a person is Album's to edit in `alb`.
+- **The occurrence form carries a `concerns` field** because §8.4 gives an event no kind
+  beyond `event`. What makes a sitting an exam is the reference to its enrolment, and a hand
+  writes it — a lens inferring one would be deciding a core's vocabulary (I5).
+
 ### Step 6's durable rules (the chrome)
 
 - **A view declares intent; Porticus runs the flow** (P-II). A view says which `Action`s it
