@@ -62,6 +62,9 @@ impl Mosaic {
             ),
             face("study hours", number(&f["study_hours"], " h"), "logged"),
             face("next exam", next_exam(&f["next_exam"]), "ahead"),
+            // Where the study life *is*, absolutely (§19.5) — a dash on all-the-studies,
+            // where there is no single programme to count years from.
+            face("period", period(&f["period"]), "now"),
         ]
     }
 }
@@ -143,5 +146,16 @@ fn next_exam(value: &Value) -> String {
     match (value["date"].as_str(), value["course"].as_str()) {
         (Some(date), Some(course)) => format!("{date}   {course}"),
         _ => "—".to_string(),
+    }
+}
+
+/// The absolute period, with the term beside it where the calendar names one (§19.5).
+fn period(value: &Value) -> String {
+    let Some(label) = value["label"].as_str() else {
+        return "—".to_string();
+    };
+    match value["terms"].as_array().and_then(|t| t.first()) {
+        Some(Value::String(term)) => format!("{label}   {term}"),
+        _ => label.to_owned(),
     }
 }

@@ -2029,3 +2029,32 @@ fn validate_reports_a_grant_naming_no_node() {
         "a live grant is not a finding"
     );
 }
+
+/// **`rename-prefix` cascades grants too** (§10.2, §9.2).
+///
+/// The repair renames child *directories*, so a node's code really does change and a
+/// `writes=core@home` naming it really is stale — §10.2 says it cascades "exactly as
+/// `rename` and `mv` do", and it does.
+#[test]
+fn rename_prefix_cascades_the_grants_the_repair_invalidates() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    // A hand's `mkdir` left a child carrying the wrong code prefix: `cs` under `c`, when
+    // its own name says `ct`. The repair rewrites the prefix over the scope.
+    write_rule(
+        &root,
+        "cs",
+        "nudge",
+        "#!/bin/sh\n# auspex: writes=pensum@cs:add\necho '{}'\n",
+    );
+
+    let (plan, _) =
+        plan_rename_prefix(&root, "cs", "ct", Some(&Code::parse("c").unwrap())).unwrap();
+    plan.apply(&root).unwrap();
+
+    let text =
+        std::fs::read_to_string(root.join("c_contextus/c_s_societas/ct__/ct__function__nudge.sh"))
+            .expect("the rule kept its name past the prefix rewrite");
+    assert!(text.contains("writes=pensum@ct:add"), "{text}");
+}

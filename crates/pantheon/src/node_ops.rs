@@ -402,13 +402,10 @@ pub fn plan_mv_file(root: &Path, file: &Path, to_code: &Code) -> Result<(Plan, V
 /// to `new`. Unlike `rename`, it does *not* touch the scope node's own directory — it
 /// fixes contents, not identity. Scope defaults to the whole tree.
 ///
-/// **Deliberately no grant cascade**, though a code-prefix hit names codes a `writes=`
-/// header might too (§9.2). `rename` cascades them because it *is* a recode — one branch,
-/// one old code, one new — and a grant naming that node is unambiguously stale. This verb
-/// is a repair for files carrying a prefix they should never have had (§10.2): the code it
-/// rewrites was wrong, so a grant naming it was already pointing at nothing, and rewriting
-/// the grant would launder the mistake rather than fix it. Codes are not refs either, so
-/// no `core:slug` cascade — that is `rename-pattern`'s, for a *slug* hit.
+/// **A code-prefix hit cascades the rule headers naming it** (§10.2, §9.2), exactly as
+/// `rename` and `mv` do: the walk renames child *directories* too, so a node's code really
+/// does change and a `writes=core@home` grant naming it really is stale. Codes are not
+/// refs, so no `core:slug` cascade — that is `rename-pattern`'s, for a *slug* hit.
 pub fn plan_rename_prefix(
     root: &Path,
     old: &str,
@@ -430,7 +427,8 @@ pub fn plan_rename_prefix(
     };
     let scope_rel = rel_path(root, &scope_path);
     let mut changes = Vec::new();
-    walk_prefix(&scope_path, &scope_rel, old, new, &mut changes)?;
+    let mut rules = Vec::new();
+    walk_prefix(&scope_path, &scope_rel, old, new, &mut changes, &mut rules)?;
 
     if changes.is_empty() {
         return Err(Error::not_found(format!(
@@ -438,6 +436,13 @@ pub fn plan_rename_prefix(
         )));
     }
     let count = changes.len();
+    // The grants naming the codes this repair rewrote (§10.2, §9.2).
+    changes.extend(header_cascade(
+        root,
+        &Code::parse(old)?,
+        &Code::parse(new)?,
+        &rules,
+    )?);
     let plan = Plan::new("rename-prefix", changes);
     let record = json!({ "old": old, "new": new, "renamed": count });
     Ok((plan, record))
@@ -453,6 +458,7 @@ fn walk_prefix(
     old: &str,
     new: &str,
     changes: &mut Vec<Change>,
+    rules: &mut Vec<(PathBuf, PathBuf)>,
 ) -> Result<()> {
     for entry in std::fs::read_dir(dir_abs)? {
         let entry = entry?;
@@ -464,7 +470,12 @@ fn walk_prefix(
             push_rename(changes, dir_rel.join(&name), child_rel.clone());
         }
         if is_dir {
-            walk_prefix(&entry.path(), &child_rel, old, new, changes)?;
+            walk_prefix(&entry.path(), &child_rel, old, new, changes, rules)?;
+        } else if name.starts_with(&format!("{old}__function__")) {
+            // A rule this repair moves, paired to where it lands (§9.2). Matched on the
+            // name rather than through `classify`, which wants the *node's* code and this
+            // walk is precisely where a file's prefix and its node disagree.
+            rules.push((entry.path(), child_rel));
         }
     }
     Ok(())
@@ -670,9 +681,7 @@ fn plan_recode(
     )?;
     // A label-only rename moves a directory and no code, so no grant went stale.
     if old_code.as_str() != new_code.as_str() {
-        changes.extend(header_cascade(
-            root, old_code, new_code, &node.path, &rules,
-        )?);
+        changes.extend(header_cascade(root, old_code, new_code, &rules)?);
     }
     Ok(changes)
 }
@@ -686,14 +695,14 @@ fn plan_recode(
 /// grant writes at any node, not only the one it sits at (§9.1 scopes where it *runs*, not
 /// where it may write) — and one whose header names the branch is rewritten.
 ///
-/// `in_branch` carries the rules the recode is itself moving, paired to where they will
-/// be: a change must name the file's path *after* the renames, since that is when it runs.
+/// `moving` carries the rules this operation is itself relocating, paired to where they
+/// will be: a change must name the file's path *after* the renames, since that is when it
+/// runs. Every other rule in the tree is read where it already sits.
 fn header_cascade(
     root: &Path,
     old_code: &Code,
     new_code: &Code,
-    branch_abs: &Path,
-    in_branch: &[(PathBuf, PathBuf)],
+    moving: &[(PathBuf, PathBuf)],
 ) -> Result<Vec<Change>> {
     let mut changes = Vec::new();
     let mut push_if_stale = |read_from: &Path, rel: PathBuf| {
@@ -709,34 +718,39 @@ fn header_cascade(
         }
     };
 
-    for (old_abs, new_rel) in in_branch {
+    for (old_abs, new_rel) in moving {
         push_if_stale(old_abs, new_rel.clone());
     }
-    // The rest of the tree, whose rule files this op does not move.
+    // The rest of the tree, whose rule files this op leaves where they are. Filtered by
+    // the paths already handled above rather than by directory: `rename-prefix` may be
+    // scoped at the root, where "outside the branch" would exclude nothing and every
+    // moving rule would be rewritten twice — the second time at a path that no longer
+    // exists by the time the plan reaches it.
+    let handled: Vec<&PathBuf> = moving.iter().map(|(old, _)| old).collect();
     let tops = match build_tree(root, None)? {
         TreeRoot::Forest(nodes) => nodes,
         TreeRoot::Subtree(node) => vec![node],
     };
-    let mut outside = Vec::new();
+    let mut found = Vec::new();
     for node in &tops {
-        collect_rule_files(node, branch_abs, &mut outside);
+        collect_rule_files(node, &mut found);
     }
-    for abs in outside {
+    for abs in found {
+        if handled.iter().any(|done| **done == abs) {
+            continue;
+        }
         let rel = rel_path(root, &abs);
         push_if_stale(&abs, rel);
     }
     Ok(changes)
 }
 
-/// Every rule file at or under `node` that is **not** inside `skip`'s branch (§9.1).
+/// Every rule file at or under `node` (§9.1).
 ///
 /// This is the second walk in the workspace looking for [`FileClass::Rule`] — no `Store`
 /// walk could ever yield one, since a rule belongs to no core's token set — so it is
 /// built the same way Auspex's is: the tree walk plus a per-node meta-dir `read_dir`.
-fn collect_rule_files(node: &Node, skip: &Path, out: &mut Vec<PathBuf>) {
-    if node.path == skip {
-        return;
-    }
+fn collect_rule_files(node: &Node, out: &mut Vec<PathBuf>) {
     let meta = node.path.join(format!("{}__", node.code.as_str()));
     if let Ok(entries) = std::fs::read_dir(&meta) {
         for entry in entries.flatten() {
@@ -747,7 +761,7 @@ fn collect_rule_files(node: &Node, skip: &Path, out: &mut Vec<PathBuf>) {
         }
     }
     for child in &node.children {
-        collect_rule_files(child, skip, out);
+        collect_rule_files(child, out);
     }
 }
 

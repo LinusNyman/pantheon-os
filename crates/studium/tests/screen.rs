@@ -51,11 +51,24 @@ fn run(root: &Path, short: &str, args: &[&str]) {
     );
 }
 
-/// The KTH scales (§19.3): `af` counts toward the GPA, `pf` does not.
+/// The KTH scales (§19.3) and its academic calendar (§19.5): `af` counts toward the GPA,
+/// `pf` does not; the five periods are the year-less anchors a placement is read against.
 const CURRICULUM: &str = r#"
 university    = "kth"
 default_scale = "af"
 periods_per_year = 5
+
+terms = [
+  { slug = "ht", periods = ["P1","P2"] },
+  { slug = "vt", periods = ["P3","P4"] },
+]
+periods = [
+  { n = 1, slug = "P1", term = "ht", start = "0826", end = "1025" },
+  { n = 2, slug = "P2", term = "ht", start = "1026", end = "0114" },
+  { n = 3, slug = "P3", term = "vt", start = "0115", end = "0315" },
+  { n = 4, slug = "P4", term = "vt", start = "0316", end = "0602" },
+  { n = 5, slug = "P5", term = "summer", start = "0603", end = "0825" },
+]
 
 [scale.af]
 counts_in_gpa = true
@@ -463,6 +476,23 @@ fn the_gpa_folds_across_three_cores_and_the_screen_shows_it() {
     assert!(
         courses.contains("courses"),
         "the second view is courses: {courses}"
+    );
+
+    // ── G1: §19.5's period placement, derived and drawn ──────────────────────
+    // Mekanik ran `250110 → 250601`, in a programme that began `240801` — study year one,
+    // an interval covering P2, P3 and P4. Nothing stores it (I1): the span carries a `from`
+    // and a `to`, the curriculum carries year-less anchors, and the label is the fold.
+    let placed = porticus::drive(
+        &mut Studium::new(&root),
+        &root,
+        &porticus::keys("2<down><right><down>"),
+        100,
+        24,
+    )
+    .expect("the lens drives");
+    assert!(
+        placed.contains("P2–P4"),
+        "the courses row places the enrolment absolutely (§19.5): {placed}"
     );
     let tasks = porticus::drive(
         &mut Studium::new(&root),

@@ -191,10 +191,14 @@ impl View for Courses {
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default();
 
+        // The calendar a placement is read against, walked once for the whole fold
+        // (§19.3, §19.5) — never per row, and never cached past this frame (I1).
+        let curricula = crate::curriculum::discover(&self.root);
+        let mut programme_starts = std::collections::HashMap::new();
         Some(
             spans
                 .iter()
-                .filter_map(|span| self.course_row(span))
+                .filter_map(|span| self.course_row(span, &curricula, &mut programme_starts))
                 .collect(),
         )
     }
@@ -205,11 +209,17 @@ impl View for Courses {
 }
 
 impl Courses {
-    fn course_row(&self, span: &Value) -> Option<Row> {
+    fn course_row(
+        &self,
+        span: &Value,
+        curricula: &[(Code, crate::curriculum::Curriculum)],
+        programme_starts: &mut std::collections::HashMap<String, Option<String>>,
+    ) -> Option<Row> {
         let slug = span["slug"].as_str()?;
         let home = Code::parse(span["home"].as_str()?).ok()?;
         let from = span["data"]["from"].as_str().unwrap_or("");
-        let period = match span["data"]["to"].as_str() {
+        let to = span["data"]["to"].as_str();
+        let dates = match to {
             Some(to) => format!("{from}–{to}"),
             None => format!("{from}–   open"),
         };
@@ -223,12 +233,53 @@ impl Courses {
                     .map(str::to_owned)
             })
             .unwrap_or_else(|| "—".to_string());
+        // Where it sat (§19.5) — derived from the interval against the governing
+        // curriculum's anchors, never stored on the span (I1, §8.4). A dash where no
+        // calendar is declared or the course names no programme to count years from.
+        let placement = self
+            .placement_of(span, from, to, curricula, programme_starts)
+            .map_or_else(|| "—".to_string(), |p| p.label);
 
         Some(Row {
-            label: format!("{slug:<24}  {grade:<4}  {period}"),
+            label: format!("{slug:<24}  {grade:<4}  {placement:<8}  {dates}"),
             target: Target::Row(RecordRef::new(home, slug.to_string())),
             when: None,
         })
+    }
+
+    /// The placement of one enrolment (§19.5).
+    ///
+    /// Two things it needs beyond the span: the curriculum governing its node (§19.3) and
+    /// the **programme span's** start, which is what a study year is counted from. The
+    /// programme is the span this one references (§19.1) — read from the edge, never from
+    /// a directory — and each is read at most once per fold.
+    fn placement_of(
+        &self,
+        span: &Value,
+        from: &str,
+        to: Option<&str>,
+        curricula: &[(Code, crate::curriculum::Curriculum)],
+        programme_starts: &mut std::collections::HashMap<String, Option<String>>,
+    ) -> Option<crate::period::Placement> {
+        let curriculum = crate::curriculum::governing(curricula, span["home"].as_str()?)?;
+        let programme = span["refs"]
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_str)
+            .find_map(|t| t.strip_prefix("fasti:"))?
+            .to_owned();
+        let started = programme_starts
+            .entry(programme.clone())
+            .or_insert_with(|| {
+                tessera::read(&self.root, FASTI, &["get", &programme]).and_then(|s| {
+                    s["data"]["from"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .or_else(|| s["from"].as_str().map(str::to_owned))
+                })
+            })
+            .clone()?;
+        crate::period::placement(curriculum, &started, from, to)
     }
 }
 

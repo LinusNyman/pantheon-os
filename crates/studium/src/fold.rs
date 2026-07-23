@@ -41,6 +41,7 @@ pub fn figures(root: &Path, home: Option<&str>) -> Value {
             "open_courses": Value::Null,
             "study_hours": study_hours(root, annales_present, &HashSet::new()),
             "next_exam": Value::Null,
+            "period": Value::Null,
         });
     };
 
@@ -114,7 +115,42 @@ pub fn figures(root: &Path, home: Option<&str>) -> Value {
         "open_courses": open_courses,
         "study_hours": study_hours(root, annales_present, &course_slugs(&spans)),
         "next_exam": next_exam(root, home, &today_yymmdd()),
+        "period": period_now(&spans, &programmes, &curricula, &today_yymmdd()),
     })
+}
+
+/// Which period the study life is **in**, absolutely (§19.5).
+///
+/// Only answerable within one programme: the label counts study years from a programme's
+/// start, and across two degrees there is no such count — the same reason the screen folds
+/// one programme at a time (§19.4). So this is `null` on all-the-studies, which is the
+/// honest dash and not a zero (§12).
+fn period_now(
+    spans: &[Value],
+    programmes: &HashSet<String>,
+    curricula: &[(pantheon::Code, Curriculum)],
+    today: &str,
+) -> Value {
+    let mut in_scope = spans
+        .iter()
+        .filter(|s| slug(s).is_some_and(|slug| programmes.contains(slug)));
+    let Some(programme) = in_scope.next() else {
+        return Value::Null;
+    };
+    if in_scope.next().is_some() {
+        return Value::Null; // more than one degree in scope: no single count of years
+    }
+    let placed = programme["home"]
+        .as_str()
+        .and_then(|home| curriculum::governing(curricula, home))
+        .zip(programme["data"]["from"].as_str())
+        .and_then(|(curriculum, started)| {
+            crate::period::placement(curriculum, started, today, None)
+        });
+    match placed {
+        Some(p) => json!({ "label": p.label, "terms": p.terms }),
+        None => Value::Null,
+    }
 }
 
 /// One grade reading, weighed against its governing scale (§19.4).

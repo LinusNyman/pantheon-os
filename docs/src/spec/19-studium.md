@@ -40,7 +40,7 @@ passing = ["P"]
 
 This is the one place Studium departs from §12's records-native default, and the departure is deliberate: the scale is neither a reading of a life (so no core owns it) nor a knob on any tool's behaviour (so §18's no-config rule does not reach it) — it is **external reference data**, a fact about a university that a grade needs to become a number, and it is homed in the tree at the node it concerns so that a published subtree carries its own scales. §18 records the carve-out and its boundary: a file that tuned behaviour would still be forbidden; this one only supplies a datum. It is not the Album institution's `data` (Album's `Agent` is a typed record that drops unknown fields, §8.1, so a scale set there is invisible across the contract) and it is not hardcoded (a hand studies at more than one university, and publishes to hands at others).
 
-A `curriculum.toml` is not yet a shape the spine classifies — `pan validate` reports it `unclassifiable_file` (a warning: only `[code]__.toml` is a recognised TOML, every other `.toml` falls through where a `.pdf` would land in `Bulk`, §5.2). Teaching `classify` to route a node-prefixed non-annotation `.toml` to `Bulk` closes the warning and is the one spine change this lens asks for; until then the file works and the warning is cosmetic.
+A `curriculum.toml` is **bulk beside the record** (§6.5): `classify` routes a node-prefixed non-annotation `.toml` to `Bulk`, exactly where a `.pdf` lands (§5.2), so `pan validate` passes it in silence. Only an *annotation-shaped* stem (`[code]__`) with a bad code is still flagged. That was the one spine change this lens asked for, and it also covers a project's `Cargo.toml` sitting at its node.
 
 ### 19.4 The GPA fold
 

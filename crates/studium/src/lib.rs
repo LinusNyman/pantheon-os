@@ -25,6 +25,7 @@ mod curriculum;
 mod fold;
 #[cfg(feature = "tui")]
 mod mosaic;
+mod period;
 #[cfg(feature = "tui")]
 mod scope;
 #[cfg(feature = "tui")]
