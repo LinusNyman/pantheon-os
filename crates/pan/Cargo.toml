@@ -33,3 +33,10 @@ ratatui = { workspace = true, optional = true }
 
 [dev-dependencies]
 insta.workspace = true
+
+# A failure's format follows *stderr* (§7.3), and the case that proves it — a pipe on
+# stdout, a terminal on stderr — is unreachable without a real pty. `openpty(3)` is the
+# whole of what this is for; no test process needs it on Windows, where the suite does
+# not run (CI tests on linux-gnu alone).
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true

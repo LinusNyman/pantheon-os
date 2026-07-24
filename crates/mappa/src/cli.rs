@@ -200,8 +200,8 @@ enum Cmd {
 #[must_use]
 pub fn run_cli() -> ExitCode {
     let cli = Cli::parse_from(with_default_verb(std::env::args_os()));
-    let as_json = contract::format_is_json(cli.format.map(|f| matches!(f, Format::Json)));
-    contract::dispatch(run(&cli, as_json), as_json)
+    let force = cli.format.map(|f| matches!(f, Format::Json));
+    contract::dispatch(run(&cli, contract::format_is_json(force)), force)
 }
 
 /// The flags that take a separate value — what the verb scan must step over to find

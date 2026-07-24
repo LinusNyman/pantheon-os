@@ -227,7 +227,7 @@ pub fn run_cli() -> ExitCode {
             print!("{text}");
             ExitCode::from(0)
         }
-        Err(e) => pantheon::contract::emit_error(&e, as_json(&cli)),
+        Err(e) => pantheon::contract::emit_error(&e, err_as_json(&cli)),
     }
 }
 
@@ -251,10 +251,21 @@ fn help_json() -> Value {
 }
 
 fn as_json(cli: &Cli) -> bool {
+    pantheon::contract::format_is_json(force(cli))
+}
+
+/// The same question for a failure, which goes to **stderr** (§7.3). `pan cd` is why
+/// the distinction is not academic: the shipped shim runs it inside `$(…)`, so stdout
+/// is a pipe on every jump while a hand reads the terminal stderr writes to.
+fn err_as_json(cli: &Cli) -> bool {
+    pantheon::contract::error_format_is_json(force(cli))
+}
+
+fn force(cli: &Cli) -> Option<bool> {
     match cli.format {
-        Some(Format::Json) => true,
-        Some(Format::Table) => false,
-        None => !io::stdout().is_terminal(),
+        Some(Format::Json) => Some(true),
+        Some(Format::Table) => Some(false),
+        None => None,
     }
 }
 

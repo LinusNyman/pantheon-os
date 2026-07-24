@@ -192,12 +192,12 @@ pub fn run_cli() -> ExitCode {
     // only `get` has one (§7.2). So it says nothing about how a JSON value would
     // render and leaves that to the hand: it maps to `None`, not to `false`, or
     // `-f raw` down a pipe would be read as `table` and start pretty-printing.
-    let as_json = contract::format_is_json(match cli.format {
+    let force = match cli.format {
         Some(Format::Json) => Some(true),
         Some(Format::Table) => Some(false),
         Some(Format::Raw) | None => None,
-    });
-    contract::dispatch(run(&cli, as_json), as_json)
+    };
+    contract::dispatch(run(&cli, contract::format_is_json(force)), force)
 }
 
 /// The flags that take a separate value — what the verb scan must step over to find

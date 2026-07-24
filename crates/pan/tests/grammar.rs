@@ -60,6 +60,73 @@ fn errors_follow_the_hand() {
     assert!(!tty_err.contains('{'), "no JSON envelope on the human path");
 }
 
+/// **A failure's hand is stderr's, not stdout's** (§7.3) — the two differ whenever
+/// stdout alone is captured, and `pan cd` is where that is the *normal* case: the
+/// shipped shim (`pan init`) runs it inside `$(…)`, so every failed jump has a pipe on
+/// stdout and the hand's own terminal on stderr. Keyed off stdout, `a zzz` answered a
+/// human with `{"error":{"code":4,…}}`.
+///
+/// Reachable only with a real pty, which is why the bug outlived a green suite.
+#[cfg(unix)]
+#[test]
+fn a_failure_follows_stderr_when_only_stdout_is_captured() {
+    use std::io::Read;
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::process::Stdio;
+
+    let (mut controller, mut device) = (0, 0);
+    // SAFETY: `openpty` writes two fresh fds through the out-pointers and reads none of
+    // the three optional arguments when they are null. Both fds are adopted by an
+    // `OwnedFd` on the line after the check, so neither leaks.
+    let (controller, device) = unsafe {
+        let rc = libc::openpty(
+            &raw mut controller,
+            &raw mut device,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        );
+        assert_eq!(rc, 0, "openpty");
+        (
+            OwnedFd::from_raw_fd(controller),
+            OwnedFd::from_raw_fd(device),
+        )
+    };
+
+    // stdout piped, stderr on the terminal — the shim's own shape.
+    let mut child = Command::new(PathBuf::from(env!("CARGO_BIN_EXE_pan")))
+        .args(["cd", "zzz"])
+        .env("PANTHEON_ROOT", env!("CARGO_MANIFEST_DIR"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(device))
+        .spawn()
+        .unwrap();
+
+    // Drain the terminal *while the child runs*, never after it exits: the device end
+    // closes with the child, and on Darwin that discards whatever the controller has
+    // not yet read — a `read_to_end` after `wait` returns `Ok(0)` about half the time.
+    // The read ends of its own accord when the child goes (EOF here, EIO on Linux).
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = std::fs::File::from(controller).read_to_end(&mut buf);
+        buf
+    });
+
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(4), "no such node (§7.3)");
+    let written = reader.join().unwrap();
+
+    let line = String::from_utf8_lossy(&written);
+    assert!(
+        line.starts_with("error: "),
+        "a hand at a terminal reads a human line, got {line:?}"
+    );
+    assert!(
+        !line.contains('{'),
+        "no JSON envelope at a terminal: {line:?}"
+    );
+}
+
 /// The seven placement rules (§2), emitted so a human and an LLM file alike (§5.5, I8).
 #[test]
 fn constitution_emits_the_seven_rules() {

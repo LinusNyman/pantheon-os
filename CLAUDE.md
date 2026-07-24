@@ -447,6 +447,14 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   collapse and strip `_`. NFC is not optional (macOS/Linux byte disagreement). Apply on write, compare NFC on read.
 - **Exit codes are contract** (§7.3): `0` ok · `1` runtime · `2` usage · `3` validation · `4` not found ·
   `5` confirm required · `6` write refused under a rule. Errors print `{"error":{"code":…,"msg":…}}` to stderr.
+- **A failure follows *stderr's* hand, a result follows stdout's** (§7.3). Two questions, two streams:
+  `contract::format_is_json` asks stdout, `contract::error_format_is_json` asks stderr, and
+  `contract::dispatch` therefore takes the hand's `-f` (`Option<bool>`) rather than a resolved bool
+  and asks each separately. Keyed off stdout — as it was — every `$(pan cd …)` that missed answered a
+  human with the machine's envelope, since the shipped shim (`pan init`, §5.5) *always* pipes stdout
+  while stderr stays the terminal. Only a pty reaches that case, so `pan/tests/grammar.rs` allocates
+  one (`openpty`, a `cfg(unix)` dev-dep) and **drains the controller on a thread while the child
+  runs** — after `wait`, Darwin discards what the closing device end left unread.
 - **All TOML is `toml_edit`'s, and frontmatter is never re-serialized** (§6.6). `pantheon::document`
   owns the `+++` fence; `Document` carries `front_raw`, the fence's original TOML, and a rewrite edits
   *that* `DocumentMut` and re-emits. Rebuilding the fence from `Frontmatter`'s two fields instead would

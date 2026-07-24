@@ -50,6 +50,19 @@ pub fn format_is_json(force: Option<bool>) -> bool {
     force.unwrap_or_else(|| !io::stdout().is_terminal())
 }
 
+/// The same question for a **failure**, which §7.3 writes to stderr.
+///
+/// It asks **stderr**, not stdout, because that is the stream the line lands on — and
+/// the two hands differ whenever stdout alone is captured. `pan cd` is the case that
+/// proves it: the shipped shim (`pan init`, §5.5) runs it inside `$(…)`, so *every*
+/// failed jump had a pipe on stdout and a terminal on stderr. Keyed off stdout, a hand
+/// standing at its own terminal read the machine's envelope.
+///
+/// An explicit `-f` still wins on both streams: it is the hand saying which it is.
+pub fn error_format_is_json(force: Option<bool>) -> bool {
+    force.unwrap_or_else(|| !io::stderr().is_terminal())
+}
+
 /// Render a contract value: compact down a pipe, a table for a reader (§7.3).
 ///
 /// The one rendering path in the suite — `pan` and every core reach it here, so a
@@ -65,9 +78,11 @@ pub fn emit(value: &Value, as_json: bool) {
 
 /// Print a failure the way the hand reads it (§7.3, I8): the `{"error":{…}}` envelope
 /// down a pipe, a plain `error: <msg>` line at a TTY. Format follows the hand for a
-/// failure exactly as it does for a result — the same `as_json` split, one place — and
-/// the process exit code is the verb's regardless (§7.3). Every core, `pan`, and `aus`
-/// end here.
+/// failure exactly as it does for a result — the same split, one place — and the process
+/// exit code is the verb's regardless (§7.3). Every core, `pan`, and `aus` end here.
+///
+/// `as_json` is [`error_format_is_json`]'s answer, never [`format_is_json`]'s: the two
+/// disagree whenever stdout alone is redirected.
 pub fn emit_error(e: &Error, as_json: bool) -> std::process::ExitCode {
     if as_json {
         eprintln!("{}", e.to_error_json());
@@ -81,27 +96,31 @@ pub fn emit_error(e: &Error, as_json: bool) -> std::process::ExitCode {
 /// process exit code, printing the `{"error":{…}}` envelope to stderr on a failure
 /// (§7.3). Every core ends identically.
 ///
+/// It takes the hand's `-f` (`None` where none was given) rather than a resolved bool,
+/// because a result and a failure go to **different streams** and so ask the question
+/// separately — [`format_is_json`] for stdout, [`error_format_is_json`] for stderr.
+///
 /// This is also where a write's Auspex wake fires (§9.4). The [`Store`] mutators
 /// *note* what they wrote; the wake goes out once here, at the end of the process,
 /// so a verb writing three lines wakes Auspex once rather than three times. It fires
 /// after the output is rendered — the child is detached and inherits no stdio, but
 /// waking before printing would still put a subprocess spawn in front of the hand's
 /// answer for no reason.
-pub fn dispatch(outcome: Result<Response>, as_json: bool) -> std::process::ExitCode {
+pub fn dispatch(outcome: Result<Response>, force: Option<bool>) -> std::process::ExitCode {
     let code = match outcome {
         Ok(Response::Json(value)) => {
-            emit(&value, as_json);
+            emit(&value, format_is_json(force));
             std::process::ExitCode::from(0)
         }
         Ok(Response::JsonExit(value, code)) => {
-            emit(&value, as_json);
+            emit(&value, format_is_json(force));
             std::process::ExitCode::from(code)
         }
         Ok(Response::Raw(text)) => {
             print!("{text}");
             std::process::ExitCode::from(0)
         }
-        Err(e) => emit_error(&e, as_json),
+        Err(e) => emit_error(&e, error_format_is_json(force)),
     };
     crate::hook::wake_if_noted();
     code
