@@ -20,7 +20,11 @@ use crate::curriculum::{self, Curriculum};
 /// core is absent is `null`, and the fold degrades to what it finds (§12).
 const FASTI: &str = "fas";
 const ANNALES: &str = "ann";
+/// The last two are the screen's alone — `figures` folds no contacts and no reflections
+/// (§19.9), so a headless build reads neither core.
+#[cfg(feature = "tui")]
 const ALBUM: &str = "alb";
+#[cfg(feature = "tui")]
 const TABELLA: &str = "tab";
 
 /// The §19.9 surface: the figures behind the mosaic, as one object.
@@ -309,6 +313,7 @@ fn series_lines(
 /// an event no kind of its own beyond `event`, and inventing one here would be a lens
 /// deciding a core's vocabulary (I5). What it *does* distinguish is what a hand needs: an
 /// occurrence that names a course, and one that does not.
+#[cfg(feature = "tui")]
 pub(crate) struct Occurrence {
     pub date: String,
     /// What the line says — its first value, else the series it sits in.
@@ -323,6 +328,7 @@ pub(crate) struct Occurrence {
 ///
 /// Bounded rather than endless, because the tab answers *what is coming*, and a timeline
 /// with next year's re-exam on it answers nothing. Sorted by date, earliest first.
+#[cfg(feature = "tui")]
 pub(crate) fn upcoming(root: &Path, home: Option<&str>, today: &str, days: i32) -> Vec<Occurrence> {
     let horizon = plus_days(today, days);
     let Some(lines) = event_lines(root, home) else {
@@ -355,6 +361,7 @@ pub(crate) fn upcoming(root: &Path, home: Option<&str>, today: &str, days: i32) 
 }
 
 /// One study-time reading — a session's hours, dated (§8.6, §19.6).
+#[cfg(feature = "tui")]
 pub(crate) struct Session {
     pub date: String,
     pub hours: String,
@@ -368,6 +375,7 @@ pub(crate) struct Session {
 /// The grade logs are named for their courses (§19.2), so **every other log in scope is
 /// study time** — the same rule the `study_hours` figure folds by, read here one line at a
 /// time instead of summed.
+#[cfg(feature = "tui")]
 pub(crate) fn sessions(root: &Path, home: Option<&str>) -> Vec<Session> {
     let courses = spans(root, home)
         .map(|s| course_slugs(&s))
@@ -402,6 +410,7 @@ pub(crate) fn sessions(root: &Path, home: Option<&str>) -> Vec<Session> {
 /// course's records point at", so a person is *in* the studies exactly when something in
 /// scope references them. Nothing is copied under a course (I3), and Album is read only
 /// for the records the edges already name.
+#[cfg(feature = "tui")]
 pub(crate) fn people(root: &Path, home: Option<&str>) -> Vec<Value> {
     let mut wanted: Vec<String> = Vec::new();
     let mut gather = |rows: Vec<Value>| {
@@ -435,6 +444,7 @@ pub(crate) fn people(root: &Path, home: Option<&str>) -> Vec<Value> {
 /// The reflections in scope (§19.6, §8.7): Tabella documents whose `type` is `reflection`.
 ///
 /// Read off `list`'s frontmatter and no further — a fold never reads bodies (§6.1, §8.7).
+#[cfg(feature = "tui")]
 pub(crate) fn reflections(root: &Path, home: Option<&str>) -> Vec<Value> {
     let mut args = vec!["list"];
     if let Some(home) = home {
@@ -453,6 +463,7 @@ pub(crate) fn reflections(root: &Path, home: Option<&str>) -> Vec<Value> {
 /// The spine's own date crate (§13), for the one piece of arithmetic a calendar cannot be
 /// compared its way out of. `None` where the day will not read, which widens the window to
 /// everything ahead rather than narrowing it to nothing.
+#[cfg(feature = "tui")]
 fn plus_days(today: &str, days: i32) -> Option<String> {
     let year: i16 = today.get(..2)?.parse().ok()?;
     let month: i8 = today.get(2..4)?.parse().ok()?;
