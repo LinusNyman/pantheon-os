@@ -105,11 +105,43 @@ impl Action {
 
 /// A record's address — its home rides *with* it, since an Agenda's rows are
 /// cross-node and each must relay to its own node (P§7).
+///
+/// **And its core rides with it too.** A cross-core lens folds rows from several
+/// binaries into one list (§12), and a relay has to reach the binary that owns the row
+/// — which an address of home+key alone cannot say. Speculum used to recover it by
+/// re-reading every dated core and matching home/key, a fold per keystroke that two
+/// cores filing one date-key at one node would have misrouted. The row knows where it
+/// came from; this is where it says so.
+///
+/// `None` is the honest answer for a **core's own TUI**, which has exactly one core and
+/// names it in `on_action` without asking (I5 — a lens is the only reader here).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordRef {
     pub home: Code,
     /// The record's key or slug (§5.4) — its identity and its name at once.
     pub key: String,
+    /// The three-char short of the core that owns this record — `pen`, `alb` (§7.3).
+    pub core: Option<String>,
+}
+
+impl RecordRef {
+    /// An address within the caller's own core — the one every core's own TUI builds.
+    pub fn new(home: Code, key: impl Into<String>) -> Self {
+        Self {
+            home,
+            key: key.into(),
+            core: None,
+        }
+    }
+
+    /// An address that names its core, for a lens whose rows span several (§12).
+    pub fn in_core(core: impl Into<String>, home: Code, key: impl Into<String>) -> Self {
+        Self {
+            home,
+            key: key.into(),
+            core: Some(core.into()),
+        }
+    }
 }
 
 /// What an action acts on (P§3).
@@ -126,7 +158,27 @@ pub enum Target {
         /// A dated Full view's cell date, so `a` on a calendar keeps the day you
         /// pointed at rather than defaulting to today (§7.3).
         at: Option<String>,
+        /// The core a *new* record here belongs to, taken from the active view's
+        /// [`View::core`](crate::view::View::core) declaration.
+        ///
+        /// A row says its own core (it was folded from one); an add has no record yet,
+        /// so the **view** answers for it — which is what lets one lens offer `a` on a
+        /// people list and on a documents list and route each to its own binary (§12).
+        /// `None` wherever the view declared none, the case of every core's own TUI.
+        core: Option<String>,
     },
+}
+
+impl Target {
+    /// A bare node target — no date, no core, the shape most callers want.
+    #[must_use]
+    pub fn node(node: Code) -> Self {
+        Target::Node {
+            node,
+            at: None,
+            core: None,
+        }
+    }
 }
 
 /// A built CLI invocation — the same command a hand would type (§7.2).
@@ -215,6 +267,14 @@ pub struct FieldSpec {
     pub flag: Option<&'static str>,
     /// A required field must be non-empty before the form will submit.
     pub required: bool,
+    /// A **switch**: the flag takes no value, so a yes here appends the flag alone.
+    ///
+    /// It exists so a form can offer a decision that has no value to type — Annales's
+    /// `-c`, which mints the series a reading goes into (§7.3). The alternative was for
+    /// the relaying app to *infer* the flag by reading whether the container existed,
+    /// which is exactly the small authorship I2 keeps out of a lens: a typo would then
+    /// silently mint a record nobody asked for, and §18 keeps no undo.
+    pub switch: bool,
 }
 
 impl FieldSpec {
@@ -226,6 +286,19 @@ impl FieldSpec {
             label: "name",
             flag: None,
             required: true,
+            switch: false,
+        }
+    }
+
+    /// A required positional, for a core whose `add` takes more than a name — Annales's
+    /// series and its values (§8.6).
+    #[must_use]
+    pub fn positional(label: &'static str) -> Self {
+        Self {
+            label,
+            flag: None,
+            required: true,
+            switch: false,
         }
     }
 
@@ -236,7 +309,32 @@ impl FieldSpec {
             label,
             flag: Some(flag),
             required: false,
+            switch: false,
         }
+    }
+
+    /// A yes/no field whose flag carries no value (`-c`).
+    ///
+    /// The hand types `y` (or `yes`, `true`, `1`); anything else, blank included, leaves
+    /// the flag off. Deliberately opt-in rather than opt-out: the flags worth a switch
+    /// are the ones that *create* something.
+    #[must_use]
+    pub fn switch(label: &'static str, flag: &'static str) -> Self {
+        Self {
+            label,
+            flag: Some(flag),
+            required: false,
+            switch: true,
+        }
+    }
+
+    /// Whether a typed value reads as yes (see [`FieldSpec::switch`]).
+    #[must_use]
+    pub fn is_yes(value: &str) -> bool {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes" | "true" | "1"
+        )
     }
 }
 

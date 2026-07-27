@@ -50,6 +50,19 @@ pub fn format_is_json(force: Option<bool>) -> bool {
     force.unwrap_or_else(|| !io::stdout().is_terminal())
 }
 
+/// The same question for a **failure**, which §7.3 writes to stderr.
+///
+/// It asks **stderr**, not stdout, because that is the stream the line lands on — and
+/// the two hands differ whenever stdout alone is captured. `pan cd` is the case that
+/// proves it: the shipped shim (`pan init`, §5.5) runs it inside `$(…)`, so *every*
+/// failed jump had a pipe on stdout and a terminal on stderr. Keyed off stdout, a hand
+/// standing at its own terminal read the machine's envelope.
+///
+/// An explicit `-f` still wins on both streams: it is the hand saying which it is.
+pub fn error_format_is_json(force: Option<bool>) -> bool {
+    force.unwrap_or_else(|| !io::stderr().is_terminal())
+}
+
 /// Render a contract value: compact down a pipe, a table for a reader (§7.3).
 ///
 /// The one rendering path in the suite — `pan` and every core reach it here, so a
@@ -63,9 +76,29 @@ pub fn emit(value: &Value, as_json: bool) {
     }
 }
 
+/// Print a failure the way the hand reads it (§7.3, I8): the `{"error":{…}}` envelope
+/// down a pipe, a plain `error: <msg>` line at a TTY. Format follows the hand for a
+/// failure exactly as it does for a result — the same split, one place — and the process
+/// exit code is the verb's regardless (§7.3). Every core, `pan`, and `aus` end here.
+///
+/// `as_json` is [`error_format_is_json`]'s answer, never [`format_is_json`]'s: the two
+/// disagree whenever stdout alone is redirected.
+pub fn emit_error(e: &Error, as_json: bool) -> std::process::ExitCode {
+    if as_json {
+        eprintln!("{}", e.to_error_json());
+    } else {
+        eprintln!("error: {e}");
+    }
+    std::process::ExitCode::from(e.exit_code().as_u8())
+}
+
 /// The whole tail of a core's `main`: render what the verb produced and return the
 /// process exit code, printing the `{"error":{…}}` envelope to stderr on a failure
 /// (§7.3). Every core ends identically.
+///
+/// It takes the hand's `-f` (`None` where none was given) rather than a resolved bool,
+/// because a result and a failure go to **different streams** and so ask the question
+/// separately — [`format_is_json`] for stdout, [`error_format_is_json`] for stderr.
 ///
 /// This is also where a write's Auspex wake fires (§9.4). The [`Store`] mutators
 /// *note* what they wrote; the wake goes out once here, at the end of the process,
@@ -73,24 +106,21 @@ pub fn emit(value: &Value, as_json: bool) {
 /// after the output is rendered — the child is detached and inherits no stdio, but
 /// waking before printing would still put a subprocess spawn in front of the hand's
 /// answer for no reason.
-pub fn dispatch(outcome: Result<Response>, as_json: bool) -> std::process::ExitCode {
+pub fn dispatch(outcome: Result<Response>, force: Option<bool>) -> std::process::ExitCode {
     let code = match outcome {
         Ok(Response::Json(value)) => {
-            emit(&value, as_json);
+            emit(&value, format_is_json(force));
             std::process::ExitCode::from(0)
         }
         Ok(Response::JsonExit(value, code)) => {
-            emit(&value, as_json);
+            emit(&value, format_is_json(force));
             std::process::ExitCode::from(code)
         }
         Ok(Response::Raw(text)) => {
             print!("{text}");
             std::process::ExitCode::from(0)
         }
-        Err(e) => {
-            eprintln!("{}", e.to_error_json());
-            std::process::ExitCode::from(e.exit_code().as_u8())
-        }
+        Err(e) => emit_error(&e, error_format_is_json(force)),
     };
     crate::hook::wake_if_noted();
     code
@@ -882,6 +912,53 @@ pub fn code_at_path(root: &Path, pwd: Option<&Path>) -> Result<Code> {
         }
     }
     here.ok_or_else(|| Error::usage("no node at $PWD; name the home with -H (§7.3)"))
+}
+
+/// The scope of a `list` fold (§7.2): a node's whole subtree, or that node alone.
+pub enum ListScope {
+    /// Fold the subtree under `Some(code)`, or the whole forest when `None` — outside
+    /// the tree there is nothing to narrow by, so the fold spans it all (§7.3).
+    Subtree(Option<Code>),
+    /// Fold this node alone, its descendants excluded — the `--here`/`-l` reading.
+    Local(Code),
+}
+
+/// Resolve a `list` scope from its home levers (§7.2, §7.3): the home as a bare
+/// positional or `-H` (given once, never both), and `--here` for the node-local read.
+///
+/// The default locus is `$PWD` (§7.3), unchanged: with no home named, a subtree fold
+/// still narrows to the node the shell sits in, or spans the forest from outside the
+/// tree. `--here` needs a concrete node — the named one, else the `$PWD` locus — and is
+/// a usage error with neither.
+pub fn list_scope(
+    root: &Path,
+    home_flag: Option<&str>,
+    home_pos: Option<&str>,
+    here: bool,
+) -> Result<ListScope> {
+    let named = match (home_flag, home_pos) {
+        (Some(_), Some(_)) => {
+            return Err(Error::usage(
+                "home given twice — as -H and as a positional; give it once (§7.3)",
+            ));
+        }
+        (Some(code), None) | (None, Some(code)) => Some(Code::parse(code)?),
+        (None, None) => None,
+    };
+    if here {
+        let code = named
+            .or_else(|| code_at_path(root, None).ok())
+            .ok_or_else(|| {
+                Error::usage(
+                    "--here needs a node; name it with -H or a bare code, or cd into one (§7.3)",
+                )
+            })?;
+        Ok(ListScope::Local(code))
+    } else {
+        Ok(ListScope::Subtree(
+            named.or_else(|| code_at_path(root, None).ok()),
+        ))
+    }
 }
 
 fn join<'a>(items: impl Iterator<Item = &'a str>) -> String {

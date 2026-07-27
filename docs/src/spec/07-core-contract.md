@@ -44,7 +44,7 @@ Every core binary exposes the same verbs. stdout is JSON when piped, a table on 
 | `rename <slug> <new>` | the renamed record | change a record's name; renames the file and cascades its refs (§5.4) |
 | `move <slug> --to CODE` | the moved record | re-home an entity or a document to another node |
 | `rm <key>` | `{deleted: key}` | remove a record — an entity file, a document, or a series line (irreversible) |
-| `list [--home CODE] [--kind K]` | array | folded present across the subtree |
+| `list [HOME] [--home CODE] [--here] [--kind K]` | array | folded present across the subtree, or one node alone with `--here` |
 | `get <slug>` | one record | current state — an entity, or a document with its body |
 | `series [name] [--from D] [--to D]` | array | every record in a collection (the trend across keys), optionally windowed |
 | `schema` | JSON Schema | self-description: name, primitive, tokens and their shapes, record schema, format version — the surface the spine's PATH discovery reads (§5.0, §7.1) |
@@ -101,6 +101,7 @@ Implicit for the common case:
 | `-V` | `--version` | version |
 | `-n` | `--dry-run` | validate, print what would change (with plan token), write nothing |
 | `-H` | `--home CODE` | state the home explicitly |
+| `-l` | `--here` | fold this node alone, not its subtree — a `list` read only (§7.2) |
 | `-k` | `--kind K` | which of the core's tokens (§7.1) — within the shape the form already picks on a write, any token when filtering a read (§7.2) |
 | `-c` | `--create` | mint the series before `add` writes the first reading; refused on an inference form (§7.3) |
 | `-a` | `--at YYMMDD` \| `YYMMDDThhmm` \| `hhmm` | the reading's date, date and time, or a time today — the key is what you give (§7.3) |
@@ -111,7 +112,9 @@ Implicit for the common case:
 | `-p` | `--plan TOKEN` | confirm the exact change a prior `--dry-run` computed (guards against a stale review) |
 | `-q` / `-v` | `--quiet` / `--verbose` | |
 
-**Format follows the hand (I8).** stdout to a TTY → table; piped → JSON. Same data, same code path; `-f` forces either.
+**`list` names its node three ways, and the default is unchanged.** With no home it folds the `$PWD` locus's subtree (above) — the shell's location narrows the read, or the fold spans the forest from outside the tree. A **bare positional** names the node instead (`alb ls csa` = `alb ls -H csa`); giving both a positional and `-H` is a usage error (exit `2`). **`--here` (`-l`)** folds that node *alone*, its descendants excluded — the read counterpart of the rail's per-node count (§7.2, P§6) — and needs a concrete node (the named one, else the locus), a usage error with neither. This adds levers; it does not move the locus.
+
+**Format follows the hand (I8).** stdout to a TTY → table; piped → JSON. Same data, same code path; `-f` forces either. The **TTY table elides a constant column** — a column whose value is identical across every row carries no information a reader needs, so `pen ls` need not repeat `pensum`/`task` on every line. This is a *display* refinement of the table alone: the JSON envelope is unchanged (I4), so the elision never fires down a pipe, `-f json` shows every column, the record's identity column (`slug`/`key`) and any hoisted `data.*` column are kept even when constant, and a single-row list keeps everything (it must still show what it is). It is general, never per-core (I5): a two-shape core's `kind` varies across rows and so stays, for free.
 
 **The editor follows the hand too (I8).** An `edit` given no new value is the **editor form**: at a TTY the text opens in the hand's own editor — `$VISUAL`, else `$EDITOR`, else `vi` — and is written back on save; piped, it spawns nothing and prints the file's path (`{"path":…}`, exit `0`), by the same law that sends a table to a TTY and JSON down a pipe. So `$EDITOR "$(tab edit meditationes | jq -r .path)"` is the shell's business rather than a `--print-path` flag, and the LLM hand gets a path to open with its own tools instead of a blocked process it cannot drive. The editor is the environment's, never Pantheon's: there is no `PANTHEON_EDITOR`, no per-core `PENSUM_EDITOR`, and no `--editor` flag — that is a knob (§18) where the OS already has one, and the shell already overrides it per command (`EDITOR=nvim pen edit ecv reach_out_to_alex`). Under `PANTHEON_RULE=1` the verb is refused before any of this (exit `6`, §9.3); a rule that wants a path uses `get` or `where`.
 
@@ -119,7 +122,7 @@ Implicit for the common case:
 
 **The editor session is the confirm.** The editor form mints no plan token and needs no `-y` — there is no computed change to review until the human saves, and the session *is* the review (save commits, `:q!` does not). It is the one mutation that never prompts, for exactly the reason the prompt exists elsewhere: the hand is already looking at the thing it is changing. (`-y` is accepted and moot there, so the TUI's blanket relay-with-`-y` holds unchanged — P§7.) An `edit` **given** its value inline (`pen edit ecv reach_out_to_alex "text"`) is an ordinary mutation and confirms by the rule below. Nothing is locked across the session (§6.4): the lock is taken to read and again to write back, since a session runs for minutes and any hand may edit the file directly meanwhile regardless (I8, §5.5). An editor exiting non-zero writes nothing (exit `1`); text that comes back unchanged writes nothing (exit `0`); text that comes back invalid exits `3`.
 
-**Exit codes** (machines never parse prose): `0` ok · `1` runtime error · `2` usage error · `3` validation failure · `4` not found · `5` confirmation required · `6` write refused (write verb under `PANTHEON_RULE=1`, §9.3). Errors print `{"error":{"code":…,"msg":…}}` to stderr.
+**Exit codes** (machines never parse prose): `0` ok · `1` runtime error · `2` usage error · `3` validation failure · `4` not found · `5` confirmation required · `6` write refused (write verb under `PANTHEON_RULE=1`, §9.3). Errors go to stderr, and their format follows the hand (I8) like every other output: down a pipe the `{"error":{"code":…,"msg":…}}` envelope, at a TTY a plain `error: <msg>` line. The exit code is the same either way. **The hand a failure follows is *stderr's*** — the stream it is written to, not stdout, which a caller may have redirected on its own. The two disagree in the ordinary case rather than an exotic one: `pan cd` is designed to be run inside `$(…)` (§5.5), so its stdout is always a pipe while a human stands at the terminal its stderr writes to. An explicit `-f` still governs both.
 
 **Confirming mutations.** There is no autonomy setting — the behavior is hardcoded, one rule for everyone (Pantheon doesn't offer a boldness knob any more than it offers a theme). Verbs are classified: **reads** and a **fresh `add`** (recording a new keyed record — a new reading, a new entity, a new task) run free, since a new key can't destroy an existing one. **Mutations** — `edit`, `rename`, `move`, `rm`, and an `add` that overwrites an existing key — are final (§18: no undo layer) and always confirm before committing:
 

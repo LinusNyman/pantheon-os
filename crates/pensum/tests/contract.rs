@@ -283,6 +283,68 @@ fn the_read_verbs() {
     insta::assert_snapshot!("read_verbs", out);
 }
 
+/// L1: `list` node addressing — a bare positional home, `--here` node-local, and the
+/// refusals. Not a snapshot: the row *sets* are the contract here, and the default
+/// `$PWD` locus is unchanged (tested elsewhere).
+#[test]
+fn list_node_addressing() {
+    let root = fresh_root();
+    pen(&root, &["a", "task_at_a"]); // a task at node `a` itself
+    pen(&root, &["acm", "task_at_acm"]); // a task under `a`, at a descendant
+
+    // A bare positional home is sugar for `-H`.
+    let (pc, pos) = pen(&root, &["ls", "a"]);
+    let (fc, flag) = pen(&root, &["ls", "-H", "a"]);
+    assert_eq!((pc, fc), (0, 0));
+    assert_eq!(pos, flag, "a positional home equals -H");
+    assert_eq!(
+        pos.as_array().unwrap().len(),
+        2,
+        "the subtree of `a` folds both tasks"
+    );
+
+    // `--here` folds the node alone — the task at `a`, never the descendant's.
+    let (hc, here) = pen(&root, &["ls", "--here", "a"]);
+    assert_eq!(hc, 0);
+    let keys: Vec<&str> = here
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["task_at_a"], "--here excludes descendants");
+
+    // The home given twice is a usage error (§7.3).
+    let (dup, _) = pen(&root, &["ls", "-H", "a", "ao"]);
+    assert_eq!(dup, 2, "a positional home beside -H is refused");
+
+    // `--here` with no node to scope to (outside the tree, no home) is a usage error.
+    let (bare, _) = pen(&root, &["ls", "--here"]);
+    assert_eq!(bare, 2, "--here needs a concrete node");
+}
+
+/// L3: an error follows the hand (§7.3, I8). Down a pipe (`-f json`) it is the frozen
+/// `{"error":{…}}` envelope; on the human path (`-f table`, which forces it even down a
+/// pipe) it is a plain `error: <msg>` line. The exit code is the same either way.
+#[test]
+fn errors_follow_the_hand() {
+    let root = fresh_root();
+
+    // Forced to JSON: the envelope on stderr, exit 4 (not found).
+    let ((json_code, envelope), _) = pen_env(&root, &["get", "never_written", "-f", "json"], &[]);
+    assert_eq!(json_code, 4);
+    assert_eq!(envelope["error"]["code"], 4);
+
+    // The human path: a bare `error: <msg>` line, no envelope, the same exit.
+    let ((tty_code, _), stderr) = pen_env(&root, &["get", "never_written", "-f", "table"], &[]);
+    assert_eq!(tty_code, 4);
+    assert!(
+        stderr.starts_with("error: "),
+        "a human error line, got {stderr:?}"
+    );
+    assert!(!stderr.contains('{'), "no JSON envelope on the human path");
+}
+
 #[test]
 fn the_leading_token_is_probed_for_a_node_code() {
     let root = fresh_root();

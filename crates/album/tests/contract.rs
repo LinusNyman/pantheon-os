@@ -332,6 +332,49 @@ fn verbs_read() {
     insta::assert_snapshot!("verbs_read", out);
 }
 
+/// L1: `list` node addressing on an entity core — a bare positional home, `--here`
+/// node-local, and the double-home refusal. The row *sets* are the contract, not a
+/// snapshot.
+#[test]
+fn list_node_addressing() {
+    let root = fresh_root();
+    alb(&root, &["cs", "person_at_cs"]); // an entity at node `cs`
+    alb(&root, &["csa", "person_at_csa"]); // an entity under `cs`, at a descendant
+
+    let slugs = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["slug"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // A bare positional home is sugar for `-H`.
+    let (pc, pos) = alb(&root, &["ls", "cs"]);
+    let (fc, flag) = alb(&root, &["ls", "-H", "cs"]);
+    assert_eq!((pc, fc), (0, 0));
+    assert_eq!(pos, flag, "a positional home equals -H");
+    let subtree = slugs(&pos);
+    assert!(subtree.contains(&"person_at_cs".to_owned()));
+    assert!(
+        subtree.contains(&"person_at_csa".to_owned()),
+        "the subtree reaches the descendant"
+    );
+
+    // `--here` folds the node alone.
+    let (hc, here) = alb(&root, &["ls", "--here", "cs"]);
+    assert_eq!(hc, 0);
+    assert_eq!(
+        slugs(&here),
+        ["person_at_cs"],
+        "--here excludes descendants"
+    );
+
+    // The home given twice is a usage error (§7.3).
+    let (dup, _) = alb(&root, &["ls", "-H", "cs", "csa"]);
+    assert_eq!(dup, 2);
+}
+
 // ── the shapes on disk (I3, §18) ────────────────────────────────────────────
 
 #[test]

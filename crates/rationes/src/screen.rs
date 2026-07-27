@@ -85,7 +85,13 @@ impl App for RationesApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        holdings(&self.root, Some(node)).len()
+        // The holdings filed **at** this node, not the subtree under it — a node-local
+        // `read_dir`, no file reads, so the rail folds each node once (P§6, I1). A
+        // `balance` is a series, not an entity, so it does not reach this count — as
+        // before, when the badge folded only `holdings`.
+        Store::<Rationes>::new(self.root.clone())
+            .find_entities_local(node, None, None)
+            .map_or(0, |refs| refs.len())
     }
 
     fn writer(&self) -> Writer {
@@ -101,16 +107,16 @@ impl App for RationesApp {
             (Action::Add | Action::QuickAdd, Target::Node { node, .. }) => {
                 Some(Invocation::new("rat", ["add", "-H", node.as_str()]))
             }
-            (Action::Edit, Target::Row(RecordRef { home, key })) => {
+            (Action::Edit, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("rat", ["edit", "-H", home.as_str(), key]))
             }
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("rat", ["rm", "-H", home.as_str(), key]))
             }
-            (Action::Rename, Target::Row(RecordRef { home, key })) => {
+            (Action::Rename, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("rat", ["rename", "-H", home.as_str(), key]))
             }
-            (Action::Move, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Move, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "rat",
                 ["move", "-H", home.as_str(), key, "--to"],
             )),
@@ -200,10 +206,7 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
                 .map_or_else(String::new, |(_, amount)| format!("   {amount}"));
             Row {
                 label: format!("{}   {}{figure}", eref.slug, eref.kind),
-                target: Target::Row(RecordRef {
-                    home: eref.home,
-                    key: eref.slug,
-                }),
+                target: Target::Row(RecordRef::new(eref.home, eref.slug)),
                 when: None,
             }
         })

@@ -198,13 +198,19 @@ enum Cmd {
         #[arg(long = "series", value_name = "NAME")]
         series: Option<String>,
     },
-    /// Every span, and every event series' present, across the subtree (§7.2). `-k`
-    /// filters to one shape.
+    /// Every span, and every event series' present, across the subtree, or one node with
+    /// `--here` (§7.2). `-k` filters to one shape.
     #[command(alias = "ls")]
     List {
+        /// The node to fold, as a bare code — sugar for `-H` (§7.3).
+        #[arg(value_name = "HOME")]
+        node: Option<String>,
         /// Only the events that reference no span (§8.4) — legal, never a finding.
         #[arg(long = "unspanned")]
         unspanned: bool,
+        /// Fold this node alone, not its subtree (§7.2).
+        #[arg(short = 'l', long = "here")]
+        here: bool,
     },
     /// One span by slug, or one event series' present — the occurrence at its latest
     /// key (§7.2, I1).
@@ -234,8 +240,8 @@ enum Cmd {
 #[must_use]
 pub fn run_cli() -> ExitCode {
     let cli = Cli::parse_from(with_default_verb(std::env::args_os()));
-    let as_json = contract::format_is_json(cli.format.map(|f| matches!(f, Format::Json)));
-    contract::dispatch(run(&cli, as_json), as_json)
+    let force = cli.format.map(|f| matches!(f, Format::Json));
+    contract::dispatch(run(&cli, contract::format_is_json(force)), force)
 }
 
 /// The flags that take a separate value — what the verb scan must step over to find
@@ -318,7 +324,11 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
         Cmd::Move { slug, to } => cmd_move(cli, slug, to),
         Cmd::Rm { key, series } => cmd_rm(cli, key, series.as_deref()),
-        Cmd::List { unspanned } => cmd_list(cli, *unspanned),
+        Cmd::List {
+            unspanned,
+            node,
+            here,
+        } => cmd_list(cli, *unspanned, node.as_deref(), *here),
         Cmd::Get { tokens } => cmd_get(cli, tokens),
         Cmd::Series { tokens, from, to } => cmd_series(cli, tokens, from.as_deref(), to.as_deref()),
         Cmd::Where { tokens } => cmd_where(cli, tokens),
@@ -967,9 +977,9 @@ fn cmd_rm(cli: &Cli, key: &str, series: Option<&str>) -> Result<Response> {
 /// present-fold, so the set you asked to check would quietly omit its members — and a
 /// check that can lie is worse than none, given §8.4 keeps this off the validator on
 /// purpose. Nothing is stored either way; the set is derived on the frame you ask for it.
-fn cmd_list(cli: &Cli, unspanned: bool) -> Result<Response> {
+fn cmd_list(cli: &Cli, unspanned: bool, node: Option<&str>, here: bool) -> Result<Response> {
     let ctx = Ctx::open(cli)?;
-    let locus = ctx.locus();
+    let scope = contract::list_scope(&ctx.root, cli.home.as_deref(), node, here)?;
 
     if unspanned {
         if ctx.filter_kind() == Some(Fasti::SPAN) {
@@ -978,12 +988,21 @@ fn cmd_list(cli: &Cli, unspanned: bool) -> Result<Response> {
                  `-k span` (§8.4)",
             ));
         }
+        // Which spans exist is a tree-wide question (an event may reference a span filed
+        // anywhere, §8.4); only the events themselves narrow to the scope.
         let spans = span_slugs(&ctx)?;
+        let events = match &scope {
+            contract::ListScope::Subtree(at) => {
+                ctx.store
+                    .find_series(at.as_ref(), Some(Fasti::EVENT), None)?
+            }
+            contract::ListScope::Local(code) => {
+                ctx.store
+                    .find_series_local(code, Some(Fasti::EVENT), None)?
+            }
+        };
         let mut rows = Vec::new();
-        for sref in ctx
-            .store
-            .find_series(locus.as_ref(), Some(Fasti::EVENT), None)?
-        {
+        for sref in events {
             for line in ctx.store.read_series(&sref)? {
                 let line = checked_line(line)?;
                 if !line
@@ -1000,14 +1019,24 @@ fn cmd_list(cli: &Cli, unspanned: bool) -> Result<Response> {
 
     let mut rows = Vec::new();
     if ctx.filter_kind() != Some(Fasti::EVENT) {
-        let folded = ctx.store.fold_entities(locus.as_ref(), Some(Fasti::SPAN))?;
+        let folded = match &scope {
+            contract::ListScope::Subtree(at) => {
+                ctx.store.fold_entities(at.as_ref(), Some(Fasti::SPAN))?
+            }
+            contract::ListScope::Local(code) => {
+                ctx.store.fold_entities_local(code, Some(Fasti::SPAN))?
+            }
+        };
         for (eref, entity) in &folded {
             entity.data.as_span()?;
             rows.push(contract::entity_json(Fasti::NAME, eref, entity)?);
         }
     }
     if ctx.filter_kind() != Some(Fasti::SPAN) {
-        let folded = ctx.store.fold(locus.as_ref(), Some(Fasti::EVENT))?;
+        let folded = match &scope {
+            contract::ListScope::Subtree(at) => ctx.store.fold(at.as_ref(), Some(Fasti::EVENT))?,
+            contract::ListScope::Local(code) => ctx.store.fold_local(code, Some(Fasti::EVENT))?,
+        };
         for present in &folded {
             present.line.data.as_event()?;
             rows.push(contract::present_json(Fasti::NAME, present)?);
@@ -1165,15 +1194,6 @@ impl Ctx {
     /// `fas get mvp_phase` mean different periods in different directories.
     fn scope(&self) -> Option<Code> {
         self.home.clone()
-    }
-
-    /// What a fold is scoped to. Unlike a lookup this *is* the locus: `cd a_o_opus/ &&
-    /// fas ls` lists what is placed there (§7.3). Outside the tree there is nothing to
-    /// narrow by, so the fold spans the forest.
-    fn locus(&self) -> Option<Code> {
-        self.home
-            .clone()
-            .or_else(|| contract::code_at_path(&self.root, None).ok())
     }
 
     /// Resolve the event series a write means: its trailing tokens are the occurrence.
@@ -1545,6 +1565,10 @@ fn warn_duplicates(ctx: &Ctx, written: &EntityRef) -> Result<()> {
             // A cross-node duplicate is a genuine choice — which record takes the
             // fuller name is the hand's — so there is no single legal correction (§10.2).
             fix: None,
+            // Nor are the choices enumerated here: listing them means knowing every
+            // holder, which is the tree walk this warning exists to avoid (§5.4, §18).
+            // `pan validate` pays that walk and offers the candidates.
+            candidates: Vec::new(),
         })
         .collect();
     eprintln!("{}", findings_json(&findings));

@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use crate::action::{Action, FieldSpec, Invocation, RecordRef, Relayed, Target, Writer};
 use crate::app::App;
 use crate::keymap::{self, Chrome};
-use crate::overlay::{Overlay, Pending, Prompt};
+use crate::overlay::{Overlay, Pending, Picking, Prompt};
 use crate::rail::Rail;
 use crate::term::Screen;
 use crate::theme::Theme;
@@ -169,15 +169,40 @@ fn check_lineup(views: &[Box<dyn View>]) -> anyhow::Result<()> {
 ///
 /// An adapter rather than two closures, because both answers come from the same `App`
 /// and two closures would each want a mutable borrow of it.
-struct Asking<'a, A>(&'a mut A);
+///
+/// It **memoizes [`count_at`](App::count_at) for the life of one draw**. The rail asks
+/// the dim (`any`) and then, only where a badge shows, the count — both of the *same*
+/// node. Without the memo that node folds twice a frame; with it the second question is
+/// a map hit. A fresh `Asking` is built per frame (`draw`/`draw_tree_modal`), so the memo
+/// never outlives the frame it was derived on (I1).
+struct Asking<'a, A> {
+    app: &'a mut A,
+    counts: std::collections::HashMap<String, usize>,
+}
+
+impl<'a, A> Asking<'a, A> {
+    fn new(app: &'a mut A) -> Self {
+        Self {
+            app,
+            counts: std::collections::HashMap::new(),
+        }
+    }
+}
 
 impl<A: App> crate::rail::Presence for Asking<'_, A> {
     fn any(&mut self, node: &Code) -> bool {
-        self.0.any_at(node)
+        // The dim is exactly *count > 0*, and it reuses the memoized count — so a held
+        // node the badge will also show is folded once, not once here and once there.
+        self.count(node) > 0
     }
 
     fn count(&mut self, node: &Code) -> usize {
-        self.0.count_at(node)
+        if let Some(&n) = self.counts.get(node.as_str()) {
+            return n;
+        }
+        let n = self.app.count_at(node);
+        self.counts.insert(node.as_str().to_owned(), n);
+        n
     }
 }
 
@@ -223,25 +248,105 @@ fn draw(
         match top {
             // The pick-a-home modal paints the tree itself, so it needs the app to ask
             // each node its presence — a different render path from the line overlays.
-            Overlay::Tree { rail } => draw_tree_modal(frame, rail, app, theme, area),
-            other => draw_overlay(frame, other, theme, ident, area),
+            Overlay::Tree { rail, picking } => {
+                draw_tree_modal(frame, rail, picking, app, theme, area);
+            }
+            // The Title splash paints a full-page banner, not a small line box (P§8, C7).
+            Overlay::Title => draw_title(frame, ident, theme, area),
+            // Help lists this view's offered actions (P§4), so the overlay is handed the
+            // set alongside it. Two shared borrows of `state`, which is why it is read
+            // here rather than copied out above the match.
+            other => draw_overlay(
+                frame,
+                other,
+                theme,
+                state.views[state.active].actions(),
+                area,
+            ),
         }
     }
 }
 
 /// The pick-a-home modal (P§4): a bordered box painting its own rail, so a quick add
 /// picks a node the same way the main tree is browsed.
-fn draw_tree_modal(frame: &mut Frame, rail: &Rail, app: &mut impl App, theme: Theme, area: Rect) {
+fn draw_tree_modal(
+    frame: &mut Frame,
+    rail: &Rail,
+    picking: &Picking,
+    app: &mut impl App,
+    theme: Theme,
+    area: Rect,
+) {
     let box_area = centred(area, 72, area.height.saturating_sub(2));
     frame.render_widget(Clear, box_area);
+    let title = match picking {
+        Picking::Home => "pick a node",
+        Picking::Destination(_) => "move to",
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.chrome())
-        .title("pick a node")
+        .title(title)
         .style(theme.text());
     let inner = block.inner(box_area);
     block.render(box_area, frame.buffer_mut());
-    rail.draw(inner, frame.buffer_mut(), theme, true, &mut Asking(app));
+    rail.draw(
+        inner,
+        frame.buffer_mut(),
+        theme,
+        true,
+        &mut Asking::new(app),
+    );
+}
+
+/// The Title splash (P§4, P§8, C7): a full-screen banner of the instrument's name in the
+/// embedded block-caps face, its symbol, and the two versions — summoned by `+`, painted
+/// over the whole `area` rather than the small line-overlay box every other overlay uses.
+///
+/// The **tagline is gone** (C6): the name is the signature, so the splash says it big and
+/// does not gloss it. Where the block caps would overrun a narrow terminal it falls back
+/// to the tracked name-word, so the splash never spills past its edges.
+fn draw_title(frame: &mut Frame, ident: &crate::Ident, theme: Theme, area: Rect) {
+    frame.render_widget(Clear, area);
+    // Paint the ink ground across the whole splash so it reads as a full page turned to,
+    // not a hole cut in the screen behind it.
+    frame.render_widget(Block::default().style(theme.text()), area);
+
+    let block = crate::banner::render(ident.name);
+    let mut lines: Vec<Line> = Vec::new();
+    if u16::try_from(crate::banner::width(&block)).unwrap_or(u16::MAX) <= area.width {
+        for row in &block {
+            lines.push(Line::from(Span::styled(row.clone(), theme.name())));
+        }
+    } else {
+        // Too narrow for the block caps — the tracked name-word still says who this is.
+        lines.push(Line::from(Span::styled(ident.tracked(), theme.name())));
+    }
+    lines.push(Line::from(String::new()));
+    lines.push(Line::from(Span::styled(
+        ident.symbol.to_string(),
+        theme.text(),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("crate {}  ·  format 1", env!("CARGO_PKG_VERSION")),
+        theme.dim(),
+    )));
+
+    // Centre the stack vertically in the full area.
+    let height = u16::try_from(lines.len())
+        .unwrap_or(u16::MAX)
+        .min(area.height);
+    let inner = Rect {
+        y: area.y + area.height.saturating_sub(height) / 2,
+        height,
+        ..area
+    };
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(theme.text())
+            .alignment(ratatui::layout::Alignment::Center),
+        inner,
+    );
 }
 
 fn draw_header(frame: &mut Frame, state: &State, theme: Theme, ident: &crate::Ident, area: Rect) {
@@ -328,13 +433,13 @@ fn draw_body(frame: &mut Frame, app: &mut impl App, state: &mut State, theme: Th
 
     if let Some(rail_area) = rail_area {
         let focused = state.focus == Focus::Rail;
-        // One borrow of the instrument, two questions (P§6).
+        // One borrow of the instrument, two questions over one per-frame memo (P§6).
         state.rail.draw(
             rail_area,
             frame.buffer_mut(),
             theme,
             focused,
-            &mut Asking(app),
+            &mut Asking::new(app),
         );
     }
 
@@ -428,10 +533,29 @@ fn draw_grid(frame: &mut Frame, grid: &Grid, theme: Theme, area: Rect) -> Rect {
     }
 }
 
+/// The first row to draw so the cursor keeps a margin from both edges — the scroll
+/// begins *before* the cursor reaches an edge, and on a tall pane the cursor rides the
+/// middle rather than the foot (P§6, C3).
+///
+/// Stateless: derived from the cursor each frame, never a stored offset (I1). It reads
+/// top-anchored while the cursor is still near the head, centres the cursor through the
+/// body, and bottom-anchors at the end so the last rows are never scrolled past. Shared
+/// by the content list ([`draw_rows`]) and the tree ([`Rail::draw`](crate::rail::Rail))
+/// so the two feel identical (I3).
+pub(crate) fn scroll_first(cursor: usize, len: usize, height: usize) -> usize {
+    if height == 0 || len <= height {
+        return 0; // the whole list fits — no scroll, no margin to keep
+    }
+    // The cursor sits half a pane below the top (centred), capped so the window never
+    // runs off the end of the list — which is also what bottom-anchors it at the tail.
+    let half = height / 2;
+    cursor.saturating_sub(half).min(len - height)
+}
+
 fn draw_rows(frame: &mut Frame, rows: &[Row], state: &State, theme: Theme, area: Rect) {
     let height = area.height as usize;
     let cursor = state.row.min(rows.len().saturating_sub(1));
-    let first = cursor.saturating_sub(height.saturating_sub(1));
+    let first = scroll_first(cursor, rows.len(), height);
     let focused = state.focus == Focus::Content;
 
     let lines: Vec<Line> = rows
@@ -497,26 +621,22 @@ fn hint(state: &State) -> String {
         .join("   ")
 }
 
+/// `offered` is the **active view's** action set — Help's right-hand column, and the only
+/// thing here that varies by view.
 fn draw_overlay(
     frame: &mut Frame,
     overlay: &Overlay,
     theme: Theme,
-    ident: &crate::Ident,
+    offered: &[Action],
     area: Rect,
 ) {
+    // The box's own inner width, which Help needs to decide one column or two. The width
+    // is independent of the body — only the height below depends on how many lines it is.
+    let inner = OVERLAY_WIDTH
+        .min(area.width.saturating_sub(2))
+        .saturating_sub(2);
     let body: Vec<Line> = match overlay {
-        Overlay::Title => vec![
-            Line::from(Span::styled(ident.tracked(), theme.name())),
-            Line::from(Span::styled(
-                format!("{}  {}", ident.symbol, ident.tagline),
-                theme.text(),
-            )),
-            Line::from(Span::styled(
-                format!("crate {}  ·  format 1", env!("CARGO_PKG_VERSION")),
-                theme.dim(),
-            )),
-        ],
-        Overlay::Help => help_lines(theme),
+        Overlay::Help => help_lines(theme, offered, inner),
         Overlay::Search { buffer } => {
             vec![Line::from(Span::styled(format!("/{buffer}"), theme.text()))]
         }
@@ -582,12 +702,16 @@ fn draw_overlay(
             lines
         }
         Overlay::Form { fields, focus, .. } => form_lines(fields, *focus, theme),
-        // The tree modal is painted by `draw_tree_modal`, not through this line body — it
-        // never reaches here.
-        Overlay::Tree { .. } => Vec::new(),
+        // Both are painted on their own full-area path — the Title splash by `draw_title`,
+        // the pick-a-home tree by `draw_tree_modal` — so neither reaches this line body.
+        Overlay::Tree { .. } | Overlay::Title => Vec::new(),
     };
 
-    let box_area = centred(area, 72, u16::try_from(body.len() + 2).unwrap_or(8));
+    let box_area = centred(
+        area,
+        OVERLAY_WIDTH,
+        u16::try_from(body.len() + 2).unwrap_or(8),
+    );
     frame.render_widget(Clear, box_area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -625,17 +749,80 @@ fn form_lines(fields: &[(FieldSpec, String)], focus: usize, theme: Theme) -> Vec
         .collect()
 }
 
-/// Help is generated from the live keymap (P§4), so it cannot drift from the bindings.
-fn help_lines(theme: Theme) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    for (key, what) in keymap::CHROME_HELP {
-        lines.push(Line::from(vec![
+/// Help is generated from the live keymap (P§4), so it cannot drift from the bindings:
+/// **Tier 1 on the left, the active view's Tier 2 on the right.**
+///
+/// Tier 2 was missing entirely until now — `?` listed the chrome keys and nothing else, so
+/// nothing on screen ever said that `a` adds or `d` marks done. [`Action::label`] was
+/// written for exactly this ("the label Help shows") and had no caller;
+/// [`keymap::key_for`] had none either.
+///
+/// An action the view does not offer is listed **dim rather than omitted**: P§5 says its
+/// key is greyed out of Help, which is a different claim from absent — the reservation is
+/// suite-wide, so the key is not free for something else even on a view that ignores it.
+///
+/// Two columns where they fit, because eleven chrome rows plus nine action rows outrun a
+/// short terminal and [`draw_overlay`] clips its body rather than scrolling it. Below
+/// [`HELP_TWO_COLUMN`] they stack instead: a wrapped second column reads as garbage, and a
+/// list that clips at the bottom at least stays a list.
+fn help_lines(theme: Theme, offered: &[Action], width: u16) -> Vec<Line<'static>> {
+    let action_row = |i: usize| -> Option<Vec<Span<'static>>> {
+        let &action = keymap::TIER_2.get(i)?;
+        let (key_style, label_style) = if offered.contains(&action) {
+            (theme.name(), theme.text())
+        } else {
+            (theme.dim(), theme.dim())
+        };
+        Some(vec![
+            Span::styled(format!("{:<6}", keymap::key_for(action)), key_style),
+            Span::styled(action.label(), label_style),
+        ])
+    };
+    // `pad` holds the label field open so the right column lines up. Stacked, there is
+    // nothing to its right and the padding would run the line past a narrow box — where
+    // `Wrap` puts the blanks on a line of their own, which reads as a gap between rows.
+    let chrome_row = |i: usize, pad: bool| -> Option<Vec<Span<'static>>> {
+        let (key, what) = keymap::CHROME_HELP.get(i)?;
+        let label = if pad {
+            format!("{what:<20}")
+        } else {
+            (*what).to_owned()
+        };
+        Some(vec![
             Span::styled(format!("{key:<14}"), theme.name()),
-            Span::styled((*what).to_string(), theme.text()),
-        ]));
+            Span::styled(label, theme.text()),
+        ])
+    };
+
+    if width < HELP_TWO_COLUMN {
+        return (0..keymap::CHROME_HELP.len())
+            .filter_map(|i| chrome_row(i, false))
+            .chain((0..keymap::TIER_2.len()).filter_map(action_row))
+            .map(Line::from)
+            .collect();
     }
-    lines
+    let rows = keymap::CHROME_HELP.len().max(keymap::TIER_2.len());
+    (0..rows)
+        .map(|i| {
+            // A missing chrome row still holds the column open, so the right one stays
+            // aligned — only reachable if Tier 2 ever outgrows the chrome list.
+            let mut spans =
+                chrome_row(i, true).unwrap_or_else(|| vec![Span::raw(" ".repeat(HELP_GUTTER))]);
+            spans.extend(action_row(i).unwrap_or_default());
+            Line::from(spans)
+        })
+        .collect()
 }
+
+/// A line overlay's box width, before the terminal narrows it.
+const OVERLAY_WIDTH: u16 = 72;
+
+/// The inner width Help's two columns need: `14 + 20` for the chrome pair, `6 + 22` for
+/// the widest action pair (`done / toggle all here`).
+const HELP_TWO_COLUMN: u16 = 62;
+
+/// The width of Help's left column, as one blank run — the two padded fields above it.
+const HELP_GUTTER: usize = 34;
 
 fn centred(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width.saturating_sub(2));
@@ -648,17 +835,48 @@ fn centred(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-/// Incremental match over a view's labels — the whole of what a view exposes for
-/// search, which is why search is written once for all of them (P§6).
+/// Incremental match over a view's labels, **ranked** so the best answers float to the
+/// top as you type (P§6) — the whole of what a view exposes for search, which is why it
+/// is written once for all of them.
+///
+/// An empty filter is the unranked list in its own order (a refold must not reshuffle
+/// rows under the cursor, P§3); a non-empty one keeps only the matches and orders them
+/// best-first. The rank tiers are prefix > word-boundary > substring, and within a tier
+/// the original order holds — a stable sort — so the ranking is deterministic frame to
+/// frame, which every caller ([`draw_rows`], [`current_target`], [`row_targets`]) needs
+/// to agree on the same cursor row.
 fn filtered(rows: &[Row], filter: &str) -> Vec<Row> {
     if filter.is_empty() {
         return rows.to_vec();
     }
     let needle = filter.to_lowercase();
-    rows.iter()
-        .filter(|row| row.label.to_lowercase().contains(&needle))
-        .cloned()
-        .collect()
+    let mut scored: Vec<(u8, usize, &Row)> = rows
+        .iter()
+        .enumerate()
+        .filter_map(|(i, row)| rank(&row.label, &needle).map(|r| (r, i, row)))
+        .collect();
+    // Best rank first; the original index breaks ties, keeping the sort stable.
+    scored.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, row)| row.clone()).collect()
+}
+
+/// Where `label` matches `needle` (already lowercased), as a rank: `0` a prefix, `1` at a
+/// word boundary (the char before the match is not alphanumeric — a space, `_`, `-`, `·`),
+/// `2` a bare substring. `None` if it does not match at all (P§6).
+fn rank(label: &str, needle: &str) -> Option<u8> {
+    let hay = label.to_lowercase();
+    let pos = hay.find(needle)?;
+    if pos == 0 {
+        Some(0)
+    } else if hay[..pos]
+        .chars()
+        .next_back()
+        .is_some_and(|c| !c.is_alphanumeric())
+    {
+        Some(1)
+    } else {
+        Some(2)
+    }
 }
 
 // ── input (P§5) ──────────────────────────────────────────────────────────────
@@ -742,7 +960,7 @@ fn handle_char(
     }
 
     if let Some(chrome) = keymap::chrome(c) {
-        return handle_chrome(state, chrome);
+        return handle_chrome(app, state, chrome);
     }
     if let Some(action) = keymap::action(c) {
         return begin(screen, app, state, action);
@@ -757,14 +975,22 @@ fn handle_char(
     Ok(())
 }
 
-fn handle_chrome(state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
+fn handle_chrome(app: &mut impl App, state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
     match chrome {
+        Chrome::Follow => return follow_ref(app, state),
         Chrome::Quit => state.quit = true,
         Chrome::Help => state.overlays.push(Overlay::Help),
         Chrome::Title => state.overlays.push(Overlay::Title),
-        Chrome::Search => state.overlays.push(Overlay::Search {
-            buffer: String::new(),
-        }),
+        Chrome::Search => {
+            // Search is the content surface (P§6, C4): `/` filters and ranks the row
+            // list, so it takes content focus wherever a rail view held it rather than
+            // jumping the tree cursor. A draw-view has no rows and simply shows an empty
+            // filter — it opts out of `/` by construction (P§6).
+            state.focus = Focus::Content;
+            state.overlays.push(Overlay::Search {
+                buffer: String::new(),
+            });
+        }
         Chrome::RecordsOnly => {
             if state.views[state.active].layout() == Layout::Rail {
                 state.rail.toggle_records_only();
@@ -792,6 +1018,62 @@ fn handle_chrome(state: &mut State, chrome: Chrome) -> anyhow::Result<()> {
         Chrome::CyclePane | Chrome::Enter | Chrome::Escape => {}
     }
     Ok(())
+}
+
+/// `f` — follow the reference the view's cursor is on (P§3, G5).
+///
+/// **The jump is same-core, and that is a law and not a limit** (I5). The running
+/// instrument links exactly one core, so a card for another core's record is one it cannot
+/// draw; a chip naming another core is answered with where to go instead, never with
+/// nothing. The check needs no core linked — the registry maps a core's name to the binary
+/// that owns it, and `ident().short` says which binary this is.
+///
+/// Everything after that is the ordinary drill: resolve the token through the spine (the
+/// hub resolves, §5.4), take the tree to the record's node, and pin it in the detail view
+/// exactly as `Enter` on a row would. `Esc` unwinds it the same way.
+fn follow_ref(app: &mut impl App, state: &mut State) -> anyhow::Result<()> {
+    let Some(token) = state.views[state.active].focused_ref() else {
+        return Ok(());
+    };
+    let Ok(reference) = pantheon::Ref::parse(&token) else {
+        state.status = Status::Notice(format!("{token} is not a `core:slug` reference"));
+        return Ok(());
+    };
+
+    let registry = pantheon::CoreRegistry::discover();
+    let short = registry
+        .cores()
+        .iter()
+        .find(|c| c.name == reference.core)
+        .map(|c| c.short.clone());
+    if short.as_deref() != Some(app.ident().short) {
+        // Honest about the boundary rather than silent: the record exists, and this is
+        // not the instrument that renders it (I4, I5).
+        state.status = Status::Notice(match short {
+            Some(short) => format!("{token} is {short}'s — open it there"),
+            None => format!("{token} belongs to no installed core"),
+        });
+        return Ok(());
+    }
+
+    let outcomes = pantheon::resolve_all(&state.root, &registry, std::slice::from_ref(&reference))?;
+    let Some(pantheon::RefOutcome::Resolved(resolution)) = outcomes.into_iter().next() else {
+        // Unresolved or ambiguous: §5.4 lists candidates rather than guessing, and a
+        // follow that guessed would be the one place the suite did.
+        state.status = Status::Notice(format!("{token} resolves to no single record"));
+        return Ok(());
+    };
+
+    let Some(detail) = state.views.iter().position(|v| v.is_detail()) else {
+        return Ok(());
+    };
+    let record = RecordRef::new(resolution.home.clone(), resolution.reference.slug.clone());
+    state.rail.reveal(&resolution.home);
+    state.pinned = Some((record.clone(), state.active));
+    state.views[detail].pin(Some(record));
+    state.active = detail;
+    state.focus = Focus::Content;
+    refresh(state)
 }
 
 /// `Enter` on a content row — **activate** (P§3, P§5).
@@ -829,6 +1111,15 @@ fn undrill(state: &mut State) {
     state.focus = Focus::Content;
 }
 
+/// Rows the active row-view now shows for the held node, after the live search filter —
+/// `None` for a draw-view, which carries its own selection. The same fold `draw_rows` and
+/// `current_target` read, so the cursor clamps against the set they display (P§6).
+fn visible_row_count(state: &mut State) -> Option<usize> {
+    let node = state.rail.selected()?;
+    let rows = state.views[state.active].rows(&node)?;
+    Some(filtered(&rows, &state.filter).len())
+}
+
 fn motion(state: &mut State, nav: Nav) -> anyhow::Result<()> {
     let full = state.views[state.active].layout() == Layout::Full;
     if full || state.focus == Focus::Content {
@@ -838,7 +1129,15 @@ fn motion(state: &mut State, nav: Nav) -> anyhow::Result<()> {
             return Ok(());
         }
         match nav {
-            Nav::Down => state.row = state.row.saturating_add(1),
+            // Clamp to the live filtered length, mirroring `Rail::down` — a reader
+            // (`draw_rows`, `current_target`) clamps too, but the raw counter drifting
+            // past the end is what makes `Up` lag after an over-scroll (P§6).
+            Nav::Down => {
+                state.row = match visible_row_count(state) {
+                    Some(len) => state.row.saturating_add(1).min(len.saturating_sub(1)),
+                    None => state.row.saturating_add(1), // draw-view: cursor is the view's
+                };
+            }
             Nav::Up => state.row = state.row.saturating_sub(1),
             _ => {}
         }
@@ -899,7 +1198,10 @@ fn begin(
         return Ok(());
     }
 
-    // `r` and `m` take a line prompt before there is anything to confirm (P§5).
+    // `r` and `m` each name something that does not exist yet, so both ask before there
+    // is anything to confirm (P§5). A new *name* is typed; a new *home* is picked off the
+    // tree — the destination is a node, and a node has one legible form and a hand should
+    // not have to spell its code.
     if action == Action::Rename {
         state.overlays.push(Overlay::Line {
             prompt: Prompt::Rename(target),
@@ -908,12 +1210,30 @@ fn begin(
         });
         return Ok(());
     }
+    if action == Action::Move {
+        state.overlays.push(Overlay::Tree {
+            rail: Rail::new(&state.root)?,
+            picking: Picking::Destination(target),
+        });
+        return Ok(());
+    }
     // `A` opens the tree as a modal to pick a home at any node (P§4), then hands off to
     // the same add form `a` opens — so a quick add differs only in how the home is
     // chosen. Its own rail leaves the browsing cursor untouched.
-    if action == Action::QuickAdd {
+    //
+    // **A Full view's `a` goes the same way**, because a Full view draws no rail (P§3) —
+    // its tree cursor is invisible, so `a`'s home was a node the hand could not see, which
+    // on a fresh launch is silently the first node in the tree. Atrium's agenda worked
+    // around this by offering `A` alone; done here it holds for every Full view at once
+    // (P-II) — Fasti's Calendar, Speculum's Horizon and Studium's dated lists were all
+    // writing to an unseen home. The date the view names survives the detour, since
+    // `Picking::Home` re-reads `view_at` when the node is taken.
+    if action == Action::QuickAdd
+        || (action == Action::Add && state.views[state.active].layout() == Layout::Full)
+    {
         state.overlays.push(Overlay::Tree {
             rail: Rail::new(&state.root)?,
+            picking: Picking::Home,
         });
         return Ok(());
     }
@@ -1125,21 +1445,39 @@ fn rooted(invocation: &Invocation, root: &std::path::Path) -> Invocation {
 fn target_for(state: &mut State, action: Action) -> Option<Target> {
     // A scoped action presupposes a row source, so it is a row-view's alone (P§7).
     let node = state.rail.selected()?;
+    let core = view_core(state);
     match action {
-        Action::Add => {
-            // A dated Full view fills the `at` from its own cell, so `a` on a calendar
-            // keeps the day you pointed at rather than defaulting to today (§7.3, P§7).
-            let at = match state.views[state.active].target() {
-                Some(Target::Node { at, .. }) => at,
-                _ => None,
-            };
-            Some(Target::Node { node, at })
-        }
-        Action::DoneAll | Action::RemoveAll | Action::QuickAdd => {
-            Some(Target::Node { node, at: None })
-        }
+        // A dated Full view fills the `at` from its own cell, so `a` on a calendar — or
+        // `A` from anywhere on it — keeps the day you pointed at rather than defaulting
+        // to today (§7.3, P§7). `A` differs from `a` only in how the *home* is chosen,
+        // so the date it carries is the same one.
+        Action::Add | Action::QuickAdd => Some(Target::Node {
+            node,
+            at: view_at(state),
+            core,
+        }),
+        Action::DoneAll | Action::RemoveAll => Some(Target::Node {
+            node,
+            at: None,
+            core,
+        }),
         _ => current_target(state),
     }
+}
+
+/// The active view's own date, where it names one (a Calendar cell, a horizon anchor).
+fn view_at(state: &mut State) -> Option<String> {
+    match state.views[state.active].target() {
+        Some(Target::Node { at, .. }) => at,
+        _ => None,
+    }
+}
+
+/// The active view's declared core (P§3) — what a *new* record here would belong to.
+///
+/// A row carries its own; only an add needs asking, and only a lens ever answers.
+fn view_core(state: &State) -> Option<String> {
+    state.views[state.active].core().map(str::to_owned)
 }
 
 /// The focused row's target — bound to the **record key captured at render**, never
@@ -1150,13 +1488,18 @@ fn target_for(state: &mut State, action: Action) -> Option<Target> {
 /// different record, because the key travelled with the row.
 fn current_target(state: &mut State) -> Option<Target> {
     let node = state.rail.selected()?;
+    let core = view_core(state);
     let view = &mut state.views[state.active];
     let Some(rows) = view.rows(&node) else {
         // **`None` is a draw-view, not an empty one** (P§3). A draw/Full view carries
         // its own selection and names it as an address — a Timeline's focused bar. One
         // that names none is *about the selected node* — `pan`'s tree tab is the case —
         // so the node is the subject.
-        return view.target().or(Some(Target::Node { node, at: None }));
+        return view.target().or(Some(Target::Node {
+            node,
+            at: None,
+            core,
+        }));
     };
     // A **row-view's** focused row wins over any address the view also names. A dated
     // Full view names its *cell* so `a` can date the add (P§7, `target_for`), and that
@@ -1199,11 +1542,11 @@ fn handle_overlay(
     if matches!(state.overlays.last(), Some(Overlay::Form { .. })) {
         return handle_form_key(screen, app, state, key);
     }
-    // The pick-a-home modal navigates its own tree (P§4). It only opens an overlay, so
-    // it needs no `screen` to relay through and cannot fail.
+    // The pick-a-node modal navigates its own tree (P§4). A picked *home* opens the add
+    // form; a picked *destination* completes a move, which relays — so it takes the
+    // screen like every other write path.
     if matches!(state.overlays.last(), Some(Overlay::Tree { .. })) {
-        handle_tree_key(app, state, key);
-        return Ok(());
+        return handle_tree_key(screen, app, state, key);
     }
 
     match key.code {
@@ -1342,6 +1685,13 @@ fn submit_form(
         }
         match spec.flag {
             None => invocation.args.push(value.to_owned()),
+            // A switch's flag takes no value: a yes appends the flag alone, anything
+            // else leaves it off entirely (P§7).
+            Some(flag) if spec.switch => {
+                if FieldSpec::is_yes(value) {
+                    invocation.args.push(flag.to_owned());
+                }
+            }
             Some(flag) => {
                 invocation.args.push(flag.to_owned());
                 invocation.args.push(value.to_owned());
@@ -1359,8 +1709,11 @@ fn submit_form(
 /// focused on the first. Shared by `a` (the home is the tree cursor) and the pick-a-home
 /// modal (the home is the node selected there).
 fn open_add_form(app: &mut impl App, state: &mut State, target: Target) {
-    let fields = app
+    // The view's form where it declares one, else the app's — a lens's `a` means a
+    // different record on each tab (§19.8), a core's means its one primitive (P§7).
+    let fields = state.views[state.active]
         .add_form()
+        .unwrap_or_else(|| app.add_form())
         .into_iter()
         .map(|spec| (spec, String::new()))
         .collect();
@@ -1371,59 +1724,103 @@ fn open_add_form(app: &mut impl App, state: &mut State, target: Target) {
     });
 }
 
-/// The pick-a-home modal's keys (P§4): arrows and `hjkl` walk its own tree, `Enter` opens
-/// the add form at the node under its cursor, `Esc` cancels.
-fn handle_tree_key(app: &mut impl App, state: &mut State, key: KeyEvent) {
+/// The pick-a-node modal's keys (P§4): arrows and `hjkl` walk its own tree, `Enter` takes
+/// the node under its cursor, `Esc` cancels.
+///
+/// What `Enter` *does* with the node is [`Picking`]'s: a home opens the add form there, a
+/// destination completes the move the base view began.
+fn handle_tree_key(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    key: KeyEvent,
+) -> anyhow::Result<()> {
     match key.code {
         KeyCode::Esc => {
             state.overlays.pop();
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.up();
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.down();
             }
         }
         KeyCode::Left | KeyCode::Char('h') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.left();
             }
         }
         KeyCode::Right | KeyCode::Char('l') => {
-            if let Some(Overlay::Tree { rail }) = state.overlays.last_mut() {
+            if let Some(Overlay::Tree { rail, .. }) = state.overlays.last_mut() {
                 rail.right();
             }
         }
         KeyCode::Enter => {
-            let node = match state.overlays.last() {
-                Some(Overlay::Tree { rail }) => rail.selected(),
+            let picked = match state.overlays.last() {
+                Some(Overlay::Tree { rail, picking }) => {
+                    rail.selected().map(|node| (node, picking.clone()))
+                }
                 _ => None,
             };
             state.overlays.pop();
-            if let Some(node) = node {
-                open_add_form(app, state, Target::Node { node, at: None });
+            let Some((node, picking)) = picked else {
+                return Ok(());
+            };
+            match picking {
+                Picking::Home => {
+                    // The home is the modal's; the core and the date are still the
+                    // view's — `A` differs from `a` only in how the node is chosen (P§4).
+                    let core = view_core(state);
+                    let at = view_at(state);
+                    open_add_form(app, state, Target::Node { node, at, core });
+                }
+                // The app built `<tool> mv <what> --to` for the target; the picked node
+                // is the value, appended exactly as a line prompt's typed text is, so the
+                // app still authors the whole write (I2, P-II).
+                Picking::Destination(target) => {
+                    return complete_move(screen, app, state, &target, &node);
+                }
             }
         }
         _ => {}
     }
+    Ok(())
 }
 
-/// Search matches live (P§6) — and *whose* labels it matches follows focus.
+/// Finish an `m` once its destination is picked: ask the app for the invocation, append
+/// the node, and run the ordinary confirm policy over it (P§7).
+fn complete_move(
+    screen: Option<&mut Screen>,
+    app: &mut impl App,
+    state: &mut State,
+    target: &Target,
+    node: &Code,
+) -> anyhow::Result<()> {
+    let Some(mut invocation) = app.on_action(Action::Move, target) else {
+        state.status = Status::Notice(format!("{} does not apply here", Action::Move.label()));
+        return Ok(());
+    };
+    invocation.args.push(node.as_str().to_owned());
+    if let Some(short) = state.missing.iter().find(|s| **s == invocation.short) {
+        state.status = Status::Notice(format!("{short} is not on PATH"));
+        return Ok(());
+    }
+    commit_or_confirm(screen, app, state, Action::Move, invocation)
+}
+
+/// Search matches live (P§6, C4): each keystroke narrows and ranks the content row list,
+/// and resets the cursor so the top answer is under it. Content is the search surface —
+/// `Chrome::Search` took content focus, so this no longer branches on it.
 fn live_search(state: &mut State) {
     let Some(Overlay::Search { buffer }) = state.overlays.last() else {
         return;
     };
-    let needle = buffer.clone();
-    if state.focus == Focus::Rail {
-        state.rail.seek(&needle);
-    } else {
-        state.filter = needle;
-        state.row = 0;
-    }
+    state.filter = buffer.clone();
+    state.row = 0;
 }
 
 fn submit(
@@ -1436,11 +1833,9 @@ fn submit(
     };
     match overlay {
         Overlay::Search { buffer } => {
-            if state.focus == Focus::Rail {
-                state.rail.seek(&buffer);
-            } else {
-                state.filter = buffer;
-            }
+            // Content is the search surface (P§6, C4): the filter the live keystrokes
+            // built stays put on submit; there is no tree seek to commit.
+            state.filter = buffer;
             Ok(())
         }
         Overlay::Confirm {
@@ -1649,13 +2044,19 @@ pub fn drive(
     };
     let ident = app.ident();
     let theme = Theme::of(&ident);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))?;
+    // **Draw before each key, as the loop does.** `run` renders and *then* waits, so a
+    // view that establishes something while painting — an `EntityCard`'s chip strip, the
+    // one cursor a card has — has established it before the next keystroke arrives.
+    // Driving keys with a single trailing draw skipped that, and a screen only reachable
+    // after a frame was a screen no test could reach.
     for key in keys {
+        terminal.draw(|frame| draw(frame, app, &mut state, theme, &ident))?;
         if state.quit {
             break;
         }
         handle(None, app, &mut state, *key)?;
     }
-    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height))?;
     terminal.draw(|frame| draw(frame, app, &mut state, theme, &ident))?;
     Ok(as_text(terminal.backend().buffer()))
 }
@@ -1720,5 +2121,77 @@ mod tests {
             Constraint::Length(WIDE_RAIL)
         ));
         assert!(matches!(rail_cut(200).1[0], Constraint::Length(WIDE_RAIL)));
+    }
+
+    /// Help's Tier-2 column: **offered reads as a binding, unoffered as a reservation**
+    /// (P§4, P§5).
+    ///
+    /// Pinned here rather than in a frame test because `as_text` strips style, so the
+    /// greying — the whole distinction between "this key acts" and "this key is spoken
+    /// for" — is invisible to the rendered string.
+    fn a_theme() -> super::Theme {
+        super::Theme::of(&crate::Ident {
+            name: "pensum",
+            short: "pen",
+            tagline: "intention",
+            symbol: '♂',
+            accent: crate::ident::accent::MINIUM,
+        })
+    }
+
+    #[test]
+    fn help_greys_the_actions_the_view_does_not_offer() {
+        use super::{Action, help_lines, keymap};
+
+        let theme = a_theme();
+        // Wide enough for two columns, which is where the two styles sit side by side.
+        let lines = help_lines(theme, &[Action::Done], super::HELP_TWO_COLUMN);
+
+        // The Tier-2 key span is the third on a row (chrome key, chrome label, then it).
+        let key_style = |action: Action| {
+            let i = keymap::TIER_2
+                .iter()
+                .position(|a| *a == action)
+                .expect("every action is listed");
+            lines[i].spans[2].style
+        };
+        assert_eq!(
+            key_style(Action::Done),
+            theme.name(),
+            "the offered action is lit"
+        );
+        assert_eq!(
+            key_style(Action::Add),
+            theme.dim(),
+            "an unoffered one is greyed, not dropped"
+        );
+        // Every Tier-2 action gets a row, offered or not — the reservation is suite-wide.
+        assert!(lines.len() >= keymap::TIER_2.len());
+    }
+
+    /// Narrow, Help **stacks rather than wraps**.
+    ///
+    /// `draw_overlay` neither scrolls nor truncates, so a second column that does not fit
+    /// is broken across lines by `Wrap` and the two columns interleave — worse than a list
+    /// that runs off the bottom, which is what the chrome rows alone already did.
+    #[test]
+    fn narrow_help_stacks_its_two_columns() {
+        use super::{Action, HELP_TWO_COLUMN, help_lines, keymap};
+
+        let theme = a_theme();
+        let wide = help_lines(theme, &[Action::Add], HELP_TWO_COLUMN);
+        let narrow = help_lines(theme, &[Action::Add], HELP_TWO_COLUMN - 1);
+        assert_eq!(
+            wide.len(),
+            keymap::CHROME_HELP.len().max(keymap::TIER_2.len()),
+            "side by side, the taller column sets the row count"
+        );
+        assert_eq!(
+            narrow.len(),
+            keymap::CHROME_HELP.len() + keymap::TIER_2.len(),
+            "stacked, every row is its own line"
+        );
+        // And a stacked chrome label is unpadded, or the pad itself wraps to a blank line.
+        assert_eq!(narrow[0].spans[1].content.as_ref(), "help");
     }
 }

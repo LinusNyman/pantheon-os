@@ -24,24 +24,20 @@ pub trait App {
     /// tenth view, which would have no switch key.
     fn lineup(&mut self) -> Vec<Box<dyn View>>;
 
-    /// This instrument's items at a node — the count badge (P§6).
+    /// This instrument's items filed **at** a node — the count badge, and (as `> 0`) the
+    /// dim (P§6).
     ///
-    /// Derived on the frame it is shown and never stored (I1).
+    /// Derived on the frame it is shown and never stored (I1). It must fold **node-local**
+    /// — the records at this node, not its whole subtree: the rail asks it of every
+    /// visible node, so a fold that recursed descendants would re-read a branch once per
+    /// ancestor above it, the cost that made walking the tree slow. The spine's `*_local`
+    /// folds (`fold_local`, `find_entities_local`, `find_documents_local`) are that path.
+    ///
+    /// The rail **memoizes this per frame**, so the dim and the badge of one node share a
+    /// single call — the badge is never a second fold of a node the dim already read. That
+    /// is why there is no separate cheap-`any` question anymore: a node-local count *is*
+    /// cheap, and asking it once is the whole of what P§6's dim and badge need.
     fn count_at(&mut self, node: &Code) -> usize;
-
-    /// The dim only (P§6) — the cheap question, asked of every visible node.
-    ///
-    /// The badge asks [`count_at`](App::count_at); this asks only *any?*. **Override it
-    /// where a count is costly**: the badge is then exact where it shows and the dim
-    /// cheap everywhere, which is the whole reason the two are separate.
-    ///
-    /// The default answers by counting, so a node that *holds* records is folded twice
-    /// per frame — once for the dim, once for the badge. That is not a leak to fix here
-    /// but the exact cost P§6 tells a costly instrument to override this away. An
-    /// instrument folding in-process over a personal corpus can leave it alone.
-    fn any_at(&mut self, node: &Code) -> bool {
-        self.count_at(node) > 0
-    }
 
     /// How a relayed write reaches a core (P§7).
     fn writer(&self) -> Writer;

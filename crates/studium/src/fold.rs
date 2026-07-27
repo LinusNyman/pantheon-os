@@ -20,6 +20,12 @@ use crate::curriculum::{self, Curriculum};
 /// core is absent is `null`, and the fold degrades to what it finds (§12).
 const FASTI: &str = "fas";
 const ANNALES: &str = "ann";
+/// The last two are the screen's alone — `figures` folds no contacts and no reflections
+/// (§19.9), so a headless build reads neither core.
+#[cfg(feature = "tui")]
+const ALBUM: &str = "alb";
+#[cfg(feature = "tui")]
+const TABELLA: &str = "tab";
 
 /// The §19.9 surface: the figures behind the mosaic, as one object.
 ///
@@ -41,6 +47,7 @@ pub fn figures(root: &Path, home: Option<&str>) -> Value {
             "open_courses": Value::Null,
             "study_hours": study_hours(root, annales_present, &HashSet::new()),
             "next_exam": Value::Null,
+            "period": Value::Null,
         });
     };
 
@@ -114,7 +121,42 @@ pub fn figures(root: &Path, home: Option<&str>) -> Value {
         "open_courses": open_courses,
         "study_hours": study_hours(root, annales_present, &course_slugs(&spans)),
         "next_exam": next_exam(root, home, &today_yymmdd()),
+        "period": period_now(&spans, &programmes, &curricula, &today_yymmdd()),
     })
+}
+
+/// Which period the study life is **in**, absolutely (§19.5).
+///
+/// Only answerable within one programme: the label counts study years from a programme's
+/// start, and across two degrees there is no such count — the same reason the screen folds
+/// one programme at a time (§19.4). So this is `null` on all-the-studies, which is the
+/// honest dash and not a zero (§12).
+fn period_now(
+    spans: &[Value],
+    programmes: &HashSet<String>,
+    curricula: &[(pantheon::Code, Curriculum)],
+    today: &str,
+) -> Value {
+    let mut in_scope = spans
+        .iter()
+        .filter(|s| slug(s).is_some_and(|slug| programmes.contains(slug)));
+    let Some(programme) = in_scope.next() else {
+        return Value::Null;
+    };
+    if in_scope.next().is_some() {
+        return Value::Null; // more than one degree in scope: no single count of years
+    }
+    let placed = programme["home"]
+        .as_str()
+        .and_then(|home| curriculum::governing(curricula, home))
+        .zip(programme["data"]["from"].as_str())
+        .and_then(|(curriculum, started)| {
+            crate::period::placement(curriculum, started, today, None)
+        });
+    match placed {
+        Some(p) => json!({ "label": p.label, "terms": p.terms }),
+        None => Value::Null,
+    }
 }
 
 /// One grade reading, weighed against its governing scale (§19.4).
@@ -203,40 +245,238 @@ fn study_hours(root: &Path, annales_present: bool, course_slugs: &HashSet<String
 ///
 /// "Upcoming" is relative to `today`, which is the one place the live fold reads the clock
 /// — every other figure is folded from dated records alone (§19.4). `null` where Fasti is
-/// absent or nothing is scheduled ahead (§12). Filtering exams from other events (a
-/// deadline) is deferred; any course-referencing occurrence is a candidate.
+/// absent or nothing is scheduled ahead (§12).
 fn next_exam(root: &Path, home: Option<&str>, today: &str) -> Value {
-    let mut args = vec!["list", "-k", "event"];
-    if let Some(home) = home {
-        args.push("-H");
-        args.push(home);
-    }
-    let Some(series_rows) = read(root, FASTI, &args).and_then(|v| array(&v)) else {
+    let Some(lines) = event_lines(root, home) else {
         return Value::Null;
     };
-
-    let mut events: Vec<(String, String)> = Vec::new();
-    for row in &series_rows {
-        let Some(name) = row["series"].as_str() else {
-            continue;
-        };
-        let Some(lines) = read(root, FASTI, &["series", name]).and_then(|v| array(&v)) else {
-            continue;
-        };
-        for line in &lines {
-            let Some(course) = course_ref(line) else {
-                continue;
-            };
-            if let Some(date) = line["key"].as_str().map(day) {
-                events.push((date, course));
-            }
-        }
-    }
+    let mut events: Vec<(String, String)> = lines
+        .iter()
+        .filter_map(|line| {
+            let course = course_ref(line)?;
+            Some((day(line["key"].as_str()?), course))
+        })
+        .collect();
 
     match pick_next(&mut events, today) {
         Some((date, course)) => json!({ "date": date, "course": course }),
         None => Value::Null,
     }
+}
+
+/// Every Fasti `event` line in scope (§8.4), or `None` where Fasti is off `PATH` (§12).
+///
+/// **`list` is the present, not the history** (I1): a core's `list` answers with the
+/// *latest* line of each series, so reading it alone would show one occurrence per series
+/// and hide every other date in it. The whole timeline is `list` to name the series, then
+/// `series <name>` for its lines — which is exactly what a fold over samples must do.
+fn event_lines(root: &Path, home: Option<&str>) -> Option<Vec<Value>> {
+    series_lines(root, FASTI, home, Some("event"))
+}
+
+/// Every line of every series a core holds in scope — the readings, not the present (I1).
+///
+/// `None` only where the core itself is off `PATH` (§12); a core that answers with no
+/// series answers with no lines, which is a real empty and not an absence.
+fn series_lines(
+    root: &Path,
+    short: &str,
+    home: Option<&str>,
+    kind: Option<&str>,
+) -> Option<Vec<Value>> {
+    let mut args = vec!["list"];
+    if let Some(kind) = kind {
+        args.extend_from_slice(&["-k", kind]);
+    }
+    if let Some(home) = home {
+        args.extend_from_slice(&["-H", home]);
+    }
+    let present = read(root, short, &args).and_then(|v| array(&v))?;
+    let mut names: Vec<&str> = present
+        .iter()
+        .filter_map(|r| r["series"].as_str())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut out = Vec::new();
+    for name in names {
+        if let Some(lines) = read(root, short, &["series", name]).and_then(|v| array(&v)) {
+            out.extend(lines);
+        }
+    }
+    Some(out)
+}
+
+/// One dated occurrence — an exam sitting, a deadline (§8.4, §19.6).
+///
+/// **Studium does not tell an exam from a deadline, and does not pretend to.** §8.4 gives
+/// an event no kind of its own beyond `event`, and inventing one here would be a lens
+/// deciding a core's vocabulary (I5). What it *does* distinguish is what a hand needs: an
+/// occurrence that names a course, and one that does not.
+#[cfg(feature = "tui")]
+pub(crate) struct Occurrence {
+    pub date: String,
+    /// What the line says — its first value, else the series it sits in.
+    pub label: String,
+    /// The course it concerns, where it references one (§8.4).
+    pub course: Option<String>,
+    pub home: String,
+    pub series: String,
+}
+
+/// The occurrences in the next `days` days (§19.6) — "deadlines & exams", folded on sight.
+///
+/// Bounded rather than endless, because the tab answers *what is coming*, and a timeline
+/// with next year's re-exam on it answers nothing. Sorted by date, earliest first.
+#[cfg(feature = "tui")]
+pub(crate) fn upcoming(root: &Path, home: Option<&str>, today: &str, days: i32) -> Vec<Occurrence> {
+    let horizon = plus_days(today, days);
+    let Some(lines) = event_lines(root, home) else {
+        return Vec::new();
+    };
+    let mut out: Vec<Occurrence> = lines
+        .iter()
+        .filter_map(|line| {
+            let date = day(line["key"].as_str()?);
+            if date.as_str() < today || horizon.as_ref().is_some_and(|end| &date > end) {
+                return None;
+            }
+            let series = line["series"].as_str().unwrap_or_default().to_owned();
+            let label = line["data"]["values"]
+                .as_array()
+                .and_then(|v| v.first())
+                .and_then(Value::as_str)
+                .map_or_else(|| series.clone(), str::to_owned);
+            Some(Occurrence {
+                date,
+                label,
+                course: course_ref(line),
+                home: line["home"].as_str().unwrap_or_default().to_owned(),
+                series,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.date.cmp(&b.date));
+    out
+}
+
+/// One study-time reading — a session's hours, dated (§8.6, §19.6).
+#[cfg(feature = "tui")]
+pub(crate) struct Session {
+    pub date: String,
+    pub hours: String,
+    /// The log it was given to — what you gave the hours *to*.
+    pub log: String,
+    pub home: String,
+}
+
+/// The study-time readings in scope, latest first (§19.6).
+///
+/// The grade logs are named for their courses (§19.2), so **every other log in scope is
+/// study time** — the same rule the `study_hours` figure folds by, read here one line at a
+/// time instead of summed.
+#[cfg(feature = "tui")]
+pub(crate) fn sessions(root: &Path, home: Option<&str>) -> Vec<Session> {
+    let courses = spans(root, home)
+        .map(|s| course_slugs(&s))
+        .unwrap_or_default();
+    let mut out: Vec<Session> = series_lines(root, ANNALES, home, None)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|line| {
+            let name = line["series"].as_str()?;
+            if courses.contains(name) {
+                return None; // a grade log, not a study-time log (§19.2)
+            }
+            let hours = line["data"]["values"]
+                .as_array()
+                .and_then(|v| v.first())
+                .and_then(Value::as_str)?;
+            Some(Session {
+                date: line["key"].as_str().map_or_else(String::new, day),
+                hours: hours.to_owned(),
+                log: name.to_owned(),
+                home: line["home"].as_str().unwrap_or_default().to_owned(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.date.cmp(&a.date));
+    out
+}
+
+/// The people a study life's records point at (§19.6, §8.1).
+///
+/// **A fold over references, never a directory** — §19.6 says contacts are "the people a
+/// course's records point at", so a person is *in* the studies exactly when something in
+/// scope references them. Nothing is copied under a course (I3), and Album is read only
+/// for the records the edges already name.
+#[cfg(feature = "tui")]
+pub(crate) fn people(root: &Path, home: Option<&str>) -> Vec<Value> {
+    let mut wanted: Vec<String> = Vec::new();
+    let mut gather = |rows: Vec<Value>| {
+        for row in &rows {
+            for slug in row["refs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter_map(|t| t.strip_prefix("album:"))
+            {
+                if !wanted.iter().any(|s| s == slug) {
+                    wanted.push(slug.to_owned());
+                }
+            }
+        }
+    };
+    // The spans are entities, so `list` is the whole set. The event and log **series** are
+    // samples, so `list` would answer with each one's latest line alone — and a professor
+    // named on an earlier reading would vanish the day a later one landed (I1).
+    gather(spans(root, home).unwrap_or_default());
+    gather(series_lines(root, FASTI, home, Some("event")).unwrap_or_default());
+    gather(series_lines(root, ANNALES, home, None).unwrap_or_default());
+    wanted.sort();
+    wanted
+        .iter()
+        .filter_map(|slug| read(root, ALBUM, &["get", slug]))
+        .collect()
+}
+
+/// The reflections in scope (§19.6, §8.7): Tabella documents whose `type` is `reflection`.
+///
+/// Read off `list`'s frontmatter and no further — a fold never reads bodies (§6.1, §8.7).
+#[cfg(feature = "tui")]
+pub(crate) fn reflections(root: &Path, home: Option<&str>) -> Vec<Value> {
+    let mut args = vec!["list"];
+    if let Some(home) = home {
+        args.extend_from_slice(&["-H", home]);
+    }
+    read(root, TABELLA, &args)
+        .and_then(|v| array(&v))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|doc| doc["type"].as_str() == Some("reflection"))
+        .collect()
+}
+
+/// `today` plus `days`, as `YYMMDD` — the horizon "the next 28 days" ends at (§19.6).
+///
+/// The spine's own date crate (§13), for the one piece of arithmetic a calendar cannot be
+/// compared its way out of. `None` where the day will not read, which widens the window to
+/// everything ahead rather than narrowing it to nothing.
+#[cfg(feature = "tui")]
+fn plus_days(today: &str, days: i32) -> Option<String> {
+    let year: i16 = today.get(..2)?.parse().ok()?;
+    let month: i8 = today.get(2..4)?.parse().ok()?;
+    let day: i8 = today.get(4..6)?.parse().ok()?;
+    let date = jiff::civil::date(2000 + year, month, day)
+        .checked_add(jiff::Span::new().days(days))
+        .ok()?;
+    Some(format!(
+        "{:02}{:02}{:02}",
+        date.year() - 2000,
+        date.month(),
+        date.day()
+    ))
 }
 
 /// The earliest event on or after `today` — a pure pick, so the "upcoming" rule is

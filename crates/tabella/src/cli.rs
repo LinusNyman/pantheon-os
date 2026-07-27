@@ -153,12 +153,20 @@ enum Cmd {
     },
     /// Remove a document by slug — irreversible (§7.2, §18).
     Rm { slug: String },
-    /// Every document across the subtree, frontmatter only (§7.2).
+    /// Every document across the subtree, or one node with `--here`, frontmatter only
+    /// (§7.2).
     ///
     /// A fold never reads bodies (§7.1). Tabella declares no read flags of its own,
     /// so selecting on `type` or `tags` is the caller's, over the emitted JSON (I4).
     #[command(alias = "ls")]
-    List,
+    List {
+        /// The node to fold, as a bare code — sugar for `-H` (§7.3).
+        #[arg(value_name = "HOME")]
+        node: Option<String>,
+        /// Fold this node alone, not its subtree (§7.2).
+        #[arg(short = 'l', long = "here")]
+        here: bool,
+    },
     /// One document by slug — frontmatter and body (§7.2). `-f raw` emits the bare
     /// body, for a pager or `$EDITOR`.
     Get { slug: String },
@@ -184,12 +192,12 @@ pub fn run_cli() -> ExitCode {
     // only `get` has one (§7.2). So it says nothing about how a JSON value would
     // render and leaves that to the hand: it maps to `None`, not to `false`, or
     // `-f raw` down a pipe would be read as `table` and start pretty-printing.
-    let as_json = contract::format_is_json(match cli.format {
+    let force = match cli.format {
         Some(Format::Json) => Some(true),
         Some(Format::Table) => Some(false),
         Some(Format::Raw) | None => None,
-    });
-    contract::dispatch(run(&cli, as_json), as_json)
+    };
+    contract::dispatch(run(&cli, contract::format_is_json(force)), force)
 }
 
 /// The flags that take a separate value — what the verb scan must step over to find
@@ -301,7 +309,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
         Cmd::Move { slug, to } => cmd_move(cli, slug, to),
         Cmd::Rm { slug } => cmd_rm(cli, slug),
-        Cmd::List => cmd_list(cli),
+        Cmd::List { node, here } => cmd_list(cli, node.as_deref(), *here),
         Cmd::Get { slug } => cmd_get(cli, slug),
         Cmd::Series { .. } => Err(Error::usage(
             "tabella keeps no series: a document is one text file, read with `get` or \
@@ -615,9 +623,12 @@ fn cmd_rm(cli: &Cli, slug: &str) -> Result<Response> {
     Ok(Response::Json(json!({ "deleted": dref.slug })))
 }
 
-fn cmd_list(cli: &Cli) -> Result<Response> {
+fn cmd_list(cli: &Cli, node: Option<&str>, here: bool) -> Result<Response> {
     let ctx = Ctx::open(cli)?;
-    let folded = ctx.store.fold_documents(ctx.locus().as_ref())?;
+    let folded = match contract::list_scope(&ctx.root, cli.home.as_deref(), node, here)? {
+        contract::ListScope::Subtree(at) => ctx.store.fold_documents(at.as_ref())?,
+        contract::ListScope::Local(code) => ctx.store.fold_documents_local(&code)?,
+    };
     Ok(Response::Json(contract::document_fold_json(
         Tabella::NAME,
         &folded,
@@ -680,15 +691,6 @@ impl Ctx {
     /// would make `tab get trip_idea` mean different notes in different directories.
     fn scope(&self) -> Option<Code> {
         self.home.clone()
-    }
-
-    /// What a fold is scoped to. Unlike a lookup this *is* the locus: `cd
-    /// e_c_corpus/ && tab ls` lists the notes filed there (§7.3). Outside the tree
-    /// there is nothing to narrow by, so the fold spans the forest.
-    fn locus(&self) -> Option<Code> {
-        self.home
-            .clone()
-            .or_else(|| contract::code_at_path(&self.root, None).ok())
     }
 }
 
@@ -800,6 +802,10 @@ fn warn_duplicates(ctx: &Ctx, written: &DocumentRef) -> Result<()> {
             // A cross-node duplicate is a genuine choice — which record takes the
             // fuller name is the hand's — so there is no single legal correction (§10.2).
             fix: None,
+            // Nor are the choices enumerated here: listing them means knowing every
+            // holder, which is the tree walk this warning exists to avoid (§5.4, §18).
+            // `pan validate` pays that walk and offers the candidates.
+            candidates: Vec::new(),
         })
         .collect();
     eprintln!("{}", findings_json(&findings));

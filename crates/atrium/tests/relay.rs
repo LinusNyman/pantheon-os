@@ -35,19 +35,23 @@ fn bin_dir() -> PathBuf {
 }
 
 fn pen(root: &Path, args: &[&str]) -> std::process::Output {
-    let pen = bin_dir().join("pen");
+    core(root, "pen", args)
+}
+
+fn core(root: &Path, short: &str, args: &[&str]) -> std::process::Output {
+    let bin = bin_dir().join(short);
     assert!(
-        pen.exists(),
-        "`pen` is not built. A lens's contract test drives another tool's binary, so \
+        bin.exists(),
+        "`{short}` is not built. A lens's contract test drives another tool's binary, so \
          `cargo build --workspace --bins` has to run first — cargo builds no bin for a \
          crate that is not under test."
     );
-    Command::new(pen)
+    Command::new(bin)
         .arg("-C")
         .arg(root)
         .args(args)
         .output()
-        .expect("pen runs")
+        .unwrap_or_else(|e| panic!("running {short}: {e}"))
 }
 
 #[test]
@@ -75,10 +79,20 @@ fn d_on_an_atrium_row_marks_a_task_done_in_another_process() {
     let joined = std::env::join_paths(dirs).expect("a joinable PATH");
     unsafe { std::env::set_var("PATH", &joined) };
 
+    // The task shows on the agenda, node-first and de-underscored (P1). Captured before
+    // the write, since marking it done empties the agenda — and asserting the spaced
+    // form proves the *label*, not the `buy_milk` command echoed in the status line.
+    let agenda = porticus::drive(&mut Atrium::new(&root), &root, &porticus::keys("2"), 90, 20)
+        .expect("the lens drives");
+    assert!(
+        agenda.contains("buy milk"),
+        "the task is on the agenda, de-underscored (P1): {agenda}"
+    );
+
     // `2` switches to the agenda, `d` marks the focused row done (P§4, P§5). The write
     // leaves this process entirely: Porticus builds `pen edit … --done`, adds `-C` and
     // `-y`, and spawns it (P§7).
-    let frame = porticus::drive(
+    porticus::drive(
         &mut Atrium::new(&root),
         &root,
         &porticus::keys("2d"),
@@ -86,10 +100,6 @@ fn d_on_an_atrium_row_marks_a_task_done_in_another_process() {
         20,
     )
     .expect("the lens drives");
-    assert!(
-        frame.contains("buy_milk"),
-        "the task is on the agenda: {frame}"
-    );
 
     // Read it back with the binary. `--all` is required: a plain `list` is every *open*
     // task, so a done one is gone from it.
@@ -103,5 +113,72 @@ fn d_on_an_atrium_row_marks_a_task_done_in_another_process() {
         done,
         "`d` in the lens must reach the file through `pen`: {}",
         String::from_utf8_lossy(&out.stdout)
+    );
+
+    // ── N1: the same lens, a second core ─────────────────────────────────────
+    a_new_person_is_minted_through_album(&root);
+}
+
+/// **N1 — a lens relays to every core it folds, not to a favoured one** (§12).
+///
+/// The hearth counted people and documents from the start but could only ever write to
+/// Pensum. Nothing about §12 required that: what a lens may relay is the standard action
+/// set, and the only thing a cross-core relay needs beyond it is to know *which* binary a
+/// keystroke means — which the target now says (G8).
+///
+/// So: land the rail on `ac`, switch to the people list, press `a`, name someone, and
+/// read them back through `alb`. A different binary from the `d` above, from the same
+/// screen, over the same `PATH`.
+fn a_new_person_is_minted_through_album(root: &Path) {
+    // `3` is the people list (mosaic · agenda · people · documents); `<down>` walks the
+    // rail from the opening sphere `a` onto `ac`, where the fixture's records live.
+    let list = porticus::drive(
+        &mut Atrium::new(root),
+        root,
+        &porticus::keys("3<down>"),
+        90,
+        20,
+    )
+    .expect("the lens drives");
+    assert!(
+        list.contains("people") && list.contains("nobody filed here"),
+        "the people list is in the lineup and empty at `ac`: {list}"
+    );
+
+    // `a` raises the add form; the name is the one field every core's `add` requires
+    // (§7.3), and Porticus appends it to the base `alb add -H ac` the lens authored.
+    porticus::drive(
+        &mut Atrium::new(root),
+        root,
+        &porticus::keys("3<down>amara<enter>"),
+        90,
+        20,
+    )
+    .expect("the lens drives the add");
+
+    let out = core(root, "alb", &["list", "-H", "ac", "--here"]);
+    let listed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+    let minted = listed
+        .as_array()
+        .is_some_and(|rows| rows.iter().any(|row| row["slug"].as_str() == Some("mara")));
+    assert!(
+        minted,
+        "`a` on the people list must mint through `alb`, not `pen`: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    // And the row it produced is Album's: pressing `x` on it relays `alb rm`, which is
+    // only reachable because the row remembers the core it was folded from.
+    let people = porticus::drive(
+        &mut Atrium::new(root),
+        root,
+        &porticus::keys("3<down>"),
+        90,
+        20,
+    )
+    .expect("the lens drives");
+    assert!(
+        people.contains("mara"),
+        "the minted person shows on the list the lens folded: {people}"
     );
 }

@@ -98,8 +98,8 @@ pub fn run_cli() -> ExitCode {
     init_tracing();
 
     let cli = Cli::parse();
-    let as_json = contract::format_is_json(cli.format.map(|f| matches!(f, Format::Json)));
-    contract::dispatch(run(&cli, as_json), as_json)
+    let force = cli.format.map(|f| matches!(f, Format::Json));
+    contract::dispatch(run(&cli, contract::format_is_json(force)), force)
 }
 
 pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {

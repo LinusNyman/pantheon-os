@@ -9,13 +9,12 @@
 //!
 //! # Keys and what stays dark
 //!
-//! The node cascade (§10.1) is built, so `r` renames the selected node's label and `x`
-//! removes it (refused by the spine if it is not empty). `m` (move) stays **dark** —
-//! Porticus has no destination prompt for it yet, and a tree browser that offered a move
-//! it could not complete would be worse than one that says so (P§7's graceful
-//! degradation). `a` (add a child) is likewise not offered here; a child is minted with
-//! `pan new`. The bulk repairs (`rename-prefix`, `rename-pattern`, `mv-file`) are CLI
-//! verbs with no key of their own.
+//! The node cascade (§10.1) is built, so `r` renames the selected node's label, `x`
+//! removes it (refused by the spine if it is not empty), and `m` re-homes it — its
+//! destination picked off Porticus's tree modal (P§4) rather than typed as a code, since
+//! a move names a *node* and the tree is where nodes are legible. `a` (add a child) is
+//! not offered here; a child is minted with `pan new`. The bulk repairs
+//! (`rename-prefix`, `rename-pattern`, `mv-file`) are CLI verbs with no key of their own.
 
 use std::ffi::OsString;
 
@@ -113,16 +112,20 @@ impl App for PanApp {
             (Action::Remove, Target::Node { node, .. }) => {
                 Some(Invocation::new("pan", ["rm", node.as_str()]))
             }
-            // ── the validate tab: `d` applies a finding's fix ──
-            // The finding's fix rides in the row target as (code, normalized-label), so
-            // this relays it verbatim (§10.2). A finding with no fix carries a node
-            // target this arm does not match, so `d` there is a no-op.
-            (Action::Done, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
-                "pan",
-                ["rename", home.as_str(), "--label", key.as_str()],
-            )),
-            // `m` (move) has no destination prompt yet, and every other key is unoffered
-            // by the active view — dark, not faked (§10.1, P§7).
+            // `m` re-homes the node under a new parent (§10.1). The destination is the
+            // node picked in Porticus's tree modal, appended after `--to` — a move names
+            // a *node*, and picking one off the tree is how you name a node without
+            // spelling its code (P§4).
+            (Action::Move, Target::Node { node, .. }) => {
+                Some(Invocation::new("pan", ["mv", node.as_str(), "--to"]))
+            }
+            // ── the validate tab: `d` applies the fix on the focused row ──
+            // The row carries the whole `pan …` command as its key, so this relays it
+            // verbatim (§10.2) and stays blind to which finding shape produced it. A
+            // finding offering no fix carries a node target this arm does not match, so
+            // `d` there is a no-op.
+            (Action::Done, Target::Row(RecordRef { key, .. })) => fix_invocation(key),
+            // Every other key is unoffered by the active view — dark, not faked (P§7).
             _ => None,
         }
     }
@@ -190,10 +193,10 @@ impl View for TreeTab {
     }
 
     fn actions(&self) -> &[Action] {
-        // `e` annotates, `r` renames the label, `x` removes an empty node (§10.1, §10.3).
-        // `m` (move) and `a` (add a child) are not offered — the chrome has no
-        // destination/child prompt for them yet, so their keys stay dark.
-        &[Action::Edit, Action::Rename, Action::Remove]
+        // `e` annotates, `r` renames the label, `x` removes an empty node, `m` re-homes
+        // it against the tree modal (§10.1, §10.3, P§4). `a` (add a child) is still not
+        // offered — the chrome has no child prompt, so that key stays dark.
+        &[Action::Edit, Action::Rename, Action::Remove, Action::Move]
     }
 
     fn prompts_for(&self, action: Action) -> Option<&'static str> {
@@ -244,6 +247,14 @@ impl View for TreeTab {
                 Span::styled(ann.keywords.join(", "), theme.text()),
             ]));
         }
+        // The node's own fields (§5.2), each on its own row under the typed four —
+        // rule 4's "fields, not nodes", which is only readable if it is shown.
+        for (key, value) in &ann.fields {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{key:<12}"), theme.dim()),
+                Span::styled(value.clone(), theme.text()),
+            ]));
+        }
 
         // Which cores have files here (§10.1). Read off the **filenames** — a token
         // names its owning core, so this needs no core linked and none imported (I5,
@@ -282,14 +293,18 @@ impl View for TreeTab {
 
 // ── the validate tab (§10.2) ─────────────────────────────────────────────────
 
-/// `pan validate`'s findings, browsable — and now **applicable** (§10.2).
+/// `pan validate`'s findings, browsable and **applicable** (§10.2).
 ///
-/// A [`Finding`] carries its single legal correction as a `pan` command
-/// ([`Finding::fix`]); this tab shows it in the row and, where a finding *has* one,
-/// `d` applies it. The fix's `(code, normalized-label)` rides in the row's target, so
-/// `on_action` relays it verbatim (`pan rename <code> --label <norm>`). A finding with no
-/// single correction — a genuine choice — stays inert: its candidates are shown, never
-/// picked (§10.2). The shown command is the preview a hand reads before pressing `d`.
+/// A [`Finding`] carries either a single legal correction ([`Finding::fix`]) or, where the
+/// choice is genuinely a hand's, several ([`Finding::candidates`]). Both become rows: a
+/// fix rides on the finding's own row, and each candidate gets **a row of its own**
+/// beneath it. So `d` never picks between choices — it applies the command on the line the
+/// cursor is on, which is the whole of how a genuine choice is offered without the tools
+/// making it (§10.2).
+///
+/// The command rides in the row's target as the record key, and `on_action` relays it
+/// verbatim — so this tab teaches `pan` no fix shapes and a new one in the spine works
+/// here the day it lands.
 struct ValidateTab {
     root: std::path::PathBuf,
 }
@@ -309,11 +324,11 @@ impl View for ValidateTab {
         // the tree (§18, §5.5) — and a screen event is exactly a hand demanding it.
         let registry = CoreRegistry::discover();
         let findings = validate(&self.root, &registry).unwrap_or_default();
-        Some(findings.iter().map(row_of).collect())
+        Some(findings.iter().flat_map(rows_of).collect())
     }
 
     fn actions(&self) -> &[Action] {
-        // `d` applies a finding's single legal correction (§10.2). Distinct from the tree
+        // `d` applies the correction on the focused row (§10.2). Distinct from the tree
         // tab's keys, so `on_action` can tell the two apart.
         &[Action::Done]
     }
@@ -332,10 +347,13 @@ impl View for ValidateTab {
     }
 }
 
-/// One finding as a row. Where it carries a single legal fix, its target holds the fix's
-/// `(code, normalized-label)` so `d` can relay it (§10.2); otherwise it targets a bare
-/// node the apply arm does not match, leaving `d` a no-op there.
-fn row_of(finding: &Finding) -> Row {
+/// One finding as its rows: the finding itself, then one row per candidate where the
+/// correction is a genuine choice (§10.2).
+///
+/// A row that carries a command holds it whole in its target, so `d` relays it without
+/// this tab knowing a single fix shape. A row with no command targets a bare node the
+/// apply arm does not match, which is what leaves `d` a no-op there.
+fn rows_of(finding: &Finding) -> Vec<Row> {
     let mark = match finding.severity {
         Severity::Error => "error  ",
         Severity::Warning => "warning",
@@ -343,41 +361,60 @@ fn row_of(finding: &Finding) -> Row {
     let base = format!("{mark}  {}  {}", finding.rel_path.display(), finding.msg);
     // Where the correction is unambiguous, show the command a hand reads before pressing
     // `d` to apply it (§10.2).
-    let label = match &finding.fix {
-        Some(fix) => format!("{base}  →  {fix}"),
-        None => base,
-    };
-    Row {
-        label,
-        target: fix_target(finding),
-        when: None,
+    let mut rows = vec![match &finding.fix {
+        Some(fix) => Row {
+            label: format!("{base}  →  {fix}"),
+            target: fix_target(Some(fix)),
+            when: None,
+        },
+        None => Row {
+            label: base,
+            target: fix_target(None),
+            when: None,
+        },
+    }];
+    // Each candidate is its own row: the cursor is how a hand picks, so nothing here
+    // chooses and nothing is hidden behind a chooser Porticus does not have (P-II).
+    for candidate in &finding.candidates {
+        rows.push(Row {
+            label: format!("          ·  {candidate}"),
+            target: fix_target(Some(candidate)),
+            when: None,
+        });
     }
+    rows
 }
 
-/// The row target for a finding: for the one auto-fix shape `pan validate` emits today —
-/// `pan rename <code> --label <normalized>` (a non-normalized node label, §10.2) — a
-/// `Target::Row` carrying `(code, normalized-label)` so `d` relays it. Anything else (no
-/// fix, or a shape this does not recognise) targets a bare node the apply arm ignores.
-fn fix_target(finding: &Finding) -> Target {
-    let placeholder = Target::Node {
-        node: Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")),
-        at: None,
-    };
-    let Some(fix) = &finding.fix else {
+/// The row target for a correction: the whole `pan …` command, carried as the record key
+/// so `on_action` can relay it verbatim (§10.2).
+///
+/// The home slot is unused by the relay and holds a legal placeholder — a `RecordRef`
+/// always names a node, and a fix names a command. `None` (or a command not addressed to
+/// `pan`, which this screen relays in-process and could not run) targets a bare node the
+/// apply arm ignores.
+fn fix_target(fix: Option<&String>) -> Target {
+    let placeholder =
+        Target::node(Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")));
+    let Some(fix) = fix.filter(|f| f.starts_with("pan ")) else {
         return placeholder;
     };
-    // Match exactly `pan rename <code> --label <normalized>`; a future fix shape stays
-    // display-only until it is taught here.
-    match fix.split_whitespace().collect::<Vec<_>>().as_slice() {
-        ["pan", "rename", code, "--label", label] => match Code::parse(code) {
-            Ok(home) => Target::Row(RecordRef {
-                home,
-                key: (*label).to_owned(),
-            }),
-            Err(_) => placeholder,
-        },
-        _ => placeholder,
+    Target::Row(RecordRef::new(
+        Code::parse("a").unwrap_or_else(|_| unreachable!("`a` is a legal code")),
+        fix.clone(),
+    ))
+}
+
+/// A carried fix command as the invocation that runs it: the words after `pan`.
+///
+/// Verbatim, because the spine computed it and `pan` is the tool that owns every fix
+/// shape it emits (§10.2, §5.5). A row carrying no command never reaches here.
+fn fix_invocation(command: &str) -> Option<Invocation> {
+    let mut words = command.split_whitespace();
+    if words.next() != Some("pan") {
+        return None;
     }
+    let args: Vec<String> = words.map(str::to_owned).collect();
+    (!args.is_empty()).then(|| Invocation::new("pan", args))
 }
 
 // ── reading the layer `pan` works on ─────────────────────────────────────────
@@ -426,10 +463,11 @@ fn child_count(root: &std::path::Path, node: &Code) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{PanApp, TreeTab};
+    use super::{PanApp, TreeTab, rows_of};
+    use pantheon::validate::{Finding, FindingCode, Severity};
     use pantheon::{NewSpec, plan_new, read_annotations};
     use porticus::view::View;
-    use porticus::{Action, App};
+    use porticus::{Action, App, Target};
 
     /// A real tree, minted through the spine.
     fn fresh_root(tag: &str) -> std::path::PathBuf {
@@ -471,39 +509,80 @@ mod tests {
     }
 
     /// `pan`'s node actions are wired now that the cascade is built: `e` annotates, `r`
-    /// renames, `x` removes (§10.1, §10.3). `m` (move) and `a` (add) stay **dark** —
-    /// Porticus has no destination/child prompt for them yet, so `on_action` returns
-    /// `None` and the keys are greyed (P§7). The validate tab's `d` applies a fix carried
-    /// in a `Row` target (§10.2).
+    /// renames, `x` removes, `m` re-homes (§10.1, §10.3, P§4). `a` (add a child) stays
+    /// **dark** — Porticus has no child prompt, so `on_action` returns `None` and the key
+    /// is greyed (P§7). The validate tab's `d` relays the command carried in a `Row`
+    /// target (§10.2).
     #[test]
-    fn the_node_actions_are_wired_and_move_stays_dark() {
+    fn the_node_actions_are_wired_and_add_stays_dark() {
         let root = fresh_root("dark");
         let mut app = PanApp { root: root.clone() };
         let node = pantheon::Code::parse("a").unwrap();
-        let target = porticus::Target::Node { node, at: None };
+        let target = porticus::Target::node(node);
 
-        for action in [Action::Edit, Action::Rename, Action::Remove] {
+        for action in [Action::Edit, Action::Rename, Action::Remove, Action::Move] {
             assert!(
                 app.on_action(action, &target).is_some(),
-                "{action:?} is a built node action (§10.1, §10.3)"
+                "{action:?} is a built node action (§10.1, §10.3, P§4)"
             );
         }
-        for action in [Action::Move, Action::Add] {
-            assert!(
-                app.on_action(action, &target).is_none(),
-                "{action:?} has no prompt yet — dark, not faked (P§7)"
-            );
-        }
+        assert!(
+            app.on_action(Action::Add, &target).is_none(),
+            "a child has no prompt yet — dark, not faked (P§7)"
+        );
 
-        // The validate tab's `d` applies a finding's fix, carried as (code, label).
-        let fix = porticus::Target::Row(porticus::RecordRef {
-            home: pantheon::Code::parse("ax").unwrap(),
-            key: "bad_label".into(),
-        });
+        // The validate tab's `d` relays whatever command the row carries — the tab
+        // teaches `pan` no fix shapes (§10.2).
+        let fix = porticus::Target::Row(porticus::RecordRef::new(
+            pantheon::Code::parse("a").unwrap(),
+            "pan rename ax --label bad_label",
+        ));
         assert!(
             app.on_action(Action::Done, &fix).is_some(),
             "`d` applies a finding fix from the validate tab (§10.2)"
         );
+        let not_pan = porticus::Target::Row(porticus::RecordRef::new(
+            pantheon::Code::parse("a").unwrap(),
+            "alb rename alex alex_csa",
+        ));
+        assert!(
+            app.on_action(Action::Done, &not_pan).is_none(),
+            "a command `pan` cannot run in-process is not relayed (I4)"
+        );
+    }
+
+    /// **A genuine choice becomes a row per candidate** (§10.2, G7).
+    ///
+    /// The cursor is how a hand picks between corrections, so each candidate gets its own
+    /// line carrying its own command — there is no chooser and nothing here decides. The
+    /// finding's own row carries no command, so `d` on it is a no-op.
+    #[test]
+    fn a_multi_candidate_finding_offers_a_row_each() {
+        let finding = Finding {
+            code: FindingCode::DuplicateSlug,
+            severity: Severity::Warning,
+            rel_path: std::path::PathBuf::from("c_contextus/csa__person__alex.json"),
+            msg: "album:alex also names a record at cso".into(),
+            fix: None,
+            candidates: vec![
+                "pan rename-pattern alex alex_csa csa".to_string(),
+                "pan rename-pattern alex alex_cso cso".to_string(),
+            ],
+        };
+
+        let rows = rows_of(&finding);
+        assert_eq!(rows.len(), 3, "the finding, then a row per candidate");
+        assert!(
+            matches!(rows[0].target, Target::Node { .. }),
+            "the finding itself carries no command, so `d` there is dark (P§7)"
+        );
+        for (row, command) in rows[1..].iter().zip(&finding.candidates) {
+            assert!(row.label.contains(command.as_str()), "{}", row.label);
+            let Target::Row(record) = &row.target else {
+                panic!("a candidate row carries its command: {}", row.label)
+            };
+            assert_eq!(&record.key, command);
+        }
     }
 
     /// `pan`'s two tabs (§10), and the tree tab as a draw-view about the selected node.

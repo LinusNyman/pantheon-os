@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::cascade::plan_cascade;
-use crate::classify::{FileClass, classify};
+use crate::classify::{FileClass, RESERVED_KIND_FUNCTION, classify};
 use crate::code::{CharToken, Code};
 use crate::core::CoreRegistry;
 use crate::envelope::Ref;
@@ -331,68 +331,374 @@ pub fn plan_mv(root: &Path, code: &Code, to_parent: &str) -> Result<(Plan, Value
     Ok((plan, record))
 }
 
-/// `pan mv-file <file> --to <code>` (§10.1, §7.2) — re-home one record, series, or rule
-/// file to another node, rewriting its `[code]__` prefix to the target's. The file's
-/// remainder (`kind__slug`, `kind__name.jsonl`, `function__name…`) is invariant, so this
-/// is a single rename into the target's meta dir. A document (single-`_` name) is moved
-/// by its own core, not here.
-pub fn plan_mv_file(root: &Path, file: &Path, to_code: &Code) -> Result<(Plan, Value)> {
-    let file_abs = if file.is_absolute() {
-        file.to_path_buf()
-    } else {
-        root.join(file)
-    };
-    if !file_abs.is_file() {
-        return Err(Error::not_found(format!("no file at {}", file.display())));
-    }
-    let basename = file_abs
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let Some((_old_code, rest)) = basename.split_once("__") else {
-        return Err(Error::usage(format!(
-            "mv-file re-homes a record, series, or rule (a `__`-named file); {basename:?} is not \
-             one — a document is re-homed by its core (§7.2)"
+/// `pan merge <src> --into <dst>` (§10.1) — dissolve one node into another, recoding its
+/// whole branch `src` → `dst`.
+///
+/// The verb `mv` cannot be. `mv` refuses a code collision (§5.3) and is right to: a silent
+/// merge would be worse than a refusal. But that left **no verb that unions two branches**,
+/// and a tree assembled from two trees is full of merges — the same node reached twice,
+/// once live and once in an archive.
+///
+/// **The union key is the code, and it recurses.** A `src` child whose recoded code matches
+/// a child already at `dst` is *merged into it*, never renamed onto it — which is the whole
+/// difference from `mv`. Where the two spell the same code with different labels, **`dst`'s
+/// directory survives** and the dropped label is reported rather than quietly lost: one
+/// code is one node (§5.3), so one of the two names has to go and only the tree's existing
+/// name is not a guess.
+///
+/// **Everything in the open directory moves**, homed bulk directories included — one
+/// rename each, nothing descended into — because what the walk does not carry, the final
+/// removal would destroy. And the removal is [`Change::RemoveEmptyDir`], which refuses a
+/// directory that is not empty, so anything that arrived meanwhile stops the merge.
+///
+/// **A file landing on a file is refused, and every one of them is named** — that is
+/// [`Plan::preflight`], unchanged, doing what it does for every other verb. Two annotation
+/// files are the usual case, and they are a genuine decision: what a merged `[code]__.toml`
+/// should say is not the tool's to invent.
+///
+/// Grants cascade as they do for `mv` — `src`'s codes really do change (§9.2). Refs do
+/// not: a definition-prefix node keeps its slug on a move, so nothing points at what
+/// changed (§10.1).
+pub fn plan_merge(root: &Path, src: &Code, dst: &Code) -> Result<(Plan, Value)> {
+    if src == dst {
+        return Err(Error::validation(format!(
+            "merge is a no-op: {} is already itself",
+            src.as_str()
         )));
+    }
+    if is_self_or_descendant(dst, src) {
+        return Err(Error::validation(format!(
+            "cannot merge {} into {} — that is the node itself or its own descendant",
+            src.as_str(),
+            dst.as_str()
+        )));
+    }
+    let (TreeRoot::Subtree(src_node), TreeRoot::Subtree(dst_node)) =
+        (build_tree(root, Some(src))?, build_tree(root, Some(dst))?)
+    else {
+        return Err(Error::not_found(
+            "merge takes two nodes, each named by its code",
+        ));
     };
 
+    let mut changes = Vec::new();
+    let mut rules = Vec::new();
+    let mut relabelled = Vec::new();
+    let dst_rel = rel_path(root, &dst_node.path);
+    merge_into(
+        root,
+        &src_node,
+        dst,
+        &dst_rel,
+        Some(&dst_node),
+        &mut changes,
+        &mut rules,
+        &mut relabelled,
+    )?;
+    changes.extend(header_cascade(root, src, dst, &rules)?);
+
+    let record = json!({
+        "from": src.as_str(),
+        "to": dst.as_str(),
+        "relabelled": relabelled,
+    });
+    Ok((Plan::new("merge", changes), record))
+}
+
+/// Dissolve `src` into the node at `dst_code`, whose directory is `dst_rel` and whose
+/// already-present form (if the tree holds one) is `dst_existing`. Emits the moves and
+/// then the removals of what it emptied; recurses where a child is a node both sides hold.
+#[allow(clippy::too_many_arguments)]
+fn merge_into(
+    root: &Path,
+    src: &Node,
+    dst_code: &Code,
+    dst_rel: &Path,
+    dst_existing: Option<&Node>,
+    changes: &mut Vec<Change>,
+    rules: &mut Vec<(PathBuf, PathBuf)>,
+    relabelled: &mut Vec<Value>,
+) -> Result<()> {
+    let src_rel = rel_path(root, &src.path);
+    let src_meta_name = format!("{}__", src.code.as_str());
+    let dst_meta_rel = dst_rel.join(format!("{}__", dst_code.as_str()));
+
+    // 1. The meta dir: every record, series, rule and annotation in it, then the dir.
+    let src_meta_abs = src.path.join(&src_meta_name);
+    if src_meta_abs.is_dir() {
+        let mut moves = Vec::new();
+        for entry in std::fs::read_dir(&src_meta_abs)? {
+            let entry = entry?;
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            let renamed = swap_code_prefix(&fname, src.code.as_str(), dst_code.as_str());
+            let lands_at = dst_meta_rel.join(&renamed);
+            if is_rule_name(&fname) {
+                rules.push((entry.path(), lands_at.clone()));
+            }
+            moves.push(Change::Rename {
+                from: src_rel.join(&src_meta_name).join(&fname),
+                to: lands_at,
+            });
+        }
+        // Minted lazily on first write, so the destination may not have one yet — and
+        // the mint has to precede the moves that land in it.
+        if !moves.is_empty() && !root.join(&dst_meta_rel).is_dir() {
+            changes.push(Change::Mkdir {
+                code: dst_code.clone(),
+                rel_path: dst_meta_rel.clone(),
+            });
+        }
+        changes.append(&mut moves);
+        changes.push(Change::RemoveEmptyDir {
+            rel_path: src_rel.join(&src_meta_name),
+        });
+    }
+
+    // 2. The open dir: loose documents, homed bulk, and bulk directories — everything
+    //    that is not the meta dir or a child node, moved whole and never descended into.
+    let child_paths: Vec<&Path> = src.children.iter().map(|c| c.path.as_path()).collect();
+    for entry in std::fs::read_dir(&src.path)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == src_meta_name || child_paths.contains(&entry.path().as_path()) {
+            continue;
+        }
+        changes.push(Change::Rename {
+            from: src_rel.join(&name),
+            to: dst_rel.join(swap_code_prefix(
+                &name,
+                src.code.as_str(),
+                dst_code.as_str(),
+            )),
+        });
+    }
+
+    // 3. Child nodes: merged into their twin where the destination holds one, moved
+    //    whole where it does not.
+    for child in &src.children {
+        let new_code = match &child.ch {
+            Some(ch) => {
+                if !dst_code.is_compact() {
+                    return Err(Error::usage(format!(
+                        "{} is a triple node and cannot become a child of the \
+                         definition-prefix node {} (§5.1)",
+                        child.code.as_str(),
+                        dst_code.as_str()
+                    )));
+                }
+                child_code(Some(dst_code), ch)
+            }
+            None => Code::parse(&format!("{}_{}", dst_code.as_str(), child.label))?,
+        };
+        let twin = dst_existing.and_then(|d| d.children.iter().find(|c| c.code == new_code));
+        if let Some(twin) = twin {
+            if twin.label != child.label {
+                // One code is one node (§5.3), so one of the two labels has to go. The
+                // tree's own is kept and the other is named, never silently dropped.
+                relabelled.push(json!({
+                    "code": new_code.as_str(),
+                    "kept": twin.label,
+                    "dropped": child.label,
+                }));
+            }
+            merge_into(
+                root,
+                child,
+                &twin.code,
+                &rel_path(root, &twin.path),
+                Some(twin),
+                changes,
+                rules,
+                relabelled,
+            )?;
+        } else {
+            let new_dirname = match &child.ch {
+                Some(ch) => triple_dirname(Some(dst_code), ch, &child.label),
+                None => def_dirname(Some(dst_code), &child.label),
+            };
+            let child_new_rel = dst_rel.join(&new_dirname);
+            push_rename(changes, rel_path(root, &child.path), child_new_rel.clone());
+            recode_contents(
+                child,
+                &child.code,
+                &new_code,
+                &child_new_rel,
+                changes,
+                rules,
+            )?;
+        }
+    }
+
+    // 4. What is left is an empty directory, and only because this plan emptied it.
+    changes.push(Change::RemoveEmptyDir { rel_path: src_rel });
+    Ok(())
+}
+
+/// `pan mv-file <file>… --to <code>` (§10.1, §7.2) — re-home files to another node,
+/// rewriting the `[code]` prefix of each name that carries one. **Any** file: a record,
+/// series or rule lands in the target's meta dir, a document or homed bulk loose in its
+/// open node dir (§6.1, §6.5), and a name carrying no code at all (`IMG_1234.jpg`) moves
+/// verbatim. Many sources build **one** plan — one token, one confirm — so a shell glob
+/// re-homes a directory's worth of files in a single reviewed transaction.
+///
+/// It once refused everything without a `__` in its name, on the grounds that a document
+/// is re-homed by its core. `tab move` does re-home a document, one slug at a time, and
+/// it remains the record-level verb — it wakes Auspex, as a core's write does. This is the
+/// structural half: it moves files, knows no core (I5), and is what a bulk migration has
+/// to reach for, since nothing else moves a hundred thousand photos.
+///
+/// Where a name's code comes from is worth stating, because the two halves differ. A
+/// `__`-named file **names its own code in its first segment**, and that is the prefix
+/// replaced — including where it disagrees with the meta dir it was misfiled into, which
+/// is the case §10.2 built this verb for. A document or a bulk file carries no `__`, so
+/// its code is its *node's*, read off where it sits.
+pub fn plan_mv_files(root: &Path, files: &[PathBuf], to_code: &Code) -> Result<(Plan, Value)> {
+    if files.is_empty() {
+        return Err(Error::usage("mv-file: name at least one file to re-home"));
+    }
     let (_to_nn, to_path) = resolve_node(root, to_code)?;
     let to_meta = to_path.join(format!("{}__", to_code.as_str()));
-    let new_basename = format!("{}__{rest}", to_code.as_str());
-    let dest = to_meta.join(&new_basename);
 
-    if dest == file_abs {
-        return Err(Error::validation(format!(
-            "{basename:?} is already at {} (§7.2)",
-            to_code.as_str()
-        )));
-    }
-    if dest.exists() {
-        return Err(Error::validation(format!(
-            "{} already holds a file named {new_basename:?} — re-home would overwrite it (§5.4)",
-            to_code.as_str()
-        )));
+    // One walk for every source: a loose file's home is the node whose open directory
+    // holds it, and only the tree knows which that is.
+    let tree = match build_tree(root, None)? {
+        TreeRoot::Forest(nodes) => nodes,
+        TreeRoot::Subtree(node) => vec![node],
+    };
+
+    let mut renames: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut moved = Vec::new();
+    let mut needs_meta = false;
+
+    for file in files {
+        let file_abs = if file.is_absolute() {
+            file.clone()
+        } else {
+            root.join(file)
+        };
+        if !file_abs.is_file() {
+            return Err(Error::not_found(format!("no file at {}", file.display())));
+        }
+        let file_abs = in_root_spelling(root, file_abs);
+        let basename = file_abs
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let here = home_code_of(&tree, file_abs.parent().unwrap_or(root));
+
+        // What the file is decides both where it lands and whose code its name carries.
+        // Every shape `classify` names carries the parsed code already, so nothing is
+        // re-derived here (§5.2).
+        let (into_meta, from_code) =
+            match classify(&basename, false, here.as_ref().unwrap_or(to_code)) {
+                FileClass::Annotation { code }
+                | FileClass::Partitioned { code, .. }
+                | FileClass::EntityNode { code, .. }
+                | FileClass::NamedSeries { code, .. }
+                | FileClass::DeterminedSeries { code, .. }
+                | FileClass::Rule { code, .. } => (true, Some(code)),
+                FileClass::Document { code, .. } => (false, Some(code)),
+                // Homed bulk, or a name the tools own no shape for: its prefix, where it has
+                // one, is the node's it sits at.
+                _ => (false, here.clone()),
+            };
+        let new_basename = match &from_code {
+            Some(from) => swap_code_prefix(&basename, from.as_str(), to_code.as_str()),
+            None => basename.clone(),
+        };
+        let dest = if into_meta {
+            to_meta.join(&new_basename)
+        } else {
+            to_path.join(&new_basename)
+        };
+
+        if dest == file_abs {
+            return Err(Error::validation(format!(
+                "{basename:?} is already at {} (§7.2)",
+                to_code.as_str()
+            )));
+        }
+        if dest.exists() {
+            return Err(Error::validation(format!(
+                "{} already holds a file named {new_basename:?} — re-home would overwrite it \
+                 (§5.4)",
+                to_code.as_str()
+            )));
+        }
+        // Two sources landing on one name, which no amount of disk-checking would catch
+        // because neither is there yet (§5.4).
+        if let Some((other, _)) = renames.iter().find(|(_, to)| *to == dest) {
+            return Err(Error::validation(format!(
+                "{basename:?} and {:?} would both be re-homed to {new_basename:?} (§5.4)",
+                other
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            )));
+        }
+        needs_meta |= into_meta;
+        renames.push((file_abs, dest));
     }
 
     let mut changes = Vec::new();
     // The target meta dir is minted lazily on first write; create it if this is the first.
-    if !to_meta.is_dir() {
+    if needs_meta && !to_meta.is_dir() {
         changes.push(Change::Mkdir {
             code: to_code.clone(),
             rel_path: rel_path(root, &to_meta),
         });
     }
-    changes.push(Change::Rename {
-        from: rel_path(root, &file_abs),
-        to: rel_path(root, &dest),
-    });
+    for (from, to) in &renames {
+        let (from, to) = (rel_path(root, from), rel_path(root, to));
+        moved.push(json!({
+            "file": from.to_string_lossy(),
+            "to": to.to_string_lossy(),
+        }));
+        changes.push(Change::Rename { from, to });
+    }
 
-    let plan = Plan::new("mv-file", changes);
-    let record = json!({
-        "file": rel_path(root, &file_abs).to_string_lossy(),
-        "to": rel_path(root, &dest).to_string_lossy(),
-    });
-    Ok((plan, record))
+    Ok((Plan::new("mv-file", changes), Value::Array(moved)))
+}
+
+/// Re-express a path the hand named in the root's **own spelling**.
+///
+/// The same file has more than one absolute name — `/tmp/t/x` and `/private/tmp/t/x` name
+/// one file on macOS — and a shell glob hands over whichever the working directory wore.
+/// Two things break on the difference, both silently: the plan carries an absolute path
+/// where every other change carries a root-relative one, and the directory holding the
+/// file compares unequal to the node's, so the file's code goes unrecognized and its
+/// prefix is never swapped. Canonicalizing *both* ends and rebuilding on `root` settles
+/// it. A path outside the root, or one that will not canonicalize, is returned as it came.
+fn in_root_spelling(root: &Path, path: PathBuf) -> PathBuf {
+    let (Ok(root_real), Ok(path_real)) = (root.canonicalize(), path.canonicalize()) else {
+        return path;
+    };
+    match path_real.strip_prefix(&root_real) {
+        Ok(rel) => root.join(rel),
+        Err(_) => path,
+    }
+}
+
+/// The code of the node whose directory `dir` is (§5.2).
+///
+/// A **meta dir names its own code**, so it is read off the name — which is right for a
+/// drifted one too: where a file sits is the whole of its scope (§9.1). An open node dir
+/// is found in the tree by path. `None` where the directory belongs to no node, whose
+/// files carry no code of the tree's to rewrite.
+fn home_code_of(nodes: &[Node], dir: &Path) -> Option<Code> {
+    let name = dir.file_name()?.to_string_lossy().into_owned();
+    if let Some(code) = name.strip_suffix("__") {
+        return Code::parse(code).ok();
+    }
+    for node in nodes {
+        if node.path == dir {
+            return Some(node.code.clone());
+        }
+        if let Some(found) = home_code_of(&node.children, dir) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// `pan rename-prefix <old> <new> [code]` (§10.1, §10.2) — rewrite a code prefix over a
@@ -402,9 +708,21 @@ pub fn plan_mv_file(root: &Path, file: &Path, to_code: &Code) -> Result<(Plan, V
 /// to `new`. Unlike `rename`, it does *not* touch the scope node's own directory — it
 /// fixes contents, not identity. Scope defaults to the whole tree.
 ///
-/// A code-prefix hit would also cascade the rule headers naming it (§9.2); that is
-/// deferred with Auspex (no header parser exists yet). Codes are not refs, so no
-/// `core:slug` cascade — that is `rename-pattern`'s, for a *slug* hit.
+/// **A code-prefix hit cascades the rule headers naming it** (§10.2, §9.2), exactly as
+/// `rename` and `mv` do: the walk renames child *directories* too, so a node's code really
+/// does change and a `writes=core@home` grant naming it really is stale. Codes are not
+/// refs, so no `core:slug` cascade — that is `rename-pattern`'s, for a *slug* hit.
+///
+/// **The walk is the node tree's, exactly as `rename`'s and `mv`'s are** — node dirs, their
+/// meta dirs, and the loose files beside them (§6.3). It once recursed through every
+/// directory it met, which put `.git`, `node_modules`, and `target` inside a project homed
+/// at a node in scope: it renamed files in git object stores and build output, and (before
+/// the pre-flight) clobbered whatever it landed on. A non-node directory now rides along
+/// inside its parent untouched, which is what a bulk directory has always done under
+/// `rename` and `mv` ([`recode_contents`]). Nothing here reads an ignore file to get that
+/// — §13 and §18 leave no ignore file any say over the tree, and the tree bound needs
+/// none. The cost is that a loose file in a non-node directory (or at the root) is out of
+/// reach, which is the same constraint every other verb already carries.
 pub fn plan_rename_prefix(
     root: &Path,
     old: &str,
@@ -420,13 +738,27 @@ pub fn plan_rename_prefix(
     Code::parse(old)?;
     Code::parse(new)?;
 
-    let scope_path = match scope {
-        Some(code) => resolve_node(root, code)?.1,
-        None => root.to_path_buf(),
-    };
-    let scope_rel = rel_path(root, &scope_path);
     let mut changes = Vec::new();
-    walk_prefix(&scope_path, &scope_rel, old, new, &mut changes)?;
+    let mut rules = Vec::new();
+    match build_tree(root, scope)? {
+        // A scope node's own directory is never renamed — the repair fixes a node's
+        // contents, not its identity — so the walk starts inside it.
+        TreeRoot::Subtree(node) => {
+            let node_rel = rel_path(root, &node.path);
+            prefix_contents(&node, &node_rel, old, new, &mut changes, &mut rules)?;
+        }
+        // Tree-wide, the root stands in for the scope node and the spheres are its
+        // contents, so a sphere's own dirname is fair game like any child node's.
+        TreeRoot::Forest(nodes) => {
+            for node in &nodes {
+                let dirname = dir_name_of(node);
+                let renamed = swap_code_prefix(&dirname, old, new);
+                let node_rel = PathBuf::from(&renamed);
+                push_rename(&mut changes, PathBuf::from(&dirname), node_rel.clone());
+                prefix_contents(node, &node_rel, old, new, &mut changes, &mut rules)?;
+            }
+        }
+    }
 
     if changes.is_empty() {
         return Err(Error::not_found(format!(
@@ -434,36 +766,97 @@ pub fn plan_rename_prefix(
         )));
     }
     let count = changes.len();
+    // The grants naming the codes this repair rewrote (§10.2, §9.2).
+    changes.extend(header_cascade(
+        root,
+        &Code::parse(old)?,
+        &Code::parse(new)?,
+        &rules,
+    )?);
     let plan = Plan::new("rename-prefix", changes);
     let record = json!({ "old": old, "new": new, "renamed": count });
     Ok((plan, record))
 }
 
-/// Recursively rename every directory and file under `dir` whose name carries `old` as a
-/// code prefix. Top-down, so a renamed directory's children use the new path (like
-/// [`plan_recode`]). `dir_abs` is read for enumeration; `dir_rel` is where it lives after
-/// any ancestor rename, for the `Change` from-paths.
-fn walk_prefix(
-    dir_abs: &Path,
-    dir_rel: &Path,
+/// Rename every name *inside* one node whose code prefix carries `old` — its meta dirs
+/// and their files, its loose files, its child node dirs — then recurse the children.
+/// Top-down, so a renamed directory's children use the new path (like [`plan_recode`]).
+/// `node_rel` is where the node lives after any ancestor rename, for the `Change`
+/// from-paths; the node's own absolute path is read to enumerate its contents.
+///
+/// **A directory that is neither a meta dir nor a child node is passed over entirely** —
+/// homed bulk, a project's `.git`, a build tree — which is the bound that keeps this walk
+/// the same size as `rename`'s and `mv`'s (§6.3).
+fn prefix_contents(
+    node: &Node,
+    node_rel: &Path,
     old: &str,
     new: &str,
     changes: &mut Vec<Change>,
+    rules: &mut Vec<(PathBuf, PathBuf)>,
 ) -> Result<()> {
-    for entry in std::fs::read_dir(dir_abs)? {
+    for entry in std::fs::read_dir(&node.path)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        let is_dir = entry.file_type()?.is_dir();
-        let renamed = swap_code_prefix(&name, old, new);
-        let child_rel = dir_rel.join(&renamed);
-        if renamed != name {
-            push_rename(changes, dir_rel.join(&name), child_rel.clone());
+        if !entry.file_type()?.is_dir() {
+            // A loose document, or homed bulk beside it.
+            push_rename(
+                changes,
+                node_rel.join(&name),
+                node_rel.join(swap_code_prefix(&name, old, new)),
+            );
+            continue;
         }
-        if is_dir {
-            walk_prefix(&entry.path(), &child_rel, old, new, changes)?;
+        // A meta dir — the node's own, or a drifted one a crashed rename left behind,
+        // which is exactly what this repair is for. Any other directory is not the
+        // tree's and is neither entered nor renamed.
+        if !name.ends_with("__") {
+            continue;
+        }
+        let meta_renamed = swap_code_prefix(&name, old, new);
+        let meta_rel = node_rel.join(&meta_renamed);
+        push_rename(changes, node_rel.join(&name), meta_rel.clone());
+        for file in std::fs::read_dir(entry.path())? {
+            let file = file?;
+            let fname = file.file_name().to_string_lossy().into_owned();
+            let renamed = swap_code_prefix(&fname, old, new);
+            let lands_at = meta_rel.join(&renamed);
+            push_rename(changes, meta_rel.join(&fname), lands_at.clone());
+            // A rule this repair moves, paired to where it lands (§9.2) — moved by its
+            // own prefix or by its meta dir's, since a grant goes stale either way.
+            // Recognized by the reserved kind segment rather than through `classify`,
+            // which wants the *node's* code and this walk is precisely where a file's
+            // prefix and its node disagree.
+            if is_rule_name(&fname) && lands_at != node_rel.join(&name).join(&fname) {
+                rules.push((file.path(), lands_at));
+            }
         }
     }
+
+    for child in &node.children {
+        let dirname = dir_name_of(child);
+        let child_rel = node_rel.join(swap_code_prefix(&dirname, old, new));
+        push_rename(changes, node_rel.join(&dirname), child_rel.clone());
+        prefix_contents(child, &child_rel, old, new, changes, rules)?;
+    }
     Ok(())
+}
+
+/// Whether a filename wears the reserved `function` token in its kind slot — an Auspex
+/// rule (§9.1). The kind is always the first `__`-segment after the code (§5.2).
+fn is_rule_name(fname: &str) -> bool {
+    fname
+        .split_once("__")
+        .and_then(|(_, rest)| rest.split("__").next())
+        .is_some_and(|kind| kind == RESERVED_KIND_FUNCTION)
+}
+
+/// A node's own directory name.
+fn dir_name_of(node: &Node) -> String {
+    node.path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// `pan rename-pattern <from> <to> [code]` (§10.1, §5.4) — a literal substitution across
@@ -655,8 +1048,99 @@ fn plan_recode(
         rel_path(root, &node.path),
         new_top_rel.to_path_buf(),
     );
-    recode_contents(&node, old_code, new_code, new_top_rel, &mut changes)?;
+    let mut rules = Vec::new();
+    recode_contents(
+        &node,
+        old_code,
+        new_code,
+        new_top_rel,
+        &mut changes,
+        &mut rules,
+    )?;
+    // A label-only rename moves a directory and no code, so no grant went stale.
+    if old_code.as_str() != new_code.as_str() {
+        changes.extend(header_cascade(root, old_code, new_code, &rules)?);
+    }
     Ok(changes)
+}
+
+/// The rule headers a recode invalidates (§9.2, §10.1) — the grant cascade, the twin of
+/// the ref cascade one layer down.
+///
+/// A `writes=core@home` grant names a **node**, and a recode renames nodes; a grant left
+/// pointing at a code that no longer exists is not merely stale but *silently wrong*, and
+/// `writes=` is the whole guard (§9.5). So every rule in the tree is read — a rule may
+/// grant writes at any node, not only the one it sits at (§9.1 scopes where it *runs*, not
+/// where it may write) — and one whose header names the branch is rewritten.
+///
+/// `moving` carries the rules this operation is itself relocating, paired to where they
+/// will be: a change must name the file's path *after* the renames, since that is when it
+/// runs. Every other rule in the tree is read where it already sits.
+fn header_cascade(
+    root: &Path,
+    old_code: &Code,
+    new_code: &Code,
+    moving: &[(PathBuf, PathBuf)],
+) -> Result<Vec<Change>> {
+    let mut changes = Vec::new();
+    let mut push_if_stale = |read_from: &Path, rel: PathBuf| {
+        let Ok(text) = std::fs::read_to_string(read_from) else {
+            return; // not text is not a header; §9.2 leaves it to `aus` to report
+        };
+        if crate::rule::rewrite_writes_homes(&text, old_code, new_code).is_some() {
+            changes.push(Change::RewriteHeader {
+                rel_path: rel,
+                from: old_code.clone(),
+                to: new_code.clone(),
+            });
+        }
+    };
+
+    for (old_abs, new_rel) in moving {
+        push_if_stale(old_abs, new_rel.clone());
+    }
+    // The rest of the tree, whose rule files this op leaves where they are. Filtered by
+    // the paths already handled above rather than by directory: `rename-prefix` may be
+    // scoped at the root, where "outside the branch" would exclude nothing and every
+    // moving rule would be rewritten twice — the second time at a path that no longer
+    // exists by the time the plan reaches it.
+    let handled: Vec<&PathBuf> = moving.iter().map(|(old, _)| old).collect();
+    let tops = match build_tree(root, None)? {
+        TreeRoot::Forest(nodes) => nodes,
+        TreeRoot::Subtree(node) => vec![node],
+    };
+    let mut found = Vec::new();
+    for node in &tops {
+        collect_rule_files(node, &mut found);
+    }
+    for abs in found {
+        if handled.iter().any(|done| **done == abs) {
+            continue;
+        }
+        let rel = rel_path(root, &abs);
+        push_if_stale(&abs, rel);
+    }
+    Ok(changes)
+}
+
+/// Every rule file at or under `node` (§9.1).
+///
+/// This is the second walk in the workspace looking for [`FileClass::Rule`] — no `Store`
+/// walk could ever yield one, since a rule belongs to no core's token set — so it is
+/// built the same way Auspex's is: the tree walk plus a per-node meta-dir `read_dir`.
+fn collect_rule_files(node: &Node, out: &mut Vec<PathBuf>) {
+    let meta = node.path.join(format!("{}__", node.code.as_str()));
+    if let Ok(entries) = std::fs::read_dir(&meta) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if matches!(classify(&name, false, &node.code), FileClass::Rule { .. }) {
+                out.push(entry.path());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_rule_files(child, out);
+    }
 }
 
 /// The meta dir, its files, loose documents, and child node dirs of `node` — renamed to
@@ -669,6 +1153,7 @@ fn recode_contents(
     new_code: &Code,
     node_new_rel: &Path,
     changes: &mut Vec<Change>,
+    rules: &mut Vec<(PathBuf, PathBuf)>,
 ) -> Result<()> {
     let node_new_code = recode_code(&node.code, old_code, new_code)?;
     let old_meta = format!("{}__", node.code.as_str());
@@ -690,6 +1175,14 @@ fn recode_contents(
                 node_new_rel.join(&new_meta).join(&fname),
                 node_new_rel.join(&new_meta).join(&renamed),
             );
+            // A rule the recode moves: remembered with where it lands, so the grant
+            // cascade can name the path the rewrite will actually find (§9.2, §10.1).
+            if matches!(classify(&fname, false, &node.code), FileClass::Rule { .. }) {
+                rules.push((
+                    meta_abs.join(&fname),
+                    node_new_rel.join(&new_meta).join(&renamed),
+                ));
+            }
         }
     }
 
@@ -710,11 +1203,7 @@ fn recode_contents(
 
     // Child node dirs, recursively.
     for child in &node.children {
-        let old_dirname = child
-            .path
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let old_dirname = dir_name_of(child);
         let new_dirname = match &child.ch {
             Some(ch) => triple_dirname(Some(&node_new_code), ch, &child.label),
             None => def_dirname(Some(&node_new_code), &child.label),
@@ -725,7 +1214,7 @@ fn recode_contents(
             node_new_rel.join(&old_dirname),
             child_new_rel.clone(),
         );
-        recode_contents(child, old_code, new_code, &child_new_rel, changes)?;
+        recode_contents(child, old_code, new_code, &child_new_rel, changes, rules)?;
     }
     Ok(())
 }

@@ -79,7 +79,11 @@ impl App for TabellaApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        documents(&self.root, Some(node)).len()
+        // The documents filed **at** this node, not the subtree under it — a node-local
+        // `read_dir`, no body read, so the rail folds each node once (P§6, I1).
+        Store::<Tabella>::new(self.root.clone())
+            .find_documents_local(node, None)
+            .map_or(0, |refs| refs.len())
     }
 
     fn writer(&self) -> Writer {
@@ -98,16 +102,16 @@ impl App for TabellaApp {
             // `edit` with no value inline is the **editor form** (§7.3): a document is
             // opened in place, because it already *is* the text (§8.7). Porticus
             // suspends around the session, and the session is itself the confirm.
-            (Action::Edit, Target::Row(RecordRef { home, key })) => {
+            (Action::Edit, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("tab", ["edit", "-H", home.as_str(), key]))
             }
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("tab", ["rm", "-H", home.as_str(), key]))
             }
-            (Action::Rename, Target::Row(RecordRef { home, key })) => {
+            (Action::Rename, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("tab", ["rename", "-H", home.as_str(), key]))
             }
-            (Action::Move, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Move, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "tab",
                 ["move", "-H", home.as_str(), key, "--to"],
             )),
@@ -175,10 +179,7 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
                 Some(kind) => format!("{}   {kind}", dref.slug),
                 None => dref.slug.clone(),
             },
-            target: Target::Row(RecordRef {
-                home: dref.home,
-                key: dref.slug,
-            }),
+            target: Target::Row(RecordRef::new(dref.home, dref.slug)),
             when: None,
         })
         .collect()

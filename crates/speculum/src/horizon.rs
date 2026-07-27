@@ -22,6 +22,7 @@ use pantheon::Code;
 
 use porticus::Handled;
 use porticus::action::Action;
+use porticus::action::Target;
 use porticus::view::{Layout, Nav, Row, View, ViewId};
 
 /// The width of the review window (§12). Widening climbs day → week → month → year and
@@ -79,6 +80,10 @@ fn key_of(day: Date) -> String {
 pub struct Horizon<F> {
     fold: F,
     span: Span,
+    /// The core a **new** reading here belongs to, and the last node the rail was on —
+    /// the two things an add needs that a row already carries (P§7, N3).
+    core: Option<&'static str>,
+    last_node: Option<Code>,
     /// The day the window is anchored on — a cursor Porticus never holds (I1). Opens on
     /// today, the one wall-clock read on this screen; `t` returns to it.
     anchor: Date,
@@ -95,9 +100,21 @@ where
         Self {
             fold,
             span: Span::Week,
+            core: None,
+            last_node: None,
             anchor: jiff::Zoned::now().date(),
             actions: Vec::new(),
         }
+    }
+
+    /// The core a reading logged from here is written to (§8.6, N3).
+    ///
+    /// A row on the horizon says which core it came from; a *new* reading has no row
+    /// yet, so the view answers for it and Porticus stamps the target (P§7).
+    #[must_use]
+    pub fn in_core(mut self, short: &'static str) -> Self {
+        self.core = Some(short);
+        self
     }
 
     #[must_use]
@@ -161,7 +178,10 @@ where
         Layout::Full
     }
 
-    fn rows(&mut self, _node: &Code) -> Option<Vec<Row>> {
+    fn rows(&mut self, node: &Code) -> Option<Vec<Row>> {
+        // Kept only so `target` can name a home: a Full view draws no rail, but the
+        // cursor behind it is still where an add lands (P§7).
+        self.last_node = Some(node.clone());
         let (start, end) = self.window();
         let (lo, hi) = (key_of(start), key_of(end));
         let mut rows: Vec<Row> = (self.fold)()
@@ -184,6 +204,22 @@ where
 
     fn actions(&self) -> &[Action] {
         &self.actions
+    }
+
+    fn core(&self) -> Option<&str> {
+        self.core
+    }
+
+    fn target(&self) -> Option<Target> {
+        // **The horizon dates the reading.** A review window is a place in time, so a
+        // reading logged while looking at last week belongs to last week — the same rule
+        // a Calendar cell follows (§7.3, P§7). Porticus resolves the home by layout and
+        // overwrites the node; only the `at` survives.
+        self.last_node.clone().map(|node| Target::Node {
+            node,
+            at: Some(key_of(self.anchor)),
+            core: None,
+        })
     }
 
     fn nav_keys(&self) -> &[(char, &'static str)] {

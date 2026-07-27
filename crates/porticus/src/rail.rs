@@ -26,11 +26,12 @@ use crate::theme::{self, Theme};
 /// A trait rather than two closures because both answers come from the *same*
 /// instrument, and two closures would each want a mutable borrow of it.
 ///
-/// They are separate on purpose. **`any` asks only *any?*** and drives the dim and the
-/// `.` collapse; **`count` asks how many** and drives the badge. An instrument whose
-/// count is costly overrides `any_at` to answer the dim without a full fold — collapse
-/// the two and that override becomes unreachable, and every instrument pays a full
-/// count for a yes/no.
+/// **`any` drives the dim and the `.` collapse; `count` drives the badge.** Both are the
+/// same node-local fold ([`App::count_at`](crate::App::count_at)) — `any` is just
+/// `count > 0` — and the adapter behind this trait memoizes it per frame, so a held node
+/// the badge shows is folded once, not once for the dim and again for the count. The fold
+/// is node-local, so it is cheap to ask of every visible node; that is what lets the two
+/// questions collapse onto one call without the tree walk paying for it (P§6).
 pub trait Presence {
     fn any(&mut self, node: &Code) -> bool;
     fn count(&mut self, node: &Code) -> usize;
@@ -208,6 +209,35 @@ impl Rail {
         self.right();
     }
 
+    /// Put the cursor on a node **named by address**, opening whatever it takes to see it
+    /// (P§6). `false` where no such node exists, and the cursor does not move.
+    ///
+    /// This is not the search jump `/` once did — that matched a typed string and was
+    /// removed when search became the content surface (C4). This answers a *reference*: a
+    /// record has been resolved to its home and the tree must go there, which is what a
+    /// chip-follow needs (P§3). Nothing is remembered but the cursor.
+    pub fn reveal(&mut self, code: &Code) -> bool {
+        let Some(ancestry) = tops(&self.root).iter().find_map(|top| path_to(top, code)) else {
+            return false;
+        };
+        // Every node above it opens; the node itself keeps whatever it had, so revealing
+        // a parent does not expand a branch the eye did not ask for.
+        for above in ancestry.iter().skip(1) {
+            self.expanded.insert((*above).to_owned());
+        }
+        match self
+            .visible()
+            .iter()
+            .position(|v| v.node.code.as_str() == code.as_str())
+        {
+            Some(index) => {
+                self.cursor = index;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// `.` — the records-only toggle (P§5).
     pub fn toggle_records_only(&mut self) {
         self.records_only = !self.records_only;
@@ -216,20 +246,6 @@ impl Rail {
     #[must_use]
     pub fn records_only(&self) -> bool {
         self.records_only
-    }
-
-    /// Move the cursor to the first node whose code or label matches — what `/` does
-    /// when the rail has focus (P§6).
-    pub fn seek(&mut self, needle: &str) {
-        let needle = needle.to_lowercase();
-        if needle.is_empty() {
-            return;
-        }
-        if let Some(found) = self.visible().iter().position(|v| {
-            v.node.code.as_str().contains(&needle) || v.node.label.to_lowercase().contains(&needle)
-        }) {
-            self.cursor = found;
-        }
     }
 
     /// Draw the rail.
@@ -246,7 +262,9 @@ impl Rail {
     ) {
         let visible = self.visible();
         let height = area.height as usize;
-        let first = self.cursor.saturating_sub(height.saturating_sub(1));
+        // The same scrolloff the content list keeps, so the tree scrolls before the
+        // cursor hits an edge and reads identically to the rows beside it (P§6, I3, C3).
+        let first = crate::runtime::scroll_first(self.cursor, visible.len(), height);
         let mut lines = Vec::new();
 
         for (index, entry) in visible.iter().enumerate().skip(first).take(height) {
@@ -293,6 +311,23 @@ impl Rail {
 }
 
 /// The top-level nodes, whichever shape the walk returned.
+/// The chain of codes from `node` down to `code`, or `None` where it is not in this
+/// branch. Walked rather than derived from the code's prefixes, because a
+/// definition-prefix node's code carries `_` inside a single token (§5.1) and only the
+/// tree knows where one node's name ends.
+fn path_to<'a>(node: &'a Node, code: &Code) -> Option<Vec<&'a str>> {
+    if node.code.as_str() == code.as_str() {
+        return Some(vec![node.code.as_str()]);
+    }
+    for child in &node.children {
+        if let Some(mut below) = path_to(child, code) {
+            below.push(node.code.as_str());
+            return Some(below);
+        }
+    }
+    None
+}
+
 fn tops(root: &TreeRoot) -> Vec<&Node> {
     match root {
         TreeRoot::Forest(nodes) => nodes.iter().collect(),

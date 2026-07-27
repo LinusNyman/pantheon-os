@@ -32,12 +32,14 @@
 
 pub mod action;
 pub mod app;
+mod banner;
 pub mod ident;
 pub mod keymap;
 pub mod overlay;
 pub mod rail;
 pub mod runtime;
 pub mod term;
+pub mod text;
 pub mod theme;
 pub mod view;
 pub mod views;
@@ -46,5 +48,6 @@ pub use action::{Action, FieldSpec, Invocation, RecordRef, Relayed, Target, Writ
 pub use app::App;
 pub use ident::Ident;
 pub use runtime::{as_text, drive, keys, render_once, run};
+pub use text::{node_labels, prettify};
 pub use theme::Theme;
 pub use view::{Grid, GridCell, Handled, Layout, Nav, Row, View, ViewId};

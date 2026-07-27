@@ -547,6 +547,49 @@ fn verbs_read() {
     insta::assert_snapshot!("verbs_read", out);
 }
 
+/// L1: `list` node addressing on a two-shape core — a bare positional home and `--here`
+/// node-local, exercised across the span half (both shapes fold under one scope). The
+/// row *sets* are the contract, not a snapshot.
+#[test]
+fn list_node_addressing() {
+    let root = fresh_root();
+    assert_eq!(fas(&root, &["ao", "parent span", "--from", "260101"]).0, 0);
+    assert_eq!(fas(&root, &["aof", "child span", "--from", "260101"]).0, 0);
+
+    let slugs = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["slug"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    // A bare positional home is sugar for `-H`.
+    let (pc, pos) = fas(&root, &["ls", "ao"]);
+    let (fc, flag) = fas(&root, &["ls", "-H", "ao"]);
+    assert_eq!((pc, fc), (0, 0));
+    assert_eq!(pos, flag, "a positional home equals -H");
+    let subtree = slugs(&pos);
+    assert!(subtree.contains(&"parent_span".to_owned()));
+    assert!(
+        subtree.contains(&"child_span".to_owned()),
+        "the subtree reaches the descendant span"
+    );
+
+    // `--here` folds the node alone.
+    let (hc, here) = fas(&root, &["ls", "--here", "ao"]);
+    assert_eq!(hc, 0);
+    assert_eq!(
+        slugs(&here),
+        ["parent_span"],
+        "--here excludes descendant spans"
+    );
+
+    // The home given twice is a usage error (§7.3).
+    let (dup, _) = fas(&root, &["ls", "-H", "ao", "aof"]);
+    assert_eq!(dup, 2);
+}
+
 // ── the shapes on disk (I3, §18) ────────────────────────────────────────────
 
 /// The snapshot that proves §7.1's "no tag is ever written": a two-token core's `Record`

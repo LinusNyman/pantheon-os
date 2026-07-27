@@ -122,9 +122,17 @@ enum Cmd {
         #[arg(long = "series", value_name = "NAME")]
         series: Option<String>,
     },
-    /// The folded present across the subtree: every log at its latest key (§7.2, I1).
+    /// The folded present across the subtree, or one node with `--here` — every log at
+    /// its latest key (§7.2, I1).
     #[command(alias = "ls")]
-    List,
+    List {
+        /// The node to fold, as a bare code — sugar for `-H` (§7.3).
+        #[arg(value_name = "HOME")]
+        node: Option<String>,
+        /// Fold this node alone, not its subtree (§7.2).
+        #[arg(short = 'l', long = "here")]
+        here: bool,
+    },
     /// One log's present — the reading at its latest key (§7.2, I1).
     Get { tokens: Vec<String> },
     /// A whole collection: the trend across keys, optionally windowed (§7.2).
@@ -160,8 +168,8 @@ enum Cmd {
 #[must_use]
 pub fn run_cli() -> ExitCode {
     let cli = Cli::parse_from(with_default_verb(std::env::args_os()));
-    let as_json = contract::format_is_json(cli.format.map(|f| matches!(f, Format::Json)));
-    contract::dispatch(run(&cli, as_json), as_json)
+    let force = cli.format.map(|f| matches!(f, Format::Json));
+    contract::dispatch(run(&cli, contract::format_is_json(force)), force)
 }
 
 /// The flags that take a separate value — what the verb scan must step over to find
@@ -242,7 +250,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
             note,
         } => cmd_edit(cli, key, values, refs, series.as_deref(), note.as_deref()),
         Cmd::Rm { key, series } => cmd_rm(cli, key, series.as_deref()),
-        Cmd::List => cmd_list(cli),
+        Cmd::List { node, here } => cmd_list(cli, node.as_deref(), *here),
         Cmd::Get { tokens } => cmd_get(cli, tokens),
         Cmd::Series { tokens, from, to } => cmd_series(cli, tokens, from.as_deref(), to.as_deref()),
         Cmd::Where { tokens } => cmd_where(cli, tokens),
@@ -417,14 +425,12 @@ fn cmd_rm(cli: &Cli, key: &str, series: Option<&str>) -> Result<Response> {
     Ok(Response::Json(json!({ "deleted": key.as_str() })))
 }
 
-fn cmd_list(cli: &Cli) -> Result<Response> {
+fn cmd_list(cli: &Cli, node: Option<&str>, here: bool) -> Result<Response> {
     let ctx = Ctx::open(cli)?;
-    // The locus is $PWD (§7.3); outside the tree there is nothing to narrow by.
-    let home = match cli.home.as_deref() {
-        Some(code) => Some(Code::parse(code)?),
-        None => contract::code_at_path(&ctx.root, None).ok(),
+    let folded = match contract::list_scope(&ctx.root, cli.home.as_deref(), node, here)? {
+        contract::ListScope::Subtree(at) => ctx.store.fold(at.as_ref(), Some(&ctx.kind))?,
+        contract::ListScope::Local(code) => ctx.store.fold_local(&code, Some(&ctx.kind))?,
     };
-    let folded = ctx.store.fold(home.as_ref(), Some(&ctx.kind))?;
     Ok(Response::Json(contract::fold_json(Annales::NAME, &folded)?))
 }
 

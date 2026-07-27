@@ -98,8 +98,10 @@ fn the_screen_draws_the_nodes_tasks() {
     )
     .unwrap();
     assert!(frame.contains("P E N S U M"), "{frame}");
-    assert!(frame.contains("buy_milk"), "{frame}");
-    assert!(frame.contains("call_the_dentist"), "{frame}");
+    // The row shows the task de-underscored, node-first (P1) — the stored key stays
+    // `buy_milk`, but a reader sees `buy milk`.
+    assert!(frame.contains("buy milk"), "{frame}");
+    assert!(frame.contains("call the dentist"), "{frame}");
 }
 
 /// **`d` marks a task done, through the core, on disk.**
@@ -135,6 +137,68 @@ fn d_on_a_row_marks_the_task_done_on_disk() {
         vec![("buy_milk".to_string(), true)],
         "`d` must reach the file, not just the frame"
     );
+}
+
+/// **`a` files a task from the agenda tab, at a home the hand picked.**
+///
+/// The agenda offered `Edit`/`Done`/`Remove` and nothing else, so `a` there was a dark
+/// key — a silent no-op on the one tab a hand sits on to see every open task, and Help
+/// listed no Tier-2 key to say otherwise. It offers `Add` now, and because an Agenda is a
+/// Full view with no rail drawn, Porticus routes it through the pick-a-node modal (P§4):
+/// `a`, then a node, then the name. The home is therefore *seen* rather than taken from an
+/// invisible cursor.
+#[test]
+fn a_on_the_agenda_files_a_task_at_a_picked_node() {
+    let root = fresh_root();
+    // `2` is the agenda, `a` raises the modal, `j` walks it to `ac`, `<enter>` takes it,
+    // then the add form's one field and `<enter>` to submit.
+    let frame = porticus::drive(
+        &mut PensumApp::new(&root),
+        &root,
+        &porticus::keys("2aj<enter>buy_milk<enter>"),
+        80,
+        20,
+    )
+    .unwrap();
+    assert_eq!(
+        done_flags(&root),
+        vec![("buy_milk".to_string(), false)],
+        "the task landed at the picked node, open: {frame}"
+    );
+}
+
+/// The modal is what `a` raises there, and it names the node it will file at (P§4).
+#[test]
+fn a_on_the_agenda_asks_which_node() {
+    let root = fresh_root();
+    let frame = porticus::drive(
+        &mut PensumApp::new(&root),
+        &root,
+        &porticus::keys("2a"),
+        80,
+        20,
+    )
+    .unwrap();
+    assert!(
+        frame.contains("pick a node"),
+        "a Full view's add asks for its home: {frame}"
+    );
+}
+
+/// Help says which keys act here — the whole of Tier 2, not just the chrome (P§4, P§5).
+#[test]
+fn help_names_the_keys_that_write() {
+    let root = fresh_root();
+    let frame = porticus::drive(
+        &mut PensumApp::new(&root),
+        &root,
+        &porticus::keys("?"),
+        90,
+        20,
+    )
+    .unwrap();
+    assert!(frame.contains("add"), "`a` is named: {frame}");
+    assert!(frame.contains("done / toggle"), "`d` is named: {frame}");
 }
 
 /// A lineup is checked before a terminal is ever taken (P§3), and Pensum's is only

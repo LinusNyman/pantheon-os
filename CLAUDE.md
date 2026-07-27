@@ -95,21 +95,26 @@ Single public Cargo workspace (monorepo forced by I5). Members: `crates/*` and `
 - `xtask/` — workspace automation (run via `cargo xtask`).
 - `docs/` — the mdBook spec. `deny.toml`, `dist-workspace.toml`, `release-plz.toml` — supply chain & release.
 
-## Status — build order steps 1–7 are done (§16); all seven cores exist
+## Status — build order steps 1–10 done (§16); step 11 (releases) deferred indefinitely
 
 **Built and green:** `pantheon` + `pan` (step 1), `annales` (2), `album` (3), `pensum` (4),
 `tabella` (5), `porticus` + `tessera` + `atrium` (6), `mappa` + `rationes` + `fasti` (7),
 `auspex` (8) — the reactive loop now closes: a write wakes it, a rule proposes, and Auspex
-applies through the core CLIs.
+applies through the core CLIs. **Step 9 (cleanups)** paid the deferrals — pan's node cascade
+(§10.1), the add form and the chrome debts (P§4–P§7), validate's candidate fixes (§10.2), the
+nested-`data` render — all landed. **Step 10 (lenses)** built the last two, `speculum` (review
+across horizons) and `studium` (the studies lens, §19), so **every instrument now exists**:
+twelve binaries, all `pan doctor`-visible.
 **All three storage shapes exist** — Partitioned, Series in *both* its hand-named and nameless
 forms, and Document — plus the `core:slug` resolver, the record-level rename cascade, and the
 record lock under contention.
 
 **The vertical slice closed at step 6**, which is what it was for: a real screen renders
 derived-out (I1) and relays a human write back through a core (I2, §12) — `d` on an Atrium row
-runs `pen edit … --done -y` and `pen list` reads it back from another process. Nine instruments
-have TUIs (`pan`, `atr`, `alb`, `ann`, `pen`, `tab`, `map`, `rat`, `fas`); the table renderer
-fills §7.3's "TTY → table"; `cargo xtask seed` mints a tree to look at.
+runs `pen edit … --done -y` and `pen list` reads it back from another process. **Every instrument
+now has a TUI** — the nine of steps 6–7 (`pan`, `atr`, `alb`, `ann`, `pen`, `tab`, `map`, `rat`,
+`fas`), plus `aus`'s rules browser (8) and the two lens mosaics `spe`/`stu` (10); the table
+renderer fills §7.3's "TTY → table"; `cargo xtask seed` mints a tree to look at.
 
 **Step 7 built the three cores the slice did not need**, against a contract a screen had already
 exercised — and they were built in parallel git worktrees off one `main`, each touching only its
@@ -124,12 +129,43 @@ variants — a *dispatch type, not a disk format*, since the filename already na
 `location`/`region` are one storage shape, so it keeps one flat struct, and an enum there would
 have turned `edit -k` into a record transformation when §7.2 says it is a file rename.
 
-**Still scaffold** — a stub printing a not-implemented line: `speculum` and `studium` (10).
+**Still stubbed** — one not-implemented line: `pan migrate` (`Cmd::Migrate`, §5.5). It is
+*blocked, not deferred*: shape-directed and idempotent, it can only be built once a *prior*
+format version exists to rewrite from, so it waits on the first release (§16 step 11).
 **Step 8 (`auspex`) is done**, landed in four parts against §16's own "`plan` before `run`"
 sequencing: the hook (below), the **read half** (discovery, the header, `ls`/`version`/`help`,
 the browser screen), the **propose protocol** (`plan`/`test`), and **apply** (`run` — the
-capability check, the dedupe, and the writes, §9.5). Step 9 is the **cleanups** pass — pan's
-node cascade (§10.1) landed on `main` already; the lenses and releases are steps 10 and 11.
+capability check, the dedupe, and the writes, §9.5).
+
+**Step 11 (releases) is deferred indefinitely — a deliberate hold, not a debt.** The OS is
+feature-complete across all four layers; the current phase is **user-testing each app and
+improving it** before anything is tagged and published. So: do **not** start `release-plz`,
+per-crate tags, or a `dist` run until the improvement phase closes and a release is *explicitly*
+asked for, and `pan migrate` stays blocked until then (it needs that first version boundary).
+Treat incoming work as **per-app improvement requests**, scoped to one instrument at a time — not
+build-order steps. The fan-out is done; the shape now is iterate-on-one-app.
+
+**What steps 9–10 settled that a later change must not undo:**
+- **The lenses follow Atrium's shape** (lib-with-a-five-line-bin, the I4 guard, the feature split
+  that drops `porticus`/`ratatui` under `--no-default-features` while `tessera` stays). `speculum`
+  is a horizon dashboard (day→week→month→year across every core); `studium` folds the **GPA**.
+- **§19 is law and it *replaced* §12's one-line sketch.** The original §12 said a Studium enrolment
+  is a Fasti span "whose fields carry credits and grade" — **unbuildable**, since Fasti's `Span` is
+  `deny_unknown_fields {from,to,note}`. The settled design (`docs/src/spec/19-studium.md`): grade is
+  an **Annales `log` fact** paired to its span by shared slug; the grading **scale lives in a
+  per-programme `[code]_curriculum.toml`** — a deliberate **§18 carve-out** (reference data a lens
+  reads, never a behaviour knob). GPA = credit-weighted fold, best-passing on retake, null-not-zero.
+  **If you touch grading, read §19, not §12.**
+- **`classify_toml` routes a non-annotation `.toml` to `Bulk`** (not `unclassifiable_file`), so a
+  `curriculum.toml` — or a project's `Cargo.toml` (§6.5) — validates clean; only an
+  annotation-shaped stem (`[code]__`) with a bad code stays flagged.
+- **Every app's `version -f json` MUST spell the key `format_version`, never `format`.** `pan
+  doctor` reads `format_version` to check the suite agrees (§15.5); an app spelling it `format`
+  parses as absent and is *silently skipped* by the agreement fold — `agreed` stays true while the
+  app never contributes. `atr` and `spe` both carried this bug (atrium from step 6, speculum copied
+  it); fixed, and `doctor.rs` now asserts **every seen app also contributes a format_version**, so
+  the next misspelling fails CI instead of vanishing. Copy `studium`'s `version_json`, not the older
+  ones, for any new app.
 
 **`aus` is `pan`-shaped and `pan doctor` sees it** — it emits `version -f json` with
 `format_version: 1`, so it reads as installed. Three things about its shape a later change must not
@@ -304,9 +340,10 @@ Step 7's follow-ups, all landed:
   pattern re-slug's ref cascade into the same plan and token. `r`/`x` are live in `pan`'s
   TUI (`m` stays dark — no destination prompt yet), and the validate tab's `d` applies a
   finding's fix (step 9's 2b). The *record*-level cascade (§5.4, `cascade.rs`) is reused for
-  the ref rewrites. **Still deferred, Auspex-gated:** the `writes=core@home` rule-header
-  token cascade and the "dead code in a header" validate finding — no header parser exists
-  (Auspex is a scaffold); rule *files* are renamed by prefix like any other.
+  the ref rewrites. **Still deferred:** the `writes=core@home` rule-header token cascade and the
+  "dead code in a header" validate finding — Auspex's header parser now *exists* (step 8,
+  `grant.rs`), but `pan`'s node cascade does not yet reach into rule headers to rewrite the
+  `writes=` grant tokens a recode invalidates; rule *files* are renamed by prefix like any other.
 - **`classify` is structural, and only the registry knows what a name *means*.** A determined
   series whose determinant is a *slug* (`crp__balance__checking.jsonl`) wears the same three
   segments as a hand-named one, so `classify` calls it `NamedSeries` — correctly. Only the
@@ -410,6 +447,14 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   collapse and strip `_`. NFC is not optional (macOS/Linux byte disagreement). Apply on write, compare NFC on read.
 - **Exit codes are contract** (§7.3): `0` ok · `1` runtime · `2` usage · `3` validation · `4` not found ·
   `5` confirm required · `6` write refused under a rule. Errors print `{"error":{"code":…,"msg":…}}` to stderr.
+- **A failure follows *stderr's* hand, a result follows stdout's** (§7.3). Two questions, two streams:
+  `contract::format_is_json` asks stdout, `contract::error_format_is_json` asks stderr, and
+  `contract::dispatch` therefore takes the hand's `-f` (`Option<bool>`) rather than a resolved bool
+  and asks each separately. Keyed off stdout — as it was — every `$(pan cd …)` that missed answered a
+  human with the machine's envelope, since the shipped shim (`pan init`, §5.5) *always* pipes stdout
+  while stderr stays the terminal. Only a pty reaches that case, so `pan/tests/grammar.rs` allocates
+  one (`openpty`, a `cfg(unix)` dev-dep) and **drains the controller on a thread while the child
+  runs** — after `wait`, Darwin discards what the closing device end left unread.
 - **All TOML is `toml_edit`'s, and frontmatter is never re-serialized** (§6.6). `pantheon::document`
   owns the `+++` fence; `Document` carries `front_raw`, the fence's original TOML, and a rewrite edits
   *that* `DocumentMut` and re-emits. Rebuilding the fence from `Frontmatter`'s two fields instead would
@@ -425,6 +470,255 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   and it **declines what it cannot honestly flatten**: `pan tree` nests nodes, `schema` nests a
   schema, so those fall back to pretty JSON. The flatness test is deliberately *not* recursive.
   No contract snapshot covers any of this, because every contract test pipes.
+
+### Improvement phase — Wave 1 (chrome UX, `porticus`; IMPROVEMENT-PLAN.md)
+
+The first per-app improvement pass, all in `porticus`, so **one edit moved all twelve** (P-II).
+What a later change must not undo:
+
+- **Scrolloff is one stateless helper** — `runtime::scroll_first(cursor, len, height)`, shared by
+  `draw_rows` and `Rail::draw` so list and tree scroll identically (I3, C3). It **centres the
+  cursor** (half a pane from the top), top-anchored near the head and bottom-anchored at the end;
+  derived from the cursor each frame, never a stored offset (I1, §18 — no knob). It *replaced* the
+  bottom-anchored `first = cursor - (height-1)`, which is why the C1 clamp test no longer asserts
+  "one Up lifts off the last row" (that was bottom-anchor behaviour) but instead that stepping back
+  the list length returns to the head.
+- **Search is the content surface, and ranked (C4).** `/` now takes **content focus** wherever a
+  Rail view held the tree (`Chrome::Search` sets `Focus::Content`), so typing narrows the *rows*,
+  not the tree cursor — **`Rail::seek` was removed**, not just unused. `filtered()` ranks matches
+  **prefix > word-boundary > substring** with a stable sort (original index breaks ties), so the
+  order is deterministic frame-to-frame — every caller (`draw_rows`, `current_target`,
+  `row_targets`) must agree on the same cursor row. A per-frame **fold memo was deliberately not
+  added**: while typing, `rows()` folds once per frame (live_search only sets the filter), so the
+  reported slowness was the missing rank + tree-seek, not repeated folds.
+- **The Title splash is a full-page banner painted on its own path (C7, C6).** `Overlay::Title`
+  routes to `draw_title` (like `Overlay::Tree`→`draw_tree_modal`), **not** through `draw_overlay`'s
+  line body — so `draw_overlay` no longer takes `ident`. The face is **`porticus::banner`**, an
+  embedded **8-row serifed Roman-caps** alphabet (serif feet/heads, tall inscriptional/Trajan)
+  **authored in-repo** (public-domain, no dependency, nothing loaded at runtime) — the plan's "render
+  the caps without a third-party `.flf`" path, taken because no `cargo deny`-clean figlet font was on
+  hand and none could be fetched. (A first 5-row solid-block cut read too modern; redrawn taller and
+  serifed to land as classical.) It renders `ident.name`,
+  falls back to the tracked word when too narrow, and **drops the tagline** (C6 — the `Ident.tagline`
+  field stays, removing it is 12-crate churn for no gain; it is simply no longer rendered anywhere).
+  The version line stays verbatim (`crate … · format 1`), which one frame test keys on.
+- **The theme pass (C5) is values-only** — `theme.rs` palette + spheres, a warm/legibility lift over
+  the same ink-on-vellum model; the accent's restraint (name + focus alone, P§8) is unchanged.
+  Invisible to the frame snapshots (`as_text` strips style), so **no snapshot churned** — a later
+  palette edit is free of snapshot review for the same reason, but must keep the P§8 table in sync.
+- **The untracked `PORTICUS-SPEC.md` was updated in step** (P§4 Title row, P§6 search/scroll + the
+  `count_at`-only count model, P§8 banner + palette table). Cite `P§n` from these; they now match
+  the code.
+
+### Improvement phase — Wave 4 (the lenses: N1, N2, N3 + G8; IMPROVEMENT-PLAN.md)
+
+The lens wave, plus G8 folded in first because it is what makes a cross-core relay honest.
+What a later change must not undo:
+
+- **A target names its core (G8).** `RecordRef` and `Target::Node` each carry
+  `core: Option<String>`. A **row** is stamped by the fold that built it
+  (`RecordRef::in_core`); a **new** record takes the *view's* declaration (`View::core()`,
+  set through `TreeFile`/`Agenda`/`Horizon`'s `.in_core(short)`), which Porticus stamps in
+  `target_for` and in the pick-a-home modal. `None` stays right for a core's own TUI — it
+  has one core and names it in `on_action` (I5). **Speculum's `core_of` re-read is gone**:
+  routing is by provenance, never by matching home/key against every dated core.
+- **`TreeFile::called(id)`** exists because a lineup's view ids must be unique (P§3) and a
+  lens now stacks several record lists in one lineup.
+- **Atrium relays across `pen`/`alb`/`tab`** with *one* `on_action`: the verb grammar is
+  the shared one (§7.2), so only the core differs and nothing guesses it. `d` stays
+  Pensum's alone. Its `count_at` is now node-local (`--here`) as P§6 requires, and stays
+  one core's question — a badge summing three would spawn three children per visible node
+  per frame.
+- **Studium folds one programme at a time**, and a programme is **a node with a
+  `[code]_curriculum.toml`** — discovered, never declared, so §18 gains no config and
+  §19.3's file gains no key. The choice is **view state** (§19.4 says nothing stores it),
+  held in one `scope::Studies` shared by every view; a fresh launch opens on all the
+  studies. `]`/`[`/`p` are wrapped around **every** view by `scope::Switch` (a full `View`
+  delegate) rather than declared on the mosaic alone — the inner view claims a key first.
+  The scope is applied as `-H` and nothing else, so a screen figure reproduces as
+  `stu -H <code>` (I8).
+- **`FieldSpec::switch(label, flag)`** is a form field whose flag takes **no value** —
+  appended only on a typed yes (`y`/`yes`/`true`/`1`). It exists so minting stays the
+  hand's word: Speculum's `new log` and Studium's `new course log` both relay `-c`, and a
+  lens must **never** infer a mint by reading whether the container exists (a typo would
+  mint a series, and §18 keeps no undo). This closed G3's deferred first-grade mint.
+- **The horizon dates the reading.** `Horizon::target()` names the anchor as `at`, and
+  `target_for` now gives `Action::QuickAdd` the same `at` as `Add` — `A` differs from `a`
+  only in how the *home* is chosen, so a dated view dates both.
+
+### Improvement phase — Wave 6 (the audit: G1–G7; IMPROVEMENT-PLAN.md)
+
+The audit wave. **Every Wave-6 item is now built** (G8 landed in Wave 4), so the plan's
+"buildable now" list is empty and its three stale comments are corrected. What a later
+change must not undo:
+
+- **The rule header grammar lives in the spine** (`pantheon::rule`), not in `auspex`. It is
+  a *structural* fact about the tree: `pan`'s node cascade rewrites the `writes=core@home`
+  grants a recode invalidates (§10.1), and `pan validate` reports one naming no node
+  (`dead_header_code`, §10.2). The spine cannot ask Auspex anything (I5), so the grammar is
+  read from the hub and Auspex's copy is gone. **Enforcement stays in `auspex::grant`** —
+  parsing a capability into what a proposal is checked against is §9.5's, not the spine's.
+- **`Change::RewriteHeader` is `RewriteRefs` one layer down**: a ref names a record, a
+  grant names a node, and a recode invalidates both. Emitted for **every rule in the tree**,
+  not only the branch's — a rule may grant writes anywhere (§9.1 scopes where it *runs*).
+  Rules the op moves are named by the path they land at, since the rewrite runs after the
+  renames; the tree walk filters by those paths rather than by directory, or a root-scoped
+  `rename-prefix` would rewrite each moving rule twice, the second time at a path that no
+  longer exists. Only `writes=` is touched — `watch=` names cores, `desc=` is prose.
+  `rename-prefix` cascades too, which §10.2 states outright.
+- **A genuine choice is a row per candidate, never a chooser.** `Finding` carries
+  `candidates: Vec<String>` beside `fix`; a cross-node duplicate slug lists one
+  `pan rename-pattern` per holder. `pan`'s validate tab renders each on its own line and
+  `d` relays **whatever command the focused row carries**, so the tab teaches `pan` no fix
+  shapes and a new one in the spine works there the day it lands.
+- **`Overlay::Tree` carries a `Picking`**: `Home` hands the node to the add form (`A`),
+  `Destination` appends it to the invocation the app built (`m`). A move names a *node*, so
+  it is picked off the tree, never typed as a code.
+- **`f` follows a ref chip, and only within one core** (I5). `View::focused_ref` says
+  *which* reference; Porticus resolves it through the spine, checks the core against
+  `ident().short` via the registry, then `Rail::reveal`s the node and pins the record. A
+  cross-core chip is answered with which binary owns it — never silently ignored, never
+  rendered by an instrument that links no such core. `Rail::reveal` is an *address* seek,
+  distinct from the search jump `Rail::seek` once was (removed in C4).
+- **`porticus::drive` draws before each key**, as `run` does. A view that establishes
+  something while painting — an `EntityCard`'s chip strip, the one cursor a card has — had
+  established nothing by the time a key arrived, so a screen only reachable after a frame
+  was a screen no test could reach.
+- **`View::add_form` overrides the app's.** One instrument one form is right for a *core* —
+  it has one primitive. A **lens** does not: Studium's `a` records a grade, logs hours, or
+  places an occurrence depending on the tab, so the form belongs to what the tab is about.
+- **`list` is the present, not the history** (I1). A core's `list` answers with the *latest*
+  line of each series, so a fold that reads refs or occurrences straight off it hides every
+  earlier reading — a professor named on one grade vanishes the day a retake lands.
+  `fold::series_lines` names the series from `list`, then reads each. **Any cross-core fold
+  over samples owes the same two-step**; only entities (a Fasti `span`) are whole in `list`.
+- **§19.5 is built and its study year anchors on the programme's start**, which is what
+  §19.5 says. Anchoring on the first period's date looks equivalent and is not: a programme
+  beginning 1 August against a P1 opening on the 26th would read its own first spring as
+  year two. A period may also *wrap* the new year (KTH's P2 runs into January), so each
+  year-less anchor is materialised per calendar year from the one before the span opens.
+- **Studium is §19.6's seven tabs and §19.8's five relays, on one `on_action`.** That works
+  because the verb grammar is shared (§7.2) and only the core differs — read off the
+  *address* (G8), never guessed from the action. **People and reflections stay read-only**:
+  §19.8 lists no relay for either, and a person is Album's to edit in `alb`.
+- **The occurrence form carries a `concerns` field** because §8.4 gives an event no kind
+  beyond `event`. What makes a sitting an exam is the reference to its enrolment, and a hand
+  writes it — a lens inferring one would be deciding a core's vocabulary (I5).
+
+### Improvement phase — Wave 7 (`a` on a Full view · Help's Tier 2)
+
+Not a plan item — a user-testing report ("why can't I add todos in the Pensum TUI?"), and both
+halves turned out to be **`porticus` failing to implement P§4 rather than a design call**. One
+edit each, so all twelve moved (P-II).
+
+- **A `Full` view's `a` opens the node picker**, as P§4's Pick row always said ("a `Full`-view
+  add … for a write with no ambient node"). It did not: `target_for` handed `Action::Add` the
+  **rail cursor**, and a Full view draws no rail — so `a` filed at a node the hand could not
+  see, silently the tree's first node on a fresh launch. Fasti's Calendar, Speculum's Horizon
+  and Studium's two dated lists were all writing to an unseen home. Routed in `act()` for
+  every Full view at once; **the date survives the detour** because `Picking::Home` re-reads
+  `view_at` when the node is taken, which is what keeps a Calendar cell dating its own add.
+  A screen test that types `a` on a Full view now needs an `<enter>` to take the node.
+- **Help lists Tier 2**, which P§4 also always said ("chrome keys plus the current view's
+  own"). `help_lines` folded `CHROME_HELP` and stopped, so nothing on screen ever said that
+  `a` adds or `d` marks done — and `Action::label` ("the label Help shows") and
+  `keymap::key_for` had **no caller at all**, which is the tell. Now two columns where they
+  fit and stacked below `HELP_TWO_COLUMN`: the box neither scrolls nor truncates, so a
+  wrapped second column interleaves with the first. Stacked, the chrome label is **unpadded**
+  — the pad itself wraps to a blank line and reads as a gap between rows.
+- **An unoffered action is greyed, never dropped** (P§5). The reservation is suite-wide, and
+  one a hand cannot see is one they will try to rebind. `as_text` strips style, so the greying
+  is pinned by a unit test in `runtime`, not a frame test.
+- **Pensum's agenda offers what its records tab offers.** A row carries its own home (P§7), so
+  `e`/`x`/`r`/`m` always worked from either tab and the gap was arbitrary; `a` was the one that
+  mattered, since the agenda is the tab a hand sits on to see every open task and was the one
+  place `a` did nothing at all. Atrium's agenda gains `Add` for the same reason — its "offer
+  `A` alone" workaround is now handled centrally.
+
+### Improvement phase — Wave 8 (`pan`'s seven defects; pan-bugs.md)
+
+A user-testing report against `pan 0.1.0`, run on synthetic trees before the `~/aedes`
+migration. **B1 destroyed data silently and B2 made it reachable everywhere**; the rest were
+missing verbs the migration needs. What a later change must not undo:
+
+- **`Plan::preflight` refuses any rename onto an occupied path, and it simulates.**
+  `std::fs::rename` *replaces* its destination, and a recode plans one rename per file
+  whose prefix changes — so a stray `aoi_notes.md` beside `aoa_notes.md` was destroyed at
+  exit `0`. The load-bearing part is that **a naive `to.exists()` misses the flagship
+  case**: a recode renames the branch dir *first*, so the doomed file's planned
+  destination names a directory that does not exist yet while the file itself sits under
+  the old one. Each virtual path is mapped back through the plan's own renames
+  (`real_path`) before the tree is asked, and a path this plan already vacated is not a
+  collision. Every collision is collected so one dry-run answers for the whole plan, and
+  the message names **real** paths — a plan path is virtual and a hand cannot act on it.
+  Called from `Plan::apply` *and* from `pan`'s `run_plan` before the dry-run emit.
+- **`Plan::apply` asks again immediately before each rename.** Plan-time alone is a TOCTOU
+  window and **the plan token does not close it** — the token is checked against a freshly
+  *computed* plan, recomputed from the same tree, so a file created in between is invisible
+  to both. `occupied()` is `symlink_metadata`, never `Path::exists`: a **dangling symlink**
+  is a name a rename replaces just the same. The atomic form (`renameat2(RENAME_NOREPLACE)`
+  / `renamex_np(RENAME_EXCL)`) was deliberately *not* taken — it costs `libc` + `unsafe` in
+  a spine that has neither, plus a Windows arm.
+- **No `--force`, deliberately.** §18 ships no undo, so a clobber must not be one flag
+  away. The escape hatch is to move the blocker aside, which leaves it on disk.
+- **This closed B5 too**: an occupied destination is refused whether it holds a file or a
+  directory, so the old asymmetry (a **non-empty dir** caught by the OS mid-apply with
+  `ENOTEMPTY`, a **file** silently clobbered) is one answer in both directions, and the
+  half-applied plan never starts.
+- **`rename-prefix` walks the node tree and nothing else** (`prefix_contents`, §6.3). It
+  recursed through *every* directory under its scope, so a project homed at a node put
+  `.git`, `node_modules` and `target` inside it — it renamed files in git object stores and
+  build output. It is now bounded exactly as `rename`/`mv` are (`build_tree` + per-node
+  meta dirs + loose files), which is why `crates/` always rode along untouched. **Do not
+  "fix" this with a skip list or `.stignore`** — §13/§18 leave no ignore file any say over
+  the tree, and a hardcoded `node_modules`/`target` list is the same thing spelled
+  differently. The cost is that a loose file in a non-node dir (or at the root) is out of
+  reach, which is B7's accepted constraint and validate's own rule ("stray files at the
+  root are bulk, not the tree's concern"). A **drifted meta dir** (any `…__` name) is still
+  entered — that is what the repair is for.
+- **`mv-file` takes any file and many of them.** It refused everything without a `__`,
+  which left nothing at all for bulk — the overwhelming majority of a migration. A
+  `__`-named file lands in the meta dir, a document or bulk loose in the open node dir
+  (§6.1, §6.5). **Where the code comes from differs by half**: a `__` file names its own
+  code in its first segment (so a *misfiled* one is re-prefixed correctly, §10.2's case),
+  while a document or bulk file takes its *node's*, read off where it sits. A name carrying
+  no code moves verbatim. `tab move` remains the record-level verb — it wakes Auspex, as a
+  core's write does; this is the structural half and knows no core (I5).
+- **`in_root_spelling` is not optional.** One file has more than one absolute name
+  (`/tmp/x` vs `/private/tmp/x`) and a shell glob hands over whichever the cwd wore. Two
+  things break silently on the difference: the plan carries an absolute path where every
+  other change is root-relative, and the node holding the file compares unequal, so its
+  code goes unrecognized and **the prefix is never swapped**. Canonicalize both ends,
+  rebuild on `root`. `pan`'s `beside_the_hand` resolves a *relative* path against the
+  **cwd** first (what a glob produces), keeping ambient cwd out of the spine.
+- **`pan merge <src> --into <dst>` is the verb `mv` cannot be.** `mv` refuses a code
+  collision (§5.3) and is right to, but that left no verb for a tree assembled from two
+  trees. **The union key is the code and it recurses**: a `src` child whose recoded code
+  matches one already at `dst` is merged *into* it, never renamed onto it. Where labels
+  differ, **`dst`'s survives** and the dropped one is reported — one code is one node, so
+  one name has to go and only the existing one is not a guess. **Everything in the open dir
+  moves**, bulk directories included (one rename, never descended into), because what the
+  walk does not carry the final removal would destroy. Grants cascade (`header_cascade`, as
+  for `mv`); refs do not (a def-prefix node keeps its slug on a move). File collisions —
+  two annotation files being the usual pair — are refused and *all* listed by `preflight`;
+  what a merged `[code]__.toml` should say is not the tool's to invent.
+- **`Change::RemoveEmptyDir` is `Remove` that refuses a surprise.** `Remove` recurses
+  (`remove_dir_all`), which is right for `rm` — the node is *proven* empty first — and
+  wrong for `merge`, where the dir is empty only because this same plan just emptied it.
+  Anything that arrived meanwhile must stop the removal, not be swept up by it.
+- **The annotation key set is open, and an unknown key is a *field*** (`[fields]` in
+  `[code]__.toml`, §5.2). It was closed at four, so placement rule 4 — "fields, not nodes"
+  — had nowhere to land: the only home for a warrant or a role was `keywords`, documented
+  as search hints for an LLM, which would have made the field indistinguishable from one.
+  The four typed keys keep their shapes; everything else is namespaced under `[fields]` so
+  it can never shadow one. Surfaced in `pan constitution` and the `pan` node card, because
+  a rule about what colours a record is unreadable if it is not shown. **A field is
+  annotation and never behaviour** (§18): every value is an unvalidated string and **no
+  tool may branch on one** — a field that tuned a tool would be the config file §18 forbids
+  whatever it were called.
+- **B7 is a constraint, not a debt.** `sort/` and `vol_o/` are not in `[char]_[label]`
+  form, so every verb stops at them and `pan validate` cannot be the completeness check
+  there. The naming rule is doing what it says; nothing was changed for it.
 
 ### Step 6's durable rules (the chrome)
 
@@ -444,10 +738,17 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   every relay centrally; **a lens's own reads are its own to root** (`tessera::read` takes one,
   and Atrium holds the root for its tiles, its agenda fold, and its `count_at`). Both halves of
   this were real bugs, found one after the other.
-- **The dim asks `any_at`, the badge asks `count_at`** (P§6). Two questions on purpose: an
-  instrument whose count is costly overrides `any_at` and the dim stays cheap. Collapse them and
-  that override becomes unreachable. The default `any_at` counts, so a node holding records is
-  folded twice a frame — the cost P§6 tells a costly instrument to override away.
+- **`count_at` is one node-local fold, memoized per frame (P§6).** The dim is `count_at > 0`
+  and the badge is `count_at`, over the *same* per-frame memo in `Asking` — so a held node is
+  folded once, not once for the dim and again for the badge. **`count_at` MUST fold node-local**
+  (`fold_local`/`find_entities_local`/`find_documents_local`), the records *at* the node and not
+  its subtree: the rail asks it of every visible node, and a subtree fold re-read a branch once
+  per ancestor — the O(depth·records) cost that made walking a core's tree slow. This *replaced*
+  the old `any_at`/`count_at` split: with a node-local count there is no costly question to make
+  cheap, so `App::any_at` was removed and the badge is now node-local where it once summed the
+  subtree (a deliberate change; `pan` was already node-local, and no test pinned the sum). The
+  content pane (`rows_at`) still folds the subtree — it is one fold per frame, never the rail's
+  per-node cost — so a parent's badge (its own records) can read lower than the list below it.
 - **`None` from `rows` is a draw-view; `Some(vec![])` is an empty row-view** (P§3). The first is
   *about the selected node*, so the node is its target; the second honestly has an empty set.
   Conflating them made `e` on a draw-view silently do nothing.

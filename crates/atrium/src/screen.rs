@@ -5,12 +5,28 @@
 
 use pantheon::Code;
 use porticus::view::Row;
-use porticus::views::Agenda;
+use porticus::views::{Agenda, TreeFile};
 use porticus::{Action, App, Ident, Invocation, RecordRef, Target, View, Writer};
 use serde_json::Value;
 
 use crate::cli::{ALBUM, PENSUM, TABELLA};
 use crate::mosaic::Mosaic;
+
+/// The actions a lens offers on a record it folded (N1, §12).
+///
+/// §12 permits a lens to **relay** a human-initiated write, and that permission was
+/// never narrow — what made Atrium's reach narrow was this list, three verbs on one
+/// core. A relay is the same command a hand would type, so the standard set is the
+/// standard set wherever the row came from: only `Done` is Pensum's alone, because only
+/// a task has something to toggle (§8.5).
+const ON_A_RECORD: &[Action] = &[
+    Action::Edit,
+    Action::Remove,
+    Action::Rename,
+    Action::Move,
+    Action::Add,
+    Action::QuickAdd,
+];
 
 /// Open the mosaic.
 ///
@@ -54,6 +70,8 @@ impl App for Atrium {
 
     fn lineup(&mut self) -> Vec<Box<dyn View>> {
         let for_agenda = self.root.clone();
+        let for_people = self.root.clone();
+        let for_documents = self.root.clone();
         vec![
             // A lens leads with its mosaic — the dashboard, not the tree (P§3).
             Box::new(Mosaic::of(vec![
@@ -72,18 +90,55 @@ impl App for Atrium {
                 )),
             ])),
             // The day's tasks, each row carrying its own home so the list spans nodes
-            // and each `d` relays to the right one (P§3, P§7).
+            // and each `d` relays to the right one (P§3, P§7). A Full view has no visible
+            // tree cursor, so a new task is added through the pick-a-home modal rather
+            // than an invisible one — which is now Porticus's rule for *every* Full view
+            // rather than this view offering `A` alone (P§4), so `a` is offered too and
+            // both keys reach the same modal.
             Box::new(
                 Agenda::of(move || tasks(&for_agenda))
-                    .offering(&[Action::Done, Action::Edit, Action::Remove])
+                    .offering(&[
+                        Action::Add,
+                        Action::Done,
+                        Action::Edit,
+                        Action::Remove,
+                        Action::Rename,
+                        Action::Move,
+                        Action::QuickAdd,
+                    ])
+                    .in_core(PENSUM)
                     .empty("nothing open today"),
+            ),
+            // The people and the documents at the node the rail is on — the other two
+            // cores the hearth already counted, now browsable and writable through the
+            // same standard actions (N1, §12). Each declares its core, so `a` here mints
+            // through `alb` and `a` there through `tab` (P§7).
+            Box::new(
+                TreeFile::of(move |node: &Code| entities(&for_people, ALBUM, node))
+                    .called("people")
+                    .in_core(ALBUM)
+                    .offering(ON_A_RECORD)
+                    .empty("nobody filed here"),
+            ),
+            Box::new(
+                TreeFile::of(move |node: &Code| entities(&for_documents, TABELLA, node))
+                    .called("documents")
+                    .in_core(TABELLA)
+                    .offering(ON_A_RECORD)
+                    .empty("nothing written here"),
             ),
         ]
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        // Atrium's items at a node are the open tasks there — folded, never stored (I1).
-        tessera::read(&self.root, PENSUM, &["list", "-H", node.as_str()])
+        // Atrium's items at a node are the open tasks there — folded, never stored (I1),
+        // and **node-local** (`--here`), because the rail asks this of every visible node
+        // and a subtree fold would re-read a branch once per ancestor (P§6).
+        //
+        // The day is what the hearth counts, so this stays one core's question even
+        // though the lineup now browses three: a badge summing three cores would spawn
+        // three children per visible node, per frame.
+        tessera::read(&self.root, PENSUM, &["list", "-H", node.as_str(), "--here"])
             .and_then(|v| v.as_array().map(Vec::len))
             .unwrap_or(0)
     }
@@ -95,23 +150,46 @@ impl App for Atrium {
     }
 
     fn relays_to(&self) -> Vec<String> {
-        vec![PENSUM.to_string()]
+        // Every core the lineup writes to, so an absent one dims its actions before the
+        // key is pressed rather than failing when tried (§12, P§7).
+        vec![PENSUM.to_string(), ALBUM.to_string(), TABELLA.to_string()]
     }
 
     fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {
         // Only the app knows its verb grammar, because only the app authors the write
         // (I2). Porticus owns the confirm and the relay and knows none of this.
-        let Target::Row(RecordRef { home, key }) = target else {
-            // Atrium adds nothing: it owns no primitive, so a new record is a core's to
-            // create, not a dashboard's (§12).
-            return None;
-        };
-        let home = home.as_str();
-        match action {
-            Action::Done => Some(Invocation::new(PENSUM, ["edit", "-H", home, key, "--done"])),
-            Action::Edit => Some(Invocation::new(PENSUM, ["edit", "-H", home, key])),
-            Action::Remove => Some(Invocation::new(PENSUM, ["rm", "-H", home, key])),
-            _ => None,
+        //
+        // **The grammar is the shared one** (§7.2): `<short> <verb> -H <home> <key>` is
+        // every core's, which is what lets one mapping serve three. What the lens must
+        // still know is *which* core — a row says so itself, a new record's view says it
+        // for it (P§7), and nothing here guesses.
+        match target {
+            Target::Row(RecordRef { home, key, core }) => {
+                let short = core.as_deref()?;
+                let home = home.as_str();
+                match action {
+                    // Only a task has something to toggle; the key is dark elsewhere by
+                    // the view's own offering, and refused here too (§8.5, P§5).
+                    Action::Done => (short == PENSUM)
+                        .then(|| Invocation::new(PENSUM, ["edit", "-H", home, key, "--done"])),
+                    // No value inline is the editor form (§7.3): the record opens in the
+                    // hand's own editor and the session is the confirm.
+                    Action::Edit => Some(Invocation::new(short, ["edit", "-H", home, key])),
+                    Action::Remove => Some(Invocation::new(short, ["rm", "-H", home, key])),
+                    // Porticus appends the typed name after its own prompt (P§5).
+                    Action::Rename => Some(Invocation::new(short, ["rename", "-H", home, key])),
+                    Action::Move => Some(Invocation::new(short, ["move", "-H", home, key, "--to"])),
+                    _ => None,
+                }
+            }
+            // A **new** record is still the core's to create — the lens only carries the
+            // hand's ask to it (I2, §12). The form's fields are appended by Porticus.
+            Target::Node { node, core, .. } => matches!(action, Action::Add | Action::QuickAdd)
+                .then(|| {
+                    core.as_deref()
+                        .map(|short| Invocation::new(short, ["add", "-H", node.as_str()]))
+                })
+                .flatten(),
         }
     }
 }
@@ -125,6 +203,7 @@ fn tasks(root: &std::path::Path) -> Vec<Row> {
     let Some(Value::Array(rows)) = tessera::read(root, PENSUM, &["list"]) else {
         return Vec::new();
     };
+    let labels = porticus::node_labels(root);
     rows.iter()
         .filter_map(|row| {
             let key = row["key"].as_str()?;
@@ -137,13 +216,49 @@ fn tasks(root: &std::path::Path) -> Vec<Row> {
                     format!("   {}", names.join(", "))
                 }
             });
+            // Node-first, the task de-underscored — the same row shape Pensum shows, so
+            // the agenda reads identically wherever it appears (P1, I3).
+            let node = labels
+                .get(home.as_str())
+                .map_or_else(|| home.as_str().to_owned(), Clone::clone);
             Some(Row {
-                label: format!("{key}   {}{refs}", home.as_str()),
-                target: Target::Row(RecordRef {
-                    home,
-                    key: key.to_string(),
-                }),
+                label: format!("{node}   {}{refs}", porticus::prettify(key)),
+                // Stamped with the core it was folded from, so `d` routes by provenance
+                // even on a list the hearth now shares with two other cores (P§7).
+                target: Target::Row(RecordRef::in_core(PENSUM, home, key.to_string())),
                 when: row["data"]["done"].as_str().map(str::to_owned),
+            })
+        })
+        .collect()
+}
+
+/// The records one core holds **at a node**, as rows (N1, §12).
+///
+/// Read off that core's `list --here` and nothing else — the contract is the only thing
+/// that crosses (I4), and one fold serves every core because `list`'s envelope is the
+/// shared one (§7.2). Node-local, because a Rail view is *about the selected node* and
+/// the tree beside it is how you reach the rest (P§6).
+///
+/// Each row is stamped with the core it came from, so a relay on it routes by provenance
+/// rather than by whichever view happened to be active (P§7).
+fn entities(root: &std::path::Path, short: &'static str, node: &Code) -> Vec<Row> {
+    let Some(Value::Array(rows)) =
+        tessera::read(root, short, &["list", "-H", node.as_str(), "--here"])
+    else {
+        return Vec::new();
+    };
+    rows.iter()
+        .filter_map(|row| {
+            // A partitioned entity is named by `slug`, a series line by `key` (§5.4,
+            // §7.2) — the lens folds both shapes, so it asks for either.
+            let key = row["slug"].as_str().or_else(|| row["key"].as_str())?;
+            let home = Code::parse(row["home"].as_str()?).ok()?;
+            let kind = row["kind"].as_str().unwrap_or("");
+            Some(Row {
+                // De-underscored for reading, keyed on the real slug for the write (P1).
+                label: format!("{}   {kind}", porticus::prettify(key)),
+                target: Target::Row(RecordRef::in_core(short, home, key.to_string())),
+                when: None,
             })
         })
         .collect()

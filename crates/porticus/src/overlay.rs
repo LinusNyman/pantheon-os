@@ -62,10 +62,26 @@ pub enum Overlay {
         fields: Vec<(FieldSpec, String)>,
         focus: usize,
     },
-    /// `A` — the tree as a modal, to pick a home for a quick add at any node (P§4). It
+    /// The tree as a modal, to name a node the base view is not sitting on (P§4). It
     /// holds its own [`Rail`] so navigating it leaves the browsing cursor where it was;
-    /// selecting a node hands off to the add [`Form`](Overlay::Form).
-    Tree { rail: Rail },
+    /// what the selection is *for* is [`Picking`].
+    Tree { rail: Rail, picking: Picking },
+}
+
+/// What a [`Tree`](Overlay::Tree) modal's chosen node answers (P§4).
+///
+/// The modal is one widget asking one question — *which node?* — and the two askers
+/// differ only in what they do with the answer, which is why they share it rather than
+/// each growing a tree of their own.
+#[derive(Clone, Debug)]
+pub enum Picking {
+    /// `A` — the home for a quick add; the selection hands off to the add
+    /// [`Form`](Overlay::Form).
+    Home,
+    /// `m` — the destination for a move. The selection is appended to the invocation the
+    /// app built for the target, exactly as a line prompt's typed text is (P§5), so `m`
+    /// is a *pick* where `r` is a *type* and neither view nor app runs a prompt.
+    Destination(Target),
 }
 
 /// One write awaiting acknowledgement.
@@ -125,7 +141,10 @@ impl Overlay {
             Overlay::Line { label, .. } => label.clone(),
             Overlay::Confirm { action, .. } => format!("confirm — {}", action.label()),
             Overlay::Form { .. } => "add".into(),
-            Overlay::Tree { .. } => "pick a node".into(),
+            Overlay::Tree { picking, .. } => match picking {
+                Picking::Home => "pick a node".into(),
+                Picking::Destination(_) => "move to".into(),
+            },
         }
     }
 }

@@ -16,7 +16,7 @@ use pantheon::Code;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use crate::action::{Action, RecordRef, Target};
+use crate::action::{Action, FieldSpec, RecordRef, Target};
 use crate::theme::Theme;
 
 /// The switcher label and the Help key. Unique within a lineup; the number key is
@@ -138,6 +138,16 @@ pub trait View {
         &[]
     }
 
+    /// The core a **new** record on this view belongs to — its three-char short (§7.3).
+    ///
+    /// Only a lens needs this, and only for `a`: a row carries its own core in its
+    /// [`RecordRef`], but an add has no record yet, so the view answers for it and
+    /// Porticus stamps the [`Target::Node`] it builds. A core's own TUI declares
+    /// nothing — it has one core and names it in `on_action` (I5).
+    fn core(&self) -> Option<&str> {
+        None
+    }
+
     /// Tier-3 keys and their labels, **declared** so Porticus can route them, keep
     /// them off Tiers 1 and 2, and list them in Help (P§4).
     fn nav_keys(&self) -> &[(char, &'static str)] {
@@ -156,9 +166,37 @@ pub trait View {
         Handled::No
     }
 
+    /// The `core:slug` reference the view's own cursor is sitting on, where it has one
+    /// (P§3) — an [`EntityCard`](crate::views::EntityCard)'s focused chip.
+    ///
+    /// The view says *which reference*; Porticus resolves it, decides whether it can be
+    /// followed here, and moves the tree and the pin (P-II). A view therefore never
+    /// resolves an address, never reaches for a core, and cannot follow a chip into a
+    /// core it does not link (I5) — which is the whole reason the answer is a token and
+    /// not a record.
+    fn focused_ref(&self) -> Option<String> {
+        None
+    }
+
     /// What a Full view names in the header where a Rail view shows the path bar
     /// (P§4): a Calendar's month, a Timeline's range. Defaults to the view's id.
     fn locator(&self) -> Option<String> {
+        None
+    }
+
+    /// The fields `a` collects **on this view**, where they differ from the app's (§7.3,
+    /// P§7).
+    ///
+    /// One instrument, one add form is right for a core: it has one primitive and one
+    /// shape to fill in. A **lens** does not — Studium's `a` records a grade on the
+    /// courses tab, logs hours on the study tab, and places an exam on the deadlines tab,
+    /// three different records in three different cores (§19.8). The form belongs to
+    /// whatever the tab is about, so the view answers where it has an answer and `None`
+    /// falls back to [`App::add_form`](crate::App::add_form).
+    ///
+    /// It stays a *declaration*: the view says which fields exist, and Porticus still
+    /// renders them, assembles the invocation, and runs the confirm (P-II).
+    fn add_form(&self) -> Option<Vec<FieldSpec>> {
         None
     }
 

@@ -8,7 +8,7 @@
 
 use pantheon::Code;
 
-use crate::action::Action;
+use crate::action::{Action, FieldSpec};
 use crate::view::{Layout, Nav, Row, View, ViewId};
 
 /// The instrument's dated items, folded fresh each frame and sorted by date.
@@ -16,6 +16,9 @@ pub struct Agenda<F> {
     fold: F,
     actions: Vec<Action>,
     empty: &'static str,
+    core: Option<&'static str>,
+    id: ViewId,
+    form: Option<Vec<FieldSpec>>,
 }
 
 impl<F> Agenda<F>
@@ -31,7 +34,37 @@ where
             fold,
             actions: Vec::new(),
             empty: "nothing scheduled",
+            core: None,
+            id: "agenda",
+            form: None,
         }
+    }
+
+    /// Name this list, because a lineup's view ids must be unique (P§3) and a lens may
+    /// stack several dated lists — tasks, deadlines, hours — in one lineup.
+    #[must_use]
+    pub fn called(mut self, id: ViewId) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// The fields `a` collects here, where they differ from the app's (§7.3, P§7).
+    ///
+    /// A lens's `a` means a different record on each tab; the tab is what knows which.
+    #[must_use]
+    pub fn with_form(mut self, fields: Vec<FieldSpec>) -> Self {
+        self.form = Some(fields);
+        self
+    }
+
+    /// The core a **new** record on this list belongs to (P§3, §12).
+    ///
+    /// A row says its own core; an add has no record yet, so the view answers for it and
+    /// Porticus stamps the target it builds. Only a lens needs this (I5).
+    #[must_use]
+    pub fn in_core(mut self, short: &'static str) -> Self {
+        self.core = Some(short);
+        self
     }
 
     #[must_use]
@@ -52,7 +85,7 @@ where
     F: FnMut() -> Vec<Row>,
 {
     fn id(&self) -> ViewId {
-        "agenda"
+        self.id
     }
 
     fn layout(&self) -> Layout {
@@ -75,6 +108,14 @@ where
 
     fn actions(&self) -> &[Action] {
         &self.actions
+    }
+
+    fn core(&self) -> Option<&str> {
+        self.core
+    }
+
+    fn add_form(&self) -> Option<Vec<FieldSpec>> {
+        self.form.clone()
     }
 
     fn navigate(&mut self, _nav: Nav) -> crate::Handled {

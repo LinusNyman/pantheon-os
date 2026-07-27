@@ -8,7 +8,8 @@
 //! prose (§6.6) · [`core`] the `Core` trait & PATH
 //! discovery (§7.1) · [`schema`] the discovery surface (§7.2) · [`root`] root
 //! resolution (§6.2) · [`tree`] the walk (§5.0) · [`resolve`] `core:slug` →
-//! record (§5.0) · [`validate`] the cross-cutting lint (§5.5) · [`lock`] the record
+//! record (§5.0) · [`rule`] the rule declaration header (§9.2) · [`validate`] the
+//! cross-cutting lint (§5.5) · [`lock`] the record
 //! write primitive (§6.4) · [`store`] the verb machinery (§7.1) · [`contract`] the
 //! verb runner every core's CLI ends in (§7.1, §7.3) · [`plan`] planned
 //! transactions (§10.1) · [`meta`] node annotations (§5.2) · [`error`] exit codes
@@ -42,6 +43,7 @@ pub mod node_ops;
 pub mod plan;
 pub mod resolve;
 pub mod root;
+pub mod rule;
 pub mod schema;
 pub mod shape;
 pub mod store;
@@ -66,12 +68,13 @@ pub use meta::{Annotations, read_annotations, set_annotations};
 pub use mint::{NewSpec, plan_new};
 pub use name::normalize;
 pub use node_ops::{
-    plan_mv, plan_mv_file, plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix,
-    plan_rm,
+    plan_merge, plan_mv, plan_mv_files, plan_rename, plan_rename_def, plan_rename_pattern,
+    plan_rename_prefix, plan_rm,
 };
 pub use plan::{Change, Outcome, Plan};
 pub use resolve::{RefOutcome, Resolution, resolve_all};
 pub use root::resolve_root;
+pub use rule::Header;
 pub use schema::{CoreSchema, TokenSchema, schema};
 pub use shape::Shape;
 pub use store::{

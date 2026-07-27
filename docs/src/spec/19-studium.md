@@ -40,7 +40,7 @@ passing = ["P"]
 
 This is the one place Studium departs from §12's records-native default, and the departure is deliberate: the scale is neither a reading of a life (so no core owns it) nor a knob on any tool's behaviour (so §18's no-config rule does not reach it) — it is **external reference data**, a fact about a university that a grade needs to become a number, and it is homed in the tree at the node it concerns so that a published subtree carries its own scales. §18 records the carve-out and its boundary: a file that tuned behaviour would still be forbidden; this one only supplies a datum. It is not the Album institution's `data` (Album's `Agent` is a typed record that drops unknown fields, §8.1, so a scale set there is invisible across the contract) and it is not hardcoded (a hand studies at more than one university, and publishes to hands at others).
 
-A `curriculum.toml` is not yet a shape the spine classifies — `pan validate` reports it `unclassifiable_file` (a warning: only `[code]__.toml` is a recognised TOML, every other `.toml` falls through where a `.pdf` would land in `Bulk`, §5.2). Teaching `classify` to route a node-prefixed non-annotation `.toml` to `Bulk` closes the warning and is the one spine change this lens asks for; until then the file works and the warning is cosmetic.
+A `curriculum.toml` is **bulk beside the record** (§6.5): `classify` routes a node-prefixed non-annotation `.toml` to `Bulk`, exactly where a `.pdf` lands (§5.2), so `pan validate` passes it in silence. Only an *annotation-shaped* stem (`[code]__`) with a bad code is still flagged. That was the one spine change this lens asked for, and it also covers a project's `Cargo.toml` sitting at its node.
 
 ### 19.4 The GPA fold
 
@@ -56,6 +56,8 @@ Studium resolves each grade's scale by the curriculum file that governs the fact
 **On a retake, the fold takes the best passing grade** — the KTH convention that a re-sit only ever lifts a mark — reading every attempt in the course's log and weighing the highest that passed. That the log keeps all attempts (§19.2) is what makes this a fold rather than a stored decision: no `final_grade` is written, "best" is recomputed on sight, and a curriculum file may name `latest` instead where an institution counts the most recent sitting. This is the figure the prior tool's dead `retake_grade_selection` never actually computed; here it is a line of the fold.
 
 **Scope is node-agnostic, like net worth.** Net worth sums every `balance`-bearing holding wherever it sits (§8.3); the GPA folds every course that has a grade fact, weighing what it finds, and needs no declaration of "which directory is studies." A hand who wants one programme's mean scopes the fold at invocation — `stu -H asd_f_teknisk_fysik`, or `-C` a subtree — the same lever every fold takes (§6.3, §7.3); nothing is stored to remember the choice. In the reference tree such records home under Disciplina (`asd`), but the fold is keyed to the grade fact, not the node.
+
+**The screen has a hand on that same lever: the programme switch.** A CLI is given its scope once per invocation; a screen is looked at for an hour, and a GPA across two degrees is a figure nobody has — so Studium's screen folds **one programme at a time**, and a declared key steps between them (`]` next, `[` previous, `p` all the studies), exactly as Speculum's horizon widens and narrows (§12). Three things keep this inside §18. The programmes are **discovered, not declared**: a programme is a node carrying a `[code]_curriculum.toml` (§19.3), which is already there to weigh a grade — the scale that governs a course is the boundary of the programme it belongs to, so no new file, key, or directory convention is introduced. The choice is **view state**, held as long as the screen is and stored nowhere, so a fresh launch opens on all the studies again — the whole-tree fold this section describes, which is also the honest scope where no curriculum exists. And the scope is applied as `-H` and nothing else: the *same* narrowing the CLI takes, so a figure a hand reads on screen is a figure it can reproduce by typing `stu -H <code>` (I8). Everything a study life derives (§19.6) folds within it — the tasks above all, since a tree-wide agenda on a study screen shows the shopping.
 
 ### 19.5 Terms and periods
 
@@ -81,6 +83,8 @@ The GPA names the lens, but a study life folds from six cores at once, each cont
 - **People** — Album (§8.1): a TA, a professor, a coursemate is a `person`, referenced from a course's records, never copied under it. "Contacts" is a fold over the people a course's records point at.
 - **Reflections** — Tabella (§8.7): an after-action review, a course-end retrospective is a Document whose `type` is `reflection`, homed at what it is about. Studium folds their frontmatter and shows the body, and originates none of it.
 
+**Each of these folds within the active programme** (§19.4): the screen's scope is an `-H` on every one of them, so the tasks tab shows that programme's doing and not the day's shopping, and the figures above it are that programme's figures. On all-the-studies the scope is absent and each fold is tree-wide, which is what it always was.
+
 These are the prior tool's tabs — dashboard, courses, timeline, study, tasks, goals — rebuilt as Porticus views over folded records (§11); a **goal** (a target grade) is an intention, so a Pensum task, not a seventh record shape. What the prior tool answered from a SQLite index beside the tree, the lens answers from a live fold over the tree — no index to rebuild, nothing to reconcile (§18). Its notification daemon is not a lens's to run (I2, §18: no watcher): the Pantheon shape of "remind me the registration window closes" is an **Auspex rule** (§9) proposing a task, and its git and export are the hand's own over an ordinary directory.
 
 ### 19.7 The folder is not the schema
@@ -105,7 +109,10 @@ At a terminal the bare `stu` opens the mosaic; down a pipe it emits the figures 
 
 ```json
 { "gpa": 4.09, "credits_completed": 60.0, "credits_in_progress": 30.0,
-  "open_courses": 4, "study_hours": 128.5, "next_exam": { "date": "260315", "course": "sf1624" } }
+  "open_courses": 4, "study_hours": 128.5, "next_exam": { "date": "260315", "course": "sf1624" },
+  "period": { "label": "P6", "terms": ["ht"] } }
 ```
+
+`period` is where the study life *is*, absolutely (§19.5) — the label today falls in, counted from the programme's start. It is `null` wherever no single programme is in scope, because the count of study years has no answer across two degrees; that is the same reason the screen folds one programme at a time (§19.4), read here as the count-versus-null discipline rather than as a zero.
 
 Each field is a fold, and each obeys the count-versus-null discipline (§12): a core off `PATH` yields `null`, never `0` — an absent Fasti is not a GPA of zero, and no graded course yet is a `gpa` of `null`. Picking one figure out of that object is the caller's, as with any tool declaring no read flags of its own (§8.7). Studium reports its crate and format versions like any app, so `pan doctor` sees it (§5.5, §15.5), and nothing consumes it in turn — no arrow points at a lens (§4). It is a lens like the other two, distinguished only by the domain it folds and the one figure that gives it its name.

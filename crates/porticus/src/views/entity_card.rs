@@ -19,12 +19,14 @@ use crate::{Handled, Nav, Theme};
 
 /// A `core:slug` ref (§5.4), rendered as a chip.
 ///
-/// **Display-only in v1.** Porticus resolves the reference through *Pantheon* for a
-/// legible label — `album:alex (csa)` — because the hub resolves and no core reads
-/// another (I5). Following a chip is not offered yet, and a **cross-core** chip never
-/// could be: the running instrument links only its own core, so it cannot render
-/// another core's card in place. You open `album:mara` by leaving to `alb` (I4), never
-/// by a hop inside `fas`.
+/// **Followable within one core** (G5, P§3). `h`/`l` move between chips and `f` follows
+/// the focused one: Porticus resolves the token, and where it names *this* instrument's
+/// own core it pins that record and takes the tree to its node.
+///
+/// A **cross-core** chip never could be followed: the running instrument links only its
+/// own core, so it cannot render another core's card in place. You open `album:mara` by
+/// leaving to `alb` (I4, I5), never by a hop inside `fas` — and pressing `f` on one says
+/// exactly that rather than doing nothing.
 pub struct Chip {
     pub label: String,
     pub reference: String,
@@ -63,6 +65,13 @@ pub struct EntityCard<F> {
     pinned: Option<RecordRef>,
     actions: Vec<Action>,
     empty: &'static str,
+    /// Which ref chip `f` would follow. A cursor over a list the *fold* produces, so it
+    /// is clamped against the live chips each frame rather than trusted (I1); a card that
+    /// re-folds with fewer refs must not point past them.
+    chip: usize,
+    /// The chips the last frame drew, kept only so `focused_ref` can answer between
+    /// frames — the addresses, never the records (I1).
+    chip_refs: Vec<String>,
 }
 
 impl<F> EntityCard<F>
@@ -81,6 +90,8 @@ where
             pinned: None,
             actions: Vec::new(),
             empty: "pick a record",
+            chip: 0,
+            chip_refs: Vec::new(),
         }
     }
 
@@ -119,8 +130,33 @@ where
         None
     }
 
-    fn navigate(&mut self, _nav: Nav) -> Handled {
-        Handled::No
+    fn nav_keys(&self) -> &[(char, &'static str)] {
+        // `h`/`l` are Porticus's own motion and reach a content-focused view without
+        // being declared; only the follow is this view's to name (P§5).
+        &[]
+    }
+
+    fn navigate(&mut self, nav: Nav) -> Handled {
+        // The chip strip is the card's one internal cursor, so `h`/`l` walk it while the
+        // card has content focus. Up/Down are left to Porticus — a card has no rows.
+        if self.chip_refs.len() < 2 {
+            return Handled::No;
+        }
+        match nav {
+            Nav::Right => {
+                self.chip = (self.chip + 1) % self.chip_refs.len();
+                Handled::Yes
+            }
+            Nav::Left => {
+                self.chip = (self.chip + self.chip_refs.len() - 1) % self.chip_refs.len();
+                Handled::Yes
+            }
+            _ => Handled::No,
+        }
+    }
+
+    fn focused_ref(&self) -> Option<String> {
+        self.chip_refs.get(self.chip).cloned()
     }
 
     fn is_detail(&self) -> bool {
@@ -129,8 +165,12 @@ where
 
     fn pin(&mut self, record: Option<RecordRef>) {
         // Nothing else to reset: a card holds no scroll of its own, and everything it
-        // draws is folded from the pin each frame (I1).
+        // draws is folded from the pin each frame (I1). The chip cursor is the one thing
+        // that is *about the pin* rather than about the record, so it starts over: a
+        // followed chip lands on the new card's first ref, not the old card's third.
         self.pinned = record;
+        self.chip = 0;
+        self.chip_refs.clear();
     }
 
     fn empty_line(&self) -> &'static str {
@@ -138,6 +178,7 @@ where
     }
 
     fn draw(&mut self, node: &Code, area: Rect, buf: &mut Buffer, theme: Theme) {
+        self.chip_refs.clear();
         let Some(card) = (self.fold)(node, self.pinned.as_ref()) else {
             let middle = Rect {
                 y: area.y + area.height / 2,
@@ -170,10 +211,21 @@ where
         }
 
         if !card.chips.is_empty() {
+            // The strip is the cursor's list, so it is recorded as it is drawn — one
+            // fold, read two ways, never a second walk of the record (I1).
+            self.chip_refs = card.chips.iter().map(|c| c.reference.clone()).collect();
+            self.chip = self.chip.min(self.chip_refs.len() - 1);
             lines.push(Line::from(String::new()));
             let mut spans = Vec::new();
-            for chip in &card.chips {
-                spans.push(Span::styled(format!(" {} ", chip.label), theme.focus()));
+            for (index, chip) in card.chips.iter().enumerate() {
+                // The focused chip carries the accent, which P§8 reserves for the name
+                // and the focus — a chip cursor is a focus.
+                let style = if index == self.chip {
+                    theme.name()
+                } else {
+                    theme.focus()
+                };
+                spans.push(Span::styled(format!(" {} ", chip.label), style));
                 spans.push(Span::styled(" ", theme.text()));
             }
             lines.push(Line::from(spans));

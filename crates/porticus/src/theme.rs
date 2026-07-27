@@ -9,16 +9,21 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::ident::Ident;
 
+// The classical pass (C5): a measured warm/legibility lift over the same ink-on-vellum
+// model — deeper ink, a warmer vellum that reads brighter, a secondary that no longer
+// sinks into the ground, and an inscribed rule with a touch more presence. Values only;
+// the accent's restraint (name + focus alone, P§8) is unchanged.
+
 /// Warm near-black — the ink.
-pub const GROUND: Color = Color::Rgb(0x14, 0x11, 0x0C);
-/// Bone / parchment — the reading colour.
-pub const TEXT: Color = Color::Rgb(0xCF, 0xC7, 0xB8);
-/// Muted taupe — empty nodes, secondary text.
-pub const DIM: Color = Color::Rgb(0x6B, 0x65, 0x58);
-/// Box borders, the calendar grid.
-pub const CHROME: Color = Color::Rgb(0x3A, 0x36, 0x2E);
+pub const GROUND: Color = Color::Rgb(0x16, 0x12, 0x0B);
+/// Bone / vellum — the reading colour.
+pub const TEXT: Color = Color::Rgb(0xD8, 0xCF, 0xBC);
+/// Muted taupe — empty nodes, secondary text; lifted just clear of the ground.
+pub const DIM: Color = Color::Rgb(0x7A, 0x72, 0x63);
+/// Box borders, the calendar grid — an inscribed rule, present but held back.
+pub const CHROME: Color = Color::Rgb(0x4A, 0x44, 0x37);
 /// The selection block behind a focused row.
-pub const FOCUS_BG: Color = Color::Rgb(0x2A, 0x26, 0x20);
+pub const FOCUS_BG: Color = Color::Rgb(0x33, 0x2D, 0x22);
 
 /// The per-sphere tree colours — a *second* shared set, one colour per top-level
 /// sphere, so a node reads the same in every instrument (I3).
@@ -29,12 +34,12 @@ pub const FOCUS_BG: Color = Color::Rgb(0x2A, 0x26, 0x20);
 /// cycling if a tree has more tops than colours. Stable, name-independent, identical
 /// everywhere — and a tree of any shape gets an answer.
 const SPHERES: &[Color] = &[
-    Color::Rgb(0xC2, 0x8A, 0x5E), // amber
-    Color::Rgb(0x6F, 0x9E, 0x8A), // sage
-    Color::Rgb(0x8A, 0x8F, 0xC0), // periwinkle
-    Color::Rgb(0xBC, 0x7F, 0x8E), // rose
-    Color::Rgb(0x9A, 0xA8, 0x62), // olive
-    Color::Rgb(0x7E, 0x9C, 0xB8), // slate blue
+    Color::Rgb(0xCE, 0x95, 0x60), // amber
+    Color::Rgb(0x74, 0xA8, 0x8E), // sage
+    Color::Rgb(0x90, 0x96, 0xCC), // periwinkle
+    Color::Rgb(0xC9, 0x85, 0x94), // rose
+    Color::Rgb(0xA6, 0xB3, 0x68), // olive
+    Color::Rgb(0x86, 0xA6, 0xC4), // slate blue
 ];
 
 /// The palette plus this instrument's accent. Held by value and passed to a view each

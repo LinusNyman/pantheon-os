@@ -47,15 +47,41 @@ impl Scale {
     }
 }
 
-/// A parsed `[code]_curriculum.toml`: the scales a grade is weighed against (§19.3).
+/// One period — a subspan of a term, anchored year-lessly (§19.5).
 ///
-/// The academic calendar (`terms`/`periods`, §19.5) is declared here too; this MVP folds
-/// the GPA and leaves the period-label derivation to a later pass, so only the scales are
-/// read for now.
+/// `start`/`end` are `MMDD`: the anchors say *where in a year* a period sits, and the
+/// enrolment span supplies which year. That is what makes one declaration serve a whole
+/// programme, and why a period is derived from a span's interval rather than stored on it
+/// (I1).
+#[derive(Clone, Debug)]
+pub struct Period {
+    /// The period's index **within its year** — the `n` of §19.5's absolute formula.
+    pub n: u32,
+    pub slug: String,
+    pub term: String,
+    pub start: String,
+    pub end: String,
+}
+
+/// One term — a semester, named and holding its periods (§19.5).
+#[derive(Clone, Debug)]
+pub struct Term {
+    pub slug: String,
+    pub periods: Vec<String>,
+}
+
+/// A parsed `[code]_curriculum.toml`: the scales a grade is weighed against (§19.3) and
+/// the academic calendar a placement is read from (§19.5).
 #[derive(Clone, Debug, Default)]
 pub struct Curriculum {
     default_scale: Option<String>,
     scales: HashMap<String, Scale>,
+    /// How many periods a study year holds — the multiplier in §19.5's absolute label.
+    /// Absent where the file declares none, and then no absolute label can be derived:
+    /// the honest dash, never a guessed count.
+    periods_per_year: Option<u32>,
+    periods: Vec<Period>,
+    terms: Vec<Term>,
 }
 
 impl Curriculum {
@@ -97,8 +123,98 @@ impl Curriculum {
         Some(Curriculum {
             default_scale,
             scales,
+            periods_per_year: doc
+                .get("periods_per_year")
+                .and_then(toml_edit::Item::as_integer)
+                .and_then(|n| u32::try_from(n).ok()),
+            periods: parse_periods(&doc),
+            terms: parse_terms(&doc),
         })
     }
+
+    /// The declared calendar (§19.5) — empty where the file declares none, which is the
+    /// honest absence: a placement simply cannot be read and the course shows a dash.
+    #[must_use]
+    pub fn periods(&self) -> &[Period] {
+        &self.periods
+    }
+
+    #[must_use]
+    pub fn periods_per_year(&self) -> Option<u32> {
+        self.periods_per_year
+    }
+
+    /// The term a period belongs to (§19.5), read from whichever declaration names it —
+    /// the period's own `term` key, else the term that lists it. Two ways to say the same
+    /// thing, because §19.5's example says it both ways.
+    #[must_use]
+    pub fn term_of(&self, period: &str) -> Option<&str> {
+        if let Some(p) = self.periods.iter().find(|p| p.slug == period) {
+            if !p.term.is_empty() {
+                return Some(&p.term);
+            }
+        }
+        self.terms
+            .iter()
+            .find(|t| t.periods.iter().any(|p| p == period))
+            .map(|t| t.slug.as_str())
+    }
+}
+
+fn parse_periods(doc: &toml_edit::DocumentMut) -> Vec<Period> {
+    let Some(array) = doc.get("periods").and_then(toml_edit::Item::as_array) else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|value| {
+            let table = value.as_inline_table()?;
+            let text = |key: &str| {
+                table
+                    .get(key)
+                    .and_then(toml_edit::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            };
+            let n = table
+                .get("n")
+                .and_then(toml_edit::Value::as_integer)
+                .and_then(|n| u32::try_from(n).ok())?;
+            let period = Period {
+                n,
+                slug: text("slug"),
+                term: text("term"),
+                start: text("start"),
+                end: text("end"),
+            };
+            // An anchorless period places nothing, so it is dropped rather than kept as a
+            // window every span overlaps.
+            (period.start.len() == 4 && period.end.len() == 4).then_some(period)
+        })
+        .collect()
+}
+
+fn parse_terms(doc: &toml_edit::DocumentMut) -> Vec<Term> {
+    let Some(array) = doc.get("terms").and_then(toml_edit::Item::as_array) else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|value| {
+            let table = value.as_inline_table()?;
+            let slug = table.get("slug")?.as_str()?.to_owned();
+            let periods = table
+                .get("periods")
+                .and_then(toml_edit::Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|p| p.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(Term { slug, periods })
+        })
+        .collect()
 }
 
 fn parse_scale(item: &toml_edit::Item) -> Option<Scale> {

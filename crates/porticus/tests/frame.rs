@@ -77,10 +77,7 @@ impl App for Fake {
 fn row(key: &str, home: &str) -> Row {
     Row {
         label: key.to_string(),
-        target: Target::Row(RecordRef {
-            home: Code::parse(home).unwrap(),
-            key: key.to_string(),
-        }),
+        target: Target::Row(RecordRef::new(Code::parse(home).unwrap(), key.to_string())),
         when: None,
     }
 }
@@ -149,6 +146,29 @@ fn a_passive_overlay_yields_to_a_navigation_key() {
     );
 }
 
+/// **The Title splash is a full-page block-caps banner, no tagline** (P§8, C7, C6).
+///
+/// It was a small three-line box showing the tracked word and a tagline; `+` now paints
+/// the name big in the embedded block face over the whole screen, and the tagline is gone
+/// — the name is the signature. The version line stays, so a build is still identifiable.
+#[test]
+fn the_title_is_a_full_page_banner_without_a_tagline() {
+    let root = fresh_root();
+    let text = porticus::drive(&mut Fake, &root, &porticus::keys("+"), 72, 16).unwrap();
+    assert!(
+        text.contains('█'),
+        "the name is drawn in the block face: {text}"
+    );
+    assert!(
+        !text.contains("intention"),
+        "the tagline no longer rides beside the name (C6): {text}"
+    );
+    assert!(
+        text.contains("format 1"),
+        "the splash still carries the version line: {text}"
+    );
+}
+
 /// Narrow: the rail stacks above the content and the frame still renders in full — the
 /// content is not squeezed to nothing (P§6). The split decision itself is unit-tested in
 /// `runtime`; this pins that the stacked path actually draws.
@@ -198,6 +218,99 @@ fn a_opens_the_default_add_form() {
     );
 }
 
+/// A target names its core, so **one lens can act on several** (§12, P§7).
+///
+/// A row carries the core it was folded from; an add has no record yet, so the *view*
+/// declares it and Porticus stamps the [`Target::Node`] it builds — for `a` and for the
+/// pick-a-home modal's `A` alike. Without this a cross-core lens had to guess which
+/// binary a keystroke meant, which is what Speculum's re-read-every-core hack was.
+#[test]
+fn a_target_names_the_core_its_view_declared() {
+    /// Records what `on_action` was handed, so the test asserts the *target* rather
+    /// than a rendered string.
+    struct CrossCore {
+        seen: Option<(String, Option<String>)>,
+    }
+    impl App for CrossCore {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![
+                Box::new(
+                    TreeFile::of(|node: &Code| vec![people_row("mara", node.as_str())])
+                        .offering(&[Action::Add, Action::Remove])
+                        .called("people")
+                        .in_core("alb"),
+                ),
+                Box::new(
+                    TreeFile::of(|_: &Code| Vec::new())
+                        .offering(&[Action::Add])
+                        .called("documents")
+                        .in_core("tab"),
+                ),
+            ]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, action: Action, target: &Target) -> Option<Invocation> {
+            let core = match target {
+                Target::Row(record) => record.core.clone(),
+                Target::Node { core, .. } => core.clone(),
+            };
+            self.seen = Some((action.label().to_owned(), core));
+            None
+        }
+    }
+
+    let root = fresh_root();
+
+    // `a` on the people list: the add is Album's, because that view said so.
+    let mut app = CrossCore { seen: None };
+    porticus::drive(&mut app, &root, &porticus::keys("amara<enter>"), 72, 12).unwrap();
+    assert_eq!(
+        app.seen,
+        Some(("add".to_owned(), Some("alb".to_owned()))),
+        "the add target carries the view's core"
+    );
+
+    // The second view declares another — one lineup, two binaries (§12).
+    let mut app = CrossCore { seen: None };
+    porticus::drive(&mut app, &root, &porticus::keys("2anote<enter>"), 72, 12).unwrap();
+    assert_eq!(
+        app.seen,
+        Some(("add".to_owned(), Some("tab".to_owned()))),
+        "the second view's add reaches its own core"
+    );
+
+    // A **row** answers for itself: its core rode with it out of the fold, so a relay
+    // on an existing record never consults the view at all.
+    let mut app = CrossCore { seen: None };
+    porticus::drive(&mut app, &root, &porticus::keys("x"), 72, 12).unwrap();
+    assert_eq!(
+        app.seen,
+        Some(("remove".to_owned(), Some("map".to_owned()))),
+        "the row's own core wins over the view's"
+    );
+}
+
+/// A row whose core is not its view's — what a cross-core fold produces.
+fn people_row(key: &str, home: &str) -> Row {
+    Row {
+        label: key.to_string(),
+        target: Target::Row(RecordRef::in_core(
+            "map",
+            Code::parse(home).unwrap(),
+            key.to_string(),
+        )),
+        when: None,
+    }
+}
+
 /// `A` (quick add) opens the tree as a modal to pick a home (P§4) — replacing the old
 /// type-a-code line prompt — and its box is headed so.
 #[test]
@@ -228,6 +341,120 @@ fn quick_add_opens_the_tree_modal() {
         frame.contains("pick a node"),
         "the tree modal opened: {frame}"
     );
+}
+
+/// **A Full view's `a` opens the same modal**, because a Full view draws no rail (P§3)
+/// and so has no cursor to add at.
+///
+/// Before this, `a` on an Agenda, a Calendar, a Horizon or a Timeline built its target
+/// from the invisible tree cursor — the first node in the tree on a fresh launch — so the
+/// record landed at a home the hand never saw and was never shown. Fixed in Porticus
+/// rather than per view, so it holds for all twelve at once (P-II).
+#[test]
+fn a_full_views_add_picks_its_home_off_the_tree() {
+    struct FullAdder;
+    impl App for FullAdder {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(
+                Agenda::of(|| vec![row("buy_milk", "ac")]).offering(&[Action::Add]),
+            )]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let frame = porticus::drive(&mut FullAdder, &root, &porticus::keys("a"), 72, 14).unwrap();
+    assert!(
+        frame.contains("pick a node"),
+        "`a` on a Full view asks which home: {frame}"
+    );
+    // And taking a node hands off to the ordinary add form, so `a` still ends in one
+    // question about the record itself.
+    let frame =
+        porticus::drive(&mut FullAdder, &root, &porticus::keys("a<enter>"), 72, 14).unwrap();
+    assert!(frame.contains("name"), "the add form followed: {frame}");
+}
+
+/// The detour through the modal **keeps the date the view named** (P§4, P§7).
+///
+/// A Calendar's `a` is dated by its cell, and routing `a` through the pick-a-node modal
+/// would have thrown that away had `Picking::Home` not re-read `view_at` when the node is
+/// taken. So the cell still dates the add; only the home is now asked for out loud.
+#[test]
+fn a_picked_home_still_carries_the_views_date() {
+    use porticus::views::Calendar;
+
+    struct Dated {
+        seen: Option<Target>,
+    }
+    impl App for Dated {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(Calendar::of(Vec::new).offering(&[Action::Add]))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, target: &Target) -> Option<Invocation> {
+            self.seen = Some(target.clone());
+            None
+        }
+    }
+
+    let root = fresh_root();
+    let mut app = Dated { seen: None };
+    // `a`, take the node the modal opens on, then the form's name and submit.
+    porticus::drive(&mut app, &root, &porticus::keys("a<enter>x<enter>"), 72, 20).unwrap();
+    let Some(Target::Node { node, at, .. }) = app.seen else {
+        panic!("the add reached `on_action` with a node target");
+    };
+    assert_eq!(node.as_str(), "a", "the home is the one taken in the modal");
+    assert_eq!(
+        at.expect("the calendar cell still dates the add").len(),
+        6,
+        "a reading key is YYMMDD (§6.1)"
+    );
+}
+
+/// **Help lists the standard actions**, which it never did (P§4).
+///
+/// `?` showed the eleven Tier-1 chrome rows and stopped, so nothing on screen ever said
+/// that `a` adds or `d` marks done — the two functions written for this
+/// (`Action::label`, `keymap::key_for`) had no caller at all. The greying of an unoffered
+/// action is style, which `as_text` strips, so it is pinned by a unit test in `runtime`.
+#[test]
+fn help_names_the_standard_actions_beside_the_chrome_keys() {
+    let root = fresh_root();
+    let frame = porticus::drive(&mut Fake, &root, &porticus::keys("?"), 90, 16).unwrap();
+    // Tier 1 still there, unchanged.
+    assert!(frame.contains("switch view"), "{frame}");
+    // Tier 2 now beside it — the view's own (`d`, `e`) and the ones it leaves dark.
+    for label in [
+        "add",
+        "edit",
+        "done / toggle",
+        "remove",
+        "rename",
+        "move",
+        "quick add by code",
+    ] {
+        assert!(frame.contains(label), "help names {label}: {frame}");
+    }
 }
 
 /// A lineup must have a `[0]` to open on, and no more than nine views to switch
@@ -294,6 +521,171 @@ fn a_full_view_has_no_rail() {
         Agenda::of(Vec::new).layout(),
         Layout::Full,
         "an Agenda is a Full view (P§3)"
+    );
+}
+
+/// A tall list, labelled so its sort order is known: undated rows sort by label,
+/// ascending, so `task_00`…`task_19` render in order. A Full row-view, so `motion`
+/// drives the `state.row` branch rather than the rail.
+struct Long;
+impl App for Long {
+    fn ident(&self) -> Ident {
+        Fake.ident()
+    }
+    fn lineup(&mut self) -> Vec<Box<dyn View>> {
+        vec![Box::new(Agenda::of(|| {
+            (0..20)
+                .map(|i| row(&format!("task_{i:02}"), "ac"))
+                .collect()
+        }))]
+    }
+    fn count_at(&mut self, _node: &Code) -> usize {
+        0
+    }
+    fn writer(&self) -> Writer {
+        Writer::InProcess
+    }
+    fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+        None
+    }
+}
+
+/// **The cursor cannot scroll off the end of a list** (P§6, C1).
+///
+/// `motion`'s Down grew `state.row` unbounded; every reader (`draw_rows`,
+/// `current_target`) re-clamped, so the *visible* cursor looked pinned while the counter
+/// drifted past the end — and walking back up then moved nothing until the drift was
+/// spent. Clamped, the counter cannot exceed the last index, so over-scrolling and
+/// stepping all the way back returns exactly to the head; drifted, the extra Downs are
+/// dead presses the Ups must first undo, so the same key count lands short of the top.
+#[test]
+fn the_cursor_stops_at_the_last_row() {
+    let root = fresh_root();
+    // Content height is 8 (10 rows less header and status), so a 20-row list scrolls.
+    let downs = "<down>".repeat(25); // well past the 20th (last) row
+
+    // Over-scrolling down parks the window at the foot: the last row shows, the first has
+    // scrolled out — proving the viewport really is shorter than the list.
+    let bottom = porticus::drive(&mut Long, &root, &porticus::keys(&downs), 72, 10).unwrap();
+    assert!(
+        bottom.contains("task_19"),
+        "the last row sits in the over-scrolled window: {bottom}"
+    );
+    assert!(
+        !bottom.contains("task_00"),
+        "the list is genuinely scrolled — the first row is off-screen: {bottom}"
+    );
+
+    // 25 Downs then 19 Ups. Clamped, the counter tops out at 19, so 19 Ups return it to
+    // row 0 and `task_00` is back at the head. Drifted, the counter reached 25, so 19 Ups
+    // leave it at 6 — and `task_00` is still scrolled off. The window sits under scrolloff,
+    // so this reads the cursor by which rows are on screen, not by the old bottom-anchor.
+    let back = porticus::drive(
+        &mut Long,
+        &root,
+        &porticus::keys(&format!("{downs}{}", "<up>".repeat(19))),
+        72,
+        10,
+    )
+    .unwrap();
+    assert!(
+        back.contains("task_00"),
+        "stepping back the exact list length returns to the head — the counter was clamped, \
+         not left to drift past the end: {back}"
+    );
+}
+
+/// **Scrolling begins before the cursor reaches an edge** (P§6, C3).
+///
+/// The old viewport was bottom-anchored: `first = cursor - (height-1)`, so the list stayed
+/// top-pinned until the cursor hit the very last line, then scrolled one-per-step. Scrolloff
+/// centres the cursor through the body, so the window moves while rows are still visible
+/// *below* the cursor — the scroll starts before the edge, and on a tall pane the cursor
+/// rides the middle (the "start at the middle" the ask names).
+#[test]
+fn scrolling_keeps_the_cursor_off_the_edge() {
+    let root = fresh_root();
+    // Ten Downs on the 20-row list, content height 8: the cursor sits at row 10, centred,
+    // so the window is rows 6–13 — `task_13` shows *below* the cursor and `task_00` above
+    // has scrolled off. Bottom-anchored it would be rows 3–10 with the cursor on the last
+    // line and nothing beneath it, so `task_13` never drew.
+    let mid = porticus::drive(
+        &mut Long,
+        &root,
+        &porticus::keys(&"<down>".repeat(10)),
+        72,
+        10,
+    )
+    .unwrap();
+    assert!(
+        mid.contains("task_10") && mid.contains("task_13"),
+        "the cursor is mid-pane with rows still visible below it — the scroll began before \
+         the edge: {mid}"
+    );
+    assert!(
+        !mid.contains("task_00"),
+        "and the list scrolled to get there — the head is off-screen: {mid}"
+    );
+}
+
+/// **Search ranks the closest answer to the top** (P§6, C4).
+///
+/// The old filter kept matches in the list's own order, so a prefix hit could sit below a
+/// mid-word one and the "top answer while typing" never appeared. Ranking floats
+/// prefix > word-boundary > substring, so the nearest match surfaces first.
+#[test]
+fn search_ranks_the_closest_match_first() {
+    struct Searchable;
+    impl App for Searchable {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            // Undated rows sort by label, so unfiltered the order is buy_milk,
+            // call_the_dentist, milk_run. Search "milk" must reorder: milk_run (a prefix)
+            // above buy_milk (a word-boundary match), and drop call_the_dentist (no match).
+            vec![Box::new(Agenda::of(|| {
+                vec![
+                    row("buy_milk", "ac"),
+                    row("call_the_dentist", "ac"),
+                    row("milk_run", "ac"),
+                ]
+            }))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+
+    let root = fresh_root();
+    // Submit the search so its overlay closes and the ranked rows draw unobstructed.
+    let text = porticus::drive(
+        &mut Searchable,
+        &root,
+        &porticus::keys("/milk<enter>"),
+        72,
+        12,
+    )
+    .unwrap();
+    let milk_run = text.find("milk_run");
+    let buy_milk = text.find("buy_milk");
+    assert!(
+        milk_run.is_some() && buy_milk.is_some(),
+        "both matches are shown: {text}"
+    );
+    assert!(
+        milk_run < buy_milk,
+        "the prefix match `milk_run` ranks above the word-boundary match `buy_milk`: {text}"
+    );
+    assert!(
+        !text.contains("call_the_dentist"),
+        "a non-match is filtered out: {text}"
     );
 }
 
@@ -699,10 +1091,7 @@ fn enter_pins_a_row_into_the_detail_view() {
     );
 
     // Pinned, it folds that record.
-    lineup[1].pin(Some(RecordRef {
-        home: node.clone(),
-        key: "mara".into(),
-    }));
+    lineup[1].pin(Some(RecordRef::new(node.clone(), "mara")));
     let buffer = {
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 8)).unwrap();
         term.draw(|f| {
@@ -848,26 +1237,19 @@ fn every_relay_carries_the_root_it_is_drawing() {
     );
 }
 
-/// **The dim asks `any_at`; the badge asks `count_at`** (P§6).
+/// **The dim and the badge share one memoized fold per node** (P§6).
 ///
-/// The split is the point: an instrument whose count is costly overrides `any_at` to
-/// answer the dim without a full fold, so the badge stays exact where it shows and the
-/// dim stays cheap everywhere. The rail had been asking `count_at` for both, which made
-/// that override unreachable — a declared escape hatch that nothing could reach.
+/// The dim is `count_at > 0` and the badge is `count_at` — the *same* node-local fold,
+/// which the rail memoizes for the life of the frame. So a node the badge shows is folded
+/// once, not once for the dim and again for the count: that second fold, multiplied across
+/// every visible node, was the cost that made walking the tree slow.
 ///
-/// This asserts the cheap question is actually asked, and that `count_at` is spared
-/// where `any_at` already said no.
+/// This asserts every visible node is folded, and that **none is folded twice in a frame**.
 #[test]
-fn the_dim_asks_any_and_the_badge_asks_count() {
+fn the_dim_and_badge_share_one_fold_per_node() {
     use std::sync::{Arc, Mutex};
 
-    #[derive(Default)]
-    struct Asked {
-        any: Vec<String>,
-        count: Vec<String>,
-    }
-
-    struct Counting(Arc<Mutex<Asked>>);
+    struct Counting(Arc<Mutex<Vec<String>>>);
     impl App for Counting {
         fn ident(&self) -> Ident {
             Fake.ident()
@@ -876,13 +1258,9 @@ fn the_dim_asks_any_and_the_badge_asks_count() {
             vec![Box::new(TreeFile::of(|_: &Code| Vec::new()))]
         }
         fn count_at(&mut self, node: &Code) -> usize {
-            self.0.lock().unwrap().count.push(node.as_str().to_owned());
-            7
-        }
-        fn any_at(&mut self, node: &Code) -> bool {
-            self.0.lock().unwrap().any.push(node.as_str().to_owned());
-            // Only `ac` holds anything — so only `ac` may be counted.
-            node.as_str() == "ac"
+            self.0.lock().unwrap().push(node.as_str().to_owned());
+            // Only `ac` holds anything, so only its badge shows a number.
+            usize::from(node.as_str() == "ac") * 7
         }
         fn writer(&self) -> Writer {
             Writer::InProcess
@@ -893,22 +1271,25 @@ fn the_dim_asks_any_and_the_badge_asks_count() {
     }
 
     let root = fresh_root();
-    let asked = Arc::new(Mutex::new(Asked::default()));
+    let calls = Arc::new(Mutex::new(Vec::new()));
     let text = porticus::as_text(
-        &porticus::render_once(&mut Counting(Arc::clone(&asked)), &root, 72, 12).unwrap(),
+        &porticus::render_once(&mut Counting(Arc::clone(&calls)), &root, 72, 12).unwrap(),
     );
 
-    let asked = asked.lock().unwrap();
+    let calls = calls.lock().unwrap();
+    // Every visible node is folded — the dim needs the count to know whether to dim…
     assert!(
-        asked.any.iter().any(|c| c == "a"),
-        "every visible node is asked the cheap question: {:?}",
-        asked.any
+        calls.iter().any(|c| c == "a") && calls.iter().any(|c| c == "ac"),
+        "every visible node is folded once: {calls:?}"
     );
-    assert!(
-        asked.count.iter().all(|c| c == "ac"),
-        "`count_at` must be spared where `any_at` said no: {:?}",
-        asked.count
-    );
+    // …and none is folded twice: the badge of a held node reuses the dim's memoized fold.
+    let mut seen = std::collections::HashSet::new();
+    for code in calls.iter() {
+        assert!(
+            seen.insert(code.clone()),
+            "`{code}` was folded twice in one frame — the per-frame memo lapsed: {calls:?}"
+        );
+    }
     // And the badge that did show carries the exact count.
     assert!(text.contains("ac cura  7"), "{text}");
 }
@@ -1037,20 +1418,14 @@ fn a_timeline_bar_carries_its_own_home() {
                             label: "mvp_phase".into(),
                             from: "260101".into(),
                             to: Some("260630".into()),
-                            home: RecordRef {
-                                home: Code::parse("ac").unwrap(),
-                                key: "mvp_phase".into(),
-                            },
+                            home: RecordRef::new(Code::parse("ac").unwrap(), "mvp_phase"),
                         },
                         CardSpan {
                             label: "residence".into(),
                             from: "260201".into(),
                             // Open: drawn to the range's right edge (§8.4).
                             to: None,
-                            home: RecordRef {
-                                home: Code::parse("cs").unwrap(),
-                                key: "residence".into(),
-                            },
+                            home: RecordRef::new(Code::parse("cs").unwrap(), "residence"),
                         },
                     ]
                 })

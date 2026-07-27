@@ -25,12 +25,17 @@ pub struct Finding {
     /// The single legal correction, as the `pan` command that applies it — surfaced for
     /// a hand to review and run (§10.2). `Some` only where the fix is unambiguous (a name
     /// out of normal form has exactly one answer, §5.1); a finding with a genuine choice,
-    /// or none, carries `None`.
-    ///
-    /// This is **display only** for now: `pan validate` shows the command, but *applying*
-    /// it from the screen needs `pan`'s structural mutators (§10.1), which are still
-    /// stubbed. Genuine-choice candidates land with them.
+    /// or none, carries `None` and answers in [`candidates`](Finding::candidates)
+    /// instead.
     pub fix: Option<String>,
+    /// The **genuine choice**: several legal corrections, none of them the tools' to pick
+    /// (§10.2). A slug held at two nodes is fixed by giving *one* of them a fuller name,
+    /// and which one is the hand's call — so the spine enumerates the commands and stops
+    /// there. Empty where the finding has one answer, or none.
+    ///
+    /// Each entry is a whole `pan` command, so a screen can offer it without knowing what
+    /// shape produced it, and a hand can copy it out of the JSON and type it (I8).
+    pub candidates: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -69,6 +74,8 @@ pub enum FindingCode {
     DuplicateSlug,
     /// A typed token not in normal form (§5.1).
     NonNormalizedName,
+    /// A rule's `writes=` grant naming a node that is not in the tree (§9.2).
+    DeadHeaderCode,
 }
 
 impl FindingCode {
@@ -83,6 +90,7 @@ impl FindingCode {
             FindingCode::DanglingRef => "dangling_ref",
             FindingCode::DuplicateSlug => "duplicate_slug",
             FindingCode::NonNormalizedName => "non_normalized_name",
+            FindingCode::DeadHeaderCode => "dead_header_code",
         }
     }
 }
@@ -100,6 +108,9 @@ impl Finding {
         // render (§7.3); absent where there is no fix, so a clean finding is uncluttered.
         if let Some(fix) = &self.fix {
             value["fix"] = json!(fix);
+        }
+        if !self.candidates.is_empty() {
+            value["candidates"] = json!(self.candidates);
         }
         value
     }
@@ -125,6 +136,11 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
     // and it stays a warning. Every file holding the name is named, since the fix is
     // made at the source: give one of them a fuller name (§5.4, §18).
     for duplicate in &identifiers.duplicates {
+        // The genuine choice, enumerated once for the whole clash: one command per
+        // holder that could take the fuller name (§10.2). Every finding this clash
+        // raises carries the same list, because the choice is between the holders and
+        // not a property of the one you happen to be looking at.
+        let candidates = fuller_name_candidates(duplicate);
         for here in &duplicate.at {
             let others = duplicate
                 .at
@@ -142,9 +158,10 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
                      rather than guessing; a fuller name tells them apart (§5.4, §7.3)",
                     duplicate.reference.to_token()
                 ),
-                // A genuine choice — which record takes the fuller name is the hand's, so
-                // there is no single legal correction to offer (§10.2).
+                // No *single* legal correction: which record takes the fuller name is
+                // the hand's, so the choice is offered as candidates instead (§10.2).
                 fix: None,
+                candidates: candidates.clone(),
             });
         }
     }
@@ -172,9 +189,18 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
             ),
         }
     }
+    // The codes a rule's grant may legally name (§9.2). Gathered from the walk rather
+    // than checked one at a time, because a header names nodes anywhere in the tree.
+    let codes = live_codes(root)?;
+    let known = Known {
+        reg,
+        ids: &ids,
+        codes: &codes,
+    };
+
     check_collisions(&spheres, root, &mut findings);
     for (nn, path) in &spheres {
-        walk_node(root, &nn.code, &nn.label, path, reg, &ids, &mut findings)?;
+        walk_node(root, &nn.code, &nn.label, path, &known, &mut findings)?;
     }
 
     findings.sort_by(|a, b| {
@@ -184,13 +210,44 @@ pub fn validate(root: &Path, reg: &CoreRegistry) -> Result<Vec<Finding>> {
     Ok(findings)
 }
 
+/// What the whole tree already answered, carried down the walk (§5.0).
+///
+/// One walk indexes the tree; every per-node check then asks *this* rather than the
+/// filesystem — a kind's owner, an identifier a ref may resolve to, a code a grant may
+/// name. Bundled because they travel together and always have.
+struct Known<'a> {
+    reg: &'a CoreRegistry,
+    /// The `(core, slug)` identities a reference can resolve to (§5.4).
+    ids: &'a HashSet<(String, String)>,
+    /// Every node code in the tree — what a rule's grant is checked against (§9.2).
+    codes: &'a HashSet<String>,
+}
+
+/// Every node code in the tree (§9.2).
+fn live_codes(root: &Path) -> Result<HashSet<String>> {
+    fn collect(node: &crate::tree::Node, out: &mut HashSet<String>) {
+        out.insert(node.code.as_str().to_owned());
+        for child in &node.children {
+            collect(child, out);
+        }
+    }
+    let tops = match crate::tree::build_tree(root, None)? {
+        crate::tree::TreeRoot::Forest(nodes) => nodes,
+        crate::tree::TreeRoot::Subtree(node) => vec![node],
+    };
+    let mut out = HashSet::new();
+    for node in &tops {
+        collect(node, &mut out);
+    }
+    Ok(out)
+}
+
 fn walk_node(
     root: &Path,
     node_code: &Code,
     node_label: &str,
     node_path: &Path,
-    reg: &CoreRegistry,
-    ids: &HashSet<(String, String)>,
+    known: &Known<'_>,
     findings: &mut Vec<Finding>,
 ) -> Result<()> {
     if !is_normalized(node_label) {
@@ -220,7 +277,11 @@ fn walk_node(
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             let class = classify(&name, false, node_code);
-            check_record(root, &class, &entry.path(), reg, ids, findings);
+            if matches!(class, FileClass::Rule { .. }) {
+                check_rule_grant(root, &entry.path(), known.codes, findings);
+                continue;
+            }
+            check_record(root, &class, &entry.path(), known, findings);
         }
     }
 
@@ -260,17 +321,54 @@ fn walk_node(
 
     check_collisions(&children, root, findings);
     for (nn, path) in &children {
-        walk_node(root, &nn.code, &nn.label, path, reg, ids, findings)?;
+        walk_node(root, &nn.code, &nn.label, path, known, findings)?;
     }
     Ok(())
+}
+
+/// A rule's `writes=` grant naming a node that is not there (§9.2, §10.2).
+///
+/// **Dead, not merely stale.** A grant is the whole guard on what a rule may write
+/// (§9.5), so one pointing at a code no node carries authorizes nothing and will go on
+/// authorizing nothing silently — the rule proposes and every proposal is refused, with
+/// no error anywhere to read. `pan rename` cascades a grant it moves; this catches the
+/// one nothing moved, a code hand-typed wrong or a node removed underneath.
+///
+/// A **warning**: the tree is consistent, a rule's declaration is not, and a rule failing
+/// closed is the safe direction (§9.2). An entry that will not parse is Auspex's to
+/// report — it reads the header to run it and says so per rule — so this asks only about
+/// entries that parse and name a node.
+fn check_rule_grant(
+    root: &Path,
+    path: &Path,
+    codes: &HashSet<String>,
+    findings: &mut Vec<Finding>,
+) {
+    for entry in &crate::rule::read_header(path).writes {
+        let Some(home) = crate::rule::capability_home(entry) else {
+            continue;
+        };
+        if !codes.contains(home) {
+            push(
+                findings,
+                FindingCode::DeadHeaderCode,
+                Severity::Warning,
+                root,
+                path,
+                format!(
+                    "grant {entry:?} writes at {home:?}, which is no node in this tree — \
+                     the grant is the whole guard, so it authorizes nothing (§9.2, §9.5)"
+                ),
+            );
+        }
+    }
 }
 
 fn check_record(
     root: &Path,
     class: &FileClass,
     path: &Path,
-    reg: &CoreRegistry,
-    ids: &HashSet<(String, String)>,
+    known: &Known<'_>,
     findings: &mut Vec<Finding>,
 ) {
     let (kind, is_series) = match class {
@@ -299,7 +397,7 @@ fn check_record(
         | FileClass::NodeDir { .. } => return,
     };
 
-    if reg.core_of_kind(kind).is_none() {
+    if known.reg.core_of_kind(kind).is_none() {
         push(
             findings,
             FindingCode::KindOwnedByNoCore,
@@ -322,7 +420,7 @@ fn check_record(
         ),
         Ok(refs) => {
             for r in refs {
-                if !ids.contains(&(r.core.clone(), r.slug.clone())) {
+                if !known.ids.contains(&(r.core.clone(), r.slug.clone())) {
                     push(
                         findings,
                         FindingCode::DanglingRef,
@@ -413,6 +511,45 @@ fn check_collisions(siblings: &[(NodeName, PathBuf)], root: &Path, findings: &mu
     }
 }
 
+/// The commands that would end a cross-node slug clash, one per holder (§5.4, §10.2).
+///
+/// §5.4's remedy is *"give one of them a fuller name"*, and the fuller name here is the
+/// slug plus the node holding it — deterministic, already in normal form (§5.1, a code is
+/// lowercase alphanumeric), and legible as "the `alex` at `csa`". Which holder gets it is
+/// the choice, so every holder that *could* take it is listed and none is preferred.
+///
+/// Only an identity carried **in a filename** is offered: a partitioned entity's slug and
+/// a hand-named series' name are what `rename-pattern` rewrites (§10.1). An
+/// entity-as-node's slug is its *node's* definition (§5.2), so renaming it is
+/// `pan rename --def` — a change of node identity, not of a record's name — and it is
+/// deliberately not offered as a way to settle a clash between records.
+///
+/// The command is a scoped literal substitution, so it is exact for the clashing slug and
+/// would also touch a sibling slug at that node *containing* it. That is
+/// `rename-pattern`'s documented nature; the command is shown in full before it is run.
+fn fuller_name_candidates(duplicate: &crate::resolve::DuplicateIdentifier) -> Vec<String> {
+    let slug = &duplicate.reference.slug;
+    duplicate
+        .at
+        .iter()
+        .filter(|holder| {
+            let name = holder
+                .rel_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            matches!(
+                classify(&name, false, &holder.home),
+                FileClass::Partitioned { .. } | FileClass::NamedSeries { .. }
+            )
+        })
+        .map(|holder| {
+            let home = holder.home.as_str();
+            format!("pan rename-pattern {slug} {slug}_{home} {home}")
+        })
+        .collect()
+}
+
 fn push(
     findings: &mut Vec<Finding>,
     code: FindingCode,
@@ -441,5 +578,6 @@ fn push_fix(
         rel_path,
         msg: msg.into(),
         fix,
+        candidates: Vec::new(),
     });
 }

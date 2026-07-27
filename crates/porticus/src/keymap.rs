@@ -19,6 +19,8 @@ pub enum Chrome {
     Search,
     /// `.` — collapse the tree to nodes this instrument files at (P§6).
     RecordsOnly,
+    /// `f` — follow the reference the view's cursor is on, within this core (P§3, G5).
+    Follow,
     /// `1`–`9` — switch to view *n*, zero-indexed here.
     Switch(usize),
     /// `Tab` — cycle pane on a Rail view; inert on a Full view, which has one pane.
@@ -38,6 +40,7 @@ pub fn chrome(key: char) -> Option<Chrome> {
         '+' => Some(Chrome::Title),
         '/' => Some(Chrome::Search),
         '.' => Some(Chrome::RecordsOnly),
+        'f' => Some(Chrome::Follow),
         'q' => Some(Chrome::Quit),
         '1'..='9' => Some(Chrome::Switch(key as usize - '1' as usize)),
         _ => None,
@@ -85,6 +88,25 @@ pub fn key_for(action: Action) -> char {
     }
 }
 
+/// The Tier-2 actions in **binding order**, for Help (P§4).
+///
+/// Written here beside [`action`] and [`key_for`] rather than derived from `Action`'s
+/// declaration, so the order a hand reads is the order the keys are bound in and the two
+/// cannot drift. The list is what makes Help complete: an action the active view does not
+/// offer is still listed — greyed, since the key stays reserved suite-wide (P§5) — and a
+/// reservation a hand cannot see is one they will try to rebind.
+pub const TIER_2: &[Action] = &[
+    Action::Add,
+    Action::Edit,
+    Action::Done,
+    Action::Remove,
+    Action::Rename,
+    Action::Move,
+    Action::QuickAdd,
+    Action::DoneAll,
+    Action::RemoveAll,
+];
+
 /// Whether a key is claimed by Tier 1 or Tier 2.
 ///
 /// A Tier-3 key may collide with **neither** — a reserved key stays reserved even in a
@@ -102,6 +124,7 @@ pub const CHROME_HELP: &[(&str, &str)] = &[
     ("+", "title"),
     ("/", "search"),
     (".", "records-only tree"),
+    ("f", "follow ref"),
     ("1-9", "switch view"),
     ("Tab", "cycle pane"),
     ("←↑↓→ · hjkl", "navigate"),

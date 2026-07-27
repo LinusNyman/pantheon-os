@@ -107,7 +107,21 @@ impl App for FastiApp {
     }
 
     fn count_at(&mut self, node: &Code) -> usize {
-        spans(&self.root, Some(node)).len() + occurrences(&self.root, Some(node)).len()
+        // Spans and events filed **at** this node, not the subtree under it — folded
+        // node-local so the rail reads each node once, never a whole subtree per ancestor
+        // (P§6, I1). A span is one entity file, so its ref set is the count; an event is
+        // a series, counted by its raw lines — the same tally `occurrences` made per node.
+        let store = store(&self.root);
+        let spans = store
+            .find_entities_local(node, Some(Fasti::SPAN), None)
+            .map_or(0, |refs| refs.len());
+        let events = store
+            .find_series_local(node, Some(Fasti::EVENT), None)
+            .unwrap_or_default()
+            .iter()
+            .map(|sref| store.read_series(sref).map_or(0, |lines| lines.len()))
+            .sum::<usize>();
+        spans + events
     }
 
     fn writer(&self) -> Writer {
@@ -123,16 +137,16 @@ impl App for FastiApp {
             (Action::Add | Action::QuickAdd, Target::Node { node, .. }) => {
                 Some(Invocation::new("fas", ["add", "-H", node.as_str()]))
             }
-            (Action::Edit, Target::Row(RecordRef { home, key })) => {
+            (Action::Edit, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("fas", ["edit", "-H", home.as_str(), key]))
             }
-            (Action::Remove, Target::Row(RecordRef { home, key })) => {
+            (Action::Remove, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("fas", ["rm", "-H", home.as_str(), key]))
             }
-            (Action::Rename, Target::Row(RecordRef { home, key })) => {
+            (Action::Rename, Target::Row(RecordRef { home, key, .. })) => {
                 Some(Invocation::new("fas", ["rename", "-H", home.as_str(), key]))
             }
-            (Action::Move, Target::Row(RecordRef { home, key })) => Some(Invocation::new(
+            (Action::Move, Target::Row(RecordRef { home, key, .. })) => Some(Invocation::new(
                 "fas",
                 ["move", "-H", home.as_str(), key, "--to"],
             )),
@@ -248,10 +262,7 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
                 span.from,
                 span.to.as_deref().unwrap_or("")
             ),
-            target: Target::Row(RecordRef {
-                home: eref.home,
-                key: eref.slug,
-            }),
+            target: Target::Row(RecordRef::new(eref.home, eref.slug)),
             // A span is a period, not a dated item: it has no one date to sort by, and
             // claiming its `from` would file an open span among the day's occurrences.
             when: None,
@@ -264,10 +275,7 @@ fn rows_at(root: &std::path::Path, node: &Code) -> Vec<Row> {
                 let key = line.key.as_str().to_owned();
                 Row {
                     label: event_label(&sref, &line),
-                    target: Target::Row(RecordRef {
-                        home: sref.home.clone(),
-                        key: key.clone(),
-                    }),
+                    target: Target::Row(RecordRef::new(sref.home.clone(), key.clone())),
                     when: Some(key),
                 }
             }),
@@ -286,10 +294,7 @@ fn bars(root: &std::path::Path) -> Vec<CardSpan> {
             label: eref.slug.clone(),
             from: span.from,
             to: span.to,
-            home: RecordRef {
-                home: eref.home,
-                key: eref.slug,
-            },
+            home: RecordRef::new(eref.home, eref.slug),
         })
         .collect();
     // Earliest first, then by name — a stable order, so a refold does not shuffle bars
@@ -306,10 +311,7 @@ fn agenda(root: &std::path::Path) -> Vec<Row> {
             let key = line.key.as_str().to_owned();
             Row {
                 label: event_label(&sref, &line),
-                target: Target::Row(RecordRef {
-                    home: sref.home.clone(),
-                    key: key.clone(),
-                }),
+                target: Target::Row(RecordRef::new(sref.home.clone(), key.clone())),
                 when: Some(key),
             }
         })
@@ -365,10 +367,7 @@ fn card_at(root: &std::path::Path, node: &Code, pinned: Option<&RecordRef>) -> O
             label: eref.slug.clone(),
             from: span.from,
             to: span.to,
-            home: RecordRef {
-                home: eref.home.clone(),
-                key: eref.slug.clone(),
-            },
+            home: RecordRef::new(eref.home.clone(), eref.slug.clone()),
         }],
     })
 }
