@@ -120,6 +120,27 @@ struct Fields {
     note: Option<Option<String>>,
 }
 
+impl Fields {
+    /// The field flags a hand actually named — what `--data` refuses to share a record
+    /// with (§7.3). Envelope and addressing flags are not fields and are absent here.
+    fn named(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        for (given, flag) in [
+            (self.coordinates.is_some(), "--coordinates"),
+            (self.bounds.is_some(), "--bounds"),
+            (self.address.is_some(), "--address"),
+            (self.url.is_some(), "--url"),
+            (self.timezone.is_some(), "--timezone"),
+            (self.note.is_some(), "--note"),
+        ] {
+            if given {
+                out.push(flag);
+            }
+        }
+        out
+    }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// File a place — a location or a region (§8.2).
@@ -131,6 +152,9 @@ enum Cmd {
         tokens: Vec<String>,
         #[command(flatten)]
         fields: Fields,
+        /// The whole record as JSON, for what the flags cannot spell (§7.3).
+        #[arg(long = "data", value_name = "JSON")]
+        data: Option<String>,
         /// Attach a reference; repeatable (§5.4).
         #[arg(short = 'r', long = "ref", value_name = "REF")]
         refs: Vec<String>,
@@ -261,6 +285,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Add {
             tokens,
             fields,
+            data,
             refs,
             create,
             at,
@@ -278,7 +303,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
                      and its name is its key (§5.4, §7.1)",
                 ));
             }
-            cmd_add(cli, tokens, fields, refs)
+            cmd_add(cli, tokens, fields, data.as_deref(), refs)
         }
         Cmd::Edit { slug, fields, refs } => cmd_edit(cli, slug, fields, refs),
         Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
@@ -302,7 +327,13 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
 
 // ── the verbs ───────────────────────────────────────────────────────────────
 
-fn cmd_add(cli: &Cli, tokens: &[String], fields: &Fields, refs: &[String]) -> Result<Response> {
+fn cmd_add(
+    cli: &Cli,
+    tokens: &[String],
+    fields: &Fields,
+    data: Option<&str>,
+    refs: &[String],
+) -> Result<Response> {
     refuse_under_rule(cli, "add")?;
     let ctx = Ctx::open(cli)?;
     let kind = ctx.write_kind();
@@ -332,7 +363,14 @@ fn cmd_add(cli: &Cli, tokens: &[String], fields: &Fields, refs: &[String]) -> Re
         )));
     }
 
-    let record = build_record(fields, None)?;
+    // `--data` carries the whole record where the flags cannot spell it (§7.3).
+    let record = match data {
+        Some(json) => {
+            contract::refuse_data_with_fields(&fields.named())?;
+            contract::record_from_json::<Mappa>(json)?
+        }
+        None => build_record(fields, None)?,
+    };
     Mappa::validate(&record)?;
     let entity = Entity {
         refs: parse_refs(refs)?,

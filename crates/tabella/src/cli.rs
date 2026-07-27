@@ -104,6 +104,10 @@ enum Cmd {
     /// `add` creates *is* the document (§18).
     Add {
         tokens: Vec<String>,
+        /// The whole frontmatter as JSON, for what the flags cannot spell (§7.3).
+        /// The prose body stays the positional's — `--data` carries the record.
+        #[arg(long = "data", value_name = "JSON")]
+        data: Option<String>,
         /// The note-kind: a quote, a principle, a reflection, or any you define
         /// (§8.7). A frontmatter field, never a token.
         #[arg(long = "type", value_name = "T")]
@@ -287,6 +291,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
     match cmd {
         Cmd::Add {
             tokens,
+            data,
             r#type,
             tag,
             edit,
@@ -295,7 +300,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
             at,
         } => {
             refuse_shapeless_flags(refs, *create, at.as_deref())?;
-            cmd_add(cli, tokens, r#type.as_deref(), tag, *edit)
+            cmd_add(cli, tokens, data.as_deref(), r#type.as_deref(), tag, *edit)
         }
         Cmd::Edit {
             slug,
@@ -356,6 +361,7 @@ fn refuse_shapeless_flags(refs: &[String], create: bool, at: Option<&str>) -> Re
 fn cmd_add(
     cli: &Cli,
     tokens: &[String],
+    data: Option<&str>,
     r#type: Option<&str>,
     tags: &[String],
     open_editor: bool,
@@ -401,9 +407,25 @@ fn cmd_add(
         Some(held) => Some((held.clone(), ctx.store.read_document(held)?)),
         None => None,
     };
-    let frontmatter = Frontmatter {
-        r#type: r#type.map(ToOwned::to_owned),
-        tags: tags.to_vec(),
+    // `--data` carries the whole frontmatter where the flags cannot spell it (§7.3).
+    // The prose body is not part of the record — it stays the positional's, so a
+    // document ingested as JSON is still written with the text a hand gave it (§6.1).
+    let frontmatter = match data {
+        Some(json) => {
+            let mut named = Vec::new();
+            if r#type.is_some() {
+                named.push("--type");
+            }
+            if !tags.is_empty() {
+                named.push("--tag");
+            }
+            contract::refuse_data_with_fields(&named)?;
+            contract::record_from_json::<Tabella>(json)?
+        }
+        None => Frontmatter {
+            r#type: r#type.map(ToOwned::to_owned),
+            tags: tags.to_vec(),
+        },
     };
     Tabella::validate(&frontmatter)?;
     let document = Document {

@@ -133,6 +133,26 @@ struct Fields {
     note: Option<Option<String>>,
 }
 
+impl Fields {
+    /// The field flags a hand actually named — what `--data` refuses to share a record
+    /// with (§7.3). Envelope and addressing flags are not fields and are absent here:
+    /// `-a`, `--series` and `-c` say *which line*, never what is in it.
+    fn named(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        for (given, flag) in [
+            (self.from.is_some(), "--from"),
+            (self.to.is_some(), "--to"),
+            (self.until.is_some(), "--until"),
+            (self.note.is_some(), "--note"),
+        ] {
+            if given {
+                out.push(flag);
+            }
+        }
+        out
+    }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Place something on the timeline — a span, or an occurrence in an event series.
@@ -148,6 +168,11 @@ enum Cmd {
         tokens: Vec<String>,
         #[command(flatten)]
         fields: Fields,
+        /// The whole record as JSON, for what the flags cannot spell (§7.3). It must
+        /// read as the shape the write is already in — a `span` bounded by `--from`,
+        /// an `event` dated by `-a` — which `as_span`/`as_event` check (§5.2).
+        #[arg(long = "data", value_name = "JSON")]
+        data: Option<String>,
         /// Attach a reference; repeatable (§5.4). An event's span is one of these,
         /// never a field (§8.4, I9).
         #[arg(short = 'r', long = "ref", value_name = "REF")]
@@ -301,6 +326,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Add {
             tokens,
             fields,
+            data,
             refs,
             create,
             at,
@@ -309,6 +335,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
             cli,
             tokens,
             fields,
+            data.as_deref(),
             refs,
             *create,
             at.as_deref(),
@@ -509,6 +536,7 @@ fn cmd_add(
     cli: &Cli,
     tokens: &[String],
     fields: &Fields,
+    data: Option<&str>,
     refs: &[String],
     create: bool,
     at: Option<&str>,
@@ -516,9 +544,13 @@ fn cmd_add(
 ) -> Result<Response> {
     refuse_under_rule(cli, "add")?;
     let ctx = Ctx::open(cli)?;
+    // The form is still the flags' to name — `--from` bounds a span, `-a`/`--series`
+    // date an event — and `--data` then has to *be* that shape. Reusing `write_form`
+    // keeps one answer to "which shape is this write", and `as_span`/`as_event` say so
+    // in a sentence when the record disagrees (§5.2, §7.2).
     match write_form(ctx.filter_kind(), fields, create, at, series)? {
-        Form::Span => add_span(cli, &ctx, tokens, fields, refs),
-        Form::Event => add_event(cli, &ctx, tokens, fields, refs, create, at, series),
+        Form::Span => add_span(cli, &ctx, tokens, fields, data, refs),
+        Form::Event => add_event(cli, &ctx, tokens, fields, data, refs, create, at, series),
     }
 }
 
@@ -529,6 +561,7 @@ fn add_span(
     ctx: &Ctx,
     tokens: &[String],
     fields: &Fields,
+    data: Option<&str>,
     refs: &[String],
 ) -> Result<Response> {
     let target = contract::resolve_entity_target(
@@ -549,7 +582,15 @@ fn add_span(
     // the series half is asked here.
     refuse_series_holding(ctx, &target.home, &target.slug)?;
 
-    let span = build_span(fields, previous_span(ctx, &target)?.as_ref())?;
+    let span = match data {
+        Some(json) => {
+            contract::refuse_data_with_fields(&fields.named())?;
+            contract::record_from_json::<Fasti>(json)?
+                .as_span()?
+                .clone()
+        }
+        None => build_span(fields, previous_span(ctx, &target)?.as_ref())?,
+    };
     let record = FastiRecord::Span(span);
     Fasti::validate(&record)?;
     let entity = Entity {
@@ -607,6 +648,7 @@ fn add_event(
     ctx: &Ctx,
     tokens: &[String],
     fields: &Fields,
+    data: Option<&str>,
     refs: &[String],
     create: bool,
     at: Option<&str>,
@@ -634,12 +676,27 @@ fn add_event(
     };
 
     // `fas aof standups -c` mints the timeline empty (§7.3).
-    if create && target.values.is_empty() && fields.is_empty() && refs.is_empty() {
+    if create && target.values.is_empty() && fields.is_empty() && refs.is_empty() && data.is_none()
+    {
         return Ok(Response::Json(json!({ "created": series_identity(&sref) })));
     }
 
     let key = contract::key_from_at(at)?;
-    let record = FastiRecord::Event(build_event(fields, target.values.clone(), None));
+    let record = match data {
+        Some(json) => {
+            let mut named = fields.named();
+            if !target.values.is_empty() {
+                named.push("the words after the series name");
+            }
+            contract::refuse_data_with_fields(&named)?;
+            FastiRecord::Event(
+                contract::record_from_json::<Fasti>(json)?
+                    .as_event()?
+                    .clone(),
+            )
+        }
+        None => FastiRecord::Event(build_event(fields, target.values.clone(), None)),
+    };
     Fasti::validate(&record)?;
     let line = Line {
         key: key.clone(),

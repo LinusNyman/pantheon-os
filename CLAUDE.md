@@ -247,13 +247,13 @@ on first write — so a fixture placing a rule must `create_dir_all` it.
   `an_applied_write_does_not_wake_auspex_again` proves it with a fake `aus` on the child's PATH).
   It maps a proposal's **universal fields only** — name/key/series/refs, `--at now` for a date-keyed
   line — via `apply.rs`.
-- **The `data` wall is real and refused loudly (I5).** §9.3 shows proposals carrying a `data`
-  object, but **no core's CLI can ingest an arbitrary record** — every `add` builds from typed
-  positionals/flags, and Auspex links no core. So a `data`-bearing proposal is *refused, never
-  mis-stored*: `aus run` applies only what a hand could type. This is a genuine gap between §9.3's
-  proposal format and the cores, and closing it means giving cores a `--data`/JSON-record path
-  first (none exists). The `/series` grant slot's mint-licensing half waits on the same, since every
-  minting proposal (a reading) carries data and is refused before it gets there.
+- **The `data` wall is gone, and `add --data` is what replaced it** (X0; see the Wave 5 section
+  below). It was real for a long time — §9.3 showed proposals carrying `data` and no core's CLI
+  could ingest an arbitrary record, so `aus run` refused them rather than mis-storing. The cores
+  closed it, not Auspex: `data` now rides through as the core's own `add --data`, validated
+  against the core's schema. **Auspex still types only what a hand could type**, which is the rule
+  that never moved. `data` on a verb other than `add` is still refused, and the grant is untouched
+  — `writes=` governs *where*, `data` says only what is in the record.
 - **`sign` is `manual` unless `--trigger` is present, and that is honest** — §9.4 has a TUI-open
   spawn a *bare* `aus run`, indistinguishable from a hand's, so only a triggered run can claim
   `hook`. The `watch=` filter applies only when a trigger names a core; a bare run evaluates every
@@ -836,6 +836,54 @@ must not undo:
 - **Verified on a copy of the live tree before anything was recommended**: 158 dates across
   59 files, idempotent on re-run, still valid JSON, and read back through `pen`/`fas`/`ann`.
   Keep that order for the next format change — dry-run, copy, apply, read back.
+### Improvement phase — Wave 5 (X0: the `--data` ingest wall; IMPROVEMENT-PLAN.md)
+
+`add --data <json>` on all seven cores, plus the Auspex half. The reusable unlock every
+connector waits on (X1 Canvas, a bank feed, a calendar). What a later change must not undo:
+
+- **It is a flag on `add`, never a thirteenth verb** (§18). The twelve are frozen; a core's own
+  flags are the whole of its remaining vocabulary, and ingesting a record is the same act of
+  creation `add` already names. `edit --data` was deliberately **not** built: it would need
+  per-field merge semantics, which is a different design — and idempotent re-sync does not want
+  it, since a fresh `add` and an overwrite are the same verb.
+- **`--data` carries `data` alone.** The slug/key stays the positional's, the home `-H`'s, refs
+  `--ref`'s, a date key `--at`'s — **a record never carries its own home** (I3), so there is
+  nothing in there to override. A document's prose body likewise stays the positional's:
+  `--data` is Tabella's frontmatter, never its text.
+- **The unknown-key check is `record_from_json`'s own, and it is load-bearing.** Only the
+  two-shape cores carry `deny_unknown_fields` (they need it to discriminate their untagged
+  variants); on the other five **serde silently drops** a key the record has no field for, so
+  `--data '{"canvas_id":91}'` wrote an *empty* record at exit `0` — silent loss wearing the shape
+  of success, found by testing it rather than by reading the types. The keys are now checked
+  against the record's own `JsonSchema` (already a `Core` bound, already what `schema` publishes)
+  and the error names the fields that do exist. The check is **additive and top-level**: where
+  the schema names `properties` it refuses anything else, and where it does not — an untagged
+  enum publishes `anyOf` — it defers to serde, which for those two already denies. It never
+  admits what serde would refuse, only refuses more. **Reading a record off disk is untouched**;
+  whether a hand's extra key in a file should fail is a separate question (I6) and was not
+  answered here.
+- **`--data` beside a field flag is exit `2`, not a merge.** Two sources for one record; merging
+  invents a precedence rule a hand must remember (§18). Envelope and addressing flags are *not*
+  fields and stay legal — each core spells its own field set in a `Fields::named()`, which is
+  what the refusal lists. Where part of a record comes from **trailing positionals** (a Pensum
+  note, an Annales/Fasti `values`) those count as a field named twice, so the check runs *after*
+  target resolution in those cores.
+- **On a two-shape core the record names its own shape**, because the positional pattern that
+  usually tells them apart is gone. Rationes reads an `amount` as a balance and its absence as a
+  holding — the same discrimination the untagged enum makes on disk — so `--data` addresses
+  either with **one** token and a positional amount beside it is refused. Fasti keeps `write_form`
+  deciding (the flags name the shape, `-k` included) and then demands the record match it via the
+  **existing** `as_span`/`as_event` guards, which already say so in a sentence. Neither core
+  needed a new guard; both needed their record-building half split out (`add_holding_record`,
+  `add_balance_record`) so the typed and ingested paths converge.
+- **`if let` guards are unstable on MSRV 1.88** — a `match` arm cannot be `[slug] if let Some(j) =
+  data`. Rationes handles `--data` in an `if let` *before* its positional dispatch instead.
+- **Auspex's refusal is dropped, and the grant did not move.** `apply.rs` passes `--data` on
+  `add`; `data` on any other verb is still refused (loudly, per-rule). `writes=` governs *where*
+  a rule writes and `data` says only what is in the record, so nothing about the capability check
+  changed. The `/series` mint-licensing half is unblocked by the same edit.
+- **No snapshot churned, and that was checked rather than assumed.** The `help` snapshots list
+  verbs and kinds, not flags, and `schema` is unchanged — so all 171 held.
 
 ### Step 6's durable rules (the chrome)
 

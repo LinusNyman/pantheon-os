@@ -558,3 +558,119 @@ fn exit_codes() {
     }
     insta::assert_snapshot!("exit_codes", out);
 }
+
+// ── the ingest flag: a whole record, as JSON (§7.3) ──────────────────────────
+
+/// **`add --data` writes a record the flags could not have spelled** (§7.3).
+///
+/// Every core's `add` builds from typed positionals and flags, so a field a core's
+/// vocabulary does not name could not enter the tree at all — which is why Auspex
+/// refused a `data`-bearing proposal (§9.3) and why no importer could write through the
+/// contract. The flag is the one door for a whole record.
+///
+/// What it carries is `data` **alone**: the slug is still the positional's and the home
+/// still `-H`'s, because a record never holds its own home (I3).
+#[test]
+fn add_data_ingests_a_whole_record() {
+    let root = fresh_root();
+    let (code, value) = alb(
+        &root,
+        &[
+            "add",
+            "-H",
+            "csa",
+            "mara",
+            "--data",
+            r#"{"role":"colleague","closeness":"friend","away":[{"from":"20260101","to":"20260115"}]}"#,
+            "-y",
+        ],
+    );
+    assert_eq!(code, 0, "{value}");
+    assert_eq!(value["slug"], "mara", "the positional still names it");
+    assert_eq!(value["home"], "csa", "the home is still -H's (I3)");
+    assert_eq!(value["data"]["role"], "colleague");
+    assert_eq!(value["data"]["away"][0]["from"], "20260101");
+}
+
+/// **An unknown key is refused, not dropped** (§7.3).
+///
+/// Only the two-shape cores carry `deny_unknown_fields` — they need it to tell their
+/// variants apart — so on the other five serde would silently discard a key the record
+/// has no field for, and `--data '{"canvas_id":91}'` would write an *empty* record and
+/// exit `0`. For an importer that is silent loss, so the ingest path checks the keys
+/// against the record's own published schema (§7.2) and names the fields that exist.
+#[test]
+fn add_data_refuses_a_field_the_record_has_not() {
+    let root = fresh_root();
+    let (code, value) = alb(
+        &root,
+        &[
+            "add",
+            "-H",
+            "csa",
+            "mara",
+            "--data",
+            r#"{"canvas_id":91}"#,
+            "-y",
+        ],
+    );
+    assert_eq!(code, 3, "{value}");
+    let msg = value["error"]["msg"].as_str().unwrap_or_default();
+    assert!(msg.contains("canvas_id"), "{msg}");
+    assert!(
+        msg.contains("role"),
+        "it names the fields that do exist: {msg}"
+    );
+    let (code, _) = alb(&root, &["get", "mara"]);
+    assert_eq!(code, 4, "nothing was written");
+}
+
+/// **`--data` and a field flag together is a usage error** (§7.3).
+///
+/// Two sources for one record, and merging would invent a precedence rule a hand has to
+/// remember — the kind of hidden behaviour §18 keeps out. Envelope and addressing flags
+/// are *not* fields and stay legal beside it, which the second half asserts.
+#[test]
+fn add_data_refuses_a_field_flag_beside_it() {
+    let root = fresh_root();
+    let (code, value) = alb(
+        &root,
+        &[
+            "add",
+            "-H",
+            "csa",
+            "mara",
+            "--data",
+            r#"{"role":"colleague"}"#,
+            "--note",
+            "hi",
+            "-y",
+        ],
+    );
+    assert_eq!(code, 2, "{value}");
+    assert!(
+        value["error"]["msg"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("--note"),
+        "the refusal names the flag: {value}"
+    );
+
+    // …but `-r` is the envelope, not a field, so it rides along.
+    let (code, value) = alb(
+        &root,
+        &[
+            "add",
+            "-H",
+            "csa",
+            "mara",
+            "--data",
+            r#"{"role":"colleague"}"#,
+            "-r",
+            "album:john_appleseed",
+            "-y",
+        ],
+    );
+    assert_eq!(code, 0, "{value}");
+    assert_eq!(value["refs"][0], "album:john_appleseed");
+}

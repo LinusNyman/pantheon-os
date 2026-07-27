@@ -39,7 +39,7 @@ Every core binary exposes the same verbs. stdout is JSON when piped, a table on 
 
 | Verb | Emits | Purpose |
 |---|---|---|
-| `add --home CODE [--kind K] … [-c]` | the created record | create an entity or a document, or append a reading to an **existing** series (`-c` first mints the series, §7.3) |
+| `add --home CODE [--kind K] … [-c] [--data JSON]` | the created record | create an entity or a document, or append a reading to an **existing** series (`-c` first mints the series, §7.3); `--data` carries the whole record where the flags cannot spell it (below) |
 | `edit <key> …` | the updated record | change a record in place — an entity or document by slug, a series line by its key |
 | `rename <slug> <new>` | the renamed record | change a record's name; renames the file and cascades its refs (§5.4) |
 | `move <slug> --to CODE` | the moved record | re-home an entity or a document to another node |
@@ -121,6 +121,18 @@ Implicit for the common case:
 **What opens follows the shape** (§6.1). A **document** is opened in place — it already *is* the text (§8.7). An entity field or a series line opens a buffer holding **only that value**, normalized (§5.1) and folded back into the record on return: the JSON/JSONL record is machine-owned and is never handed to a hand raw (I6, §6.6).
 
 **The editor session is the confirm.** The editor form mints no plan token and needs no `-y` — there is no computed change to review until the human saves, and the session *is* the review (save commits, `:q!` does not). It is the one mutation that never prompts, for exactly the reason the prompt exists elsewhere: the hand is already looking at the thing it is changing. (`-y` is accepted and moot there, so the TUI's blanket relay-with-`-y` holds unchanged — P§7.) An `edit` **given** its value inline (`pen edit ecv reach_out_to_alex "text"`) is an ordinary mutation and confirms by the rule below. Nothing is locked across the session (§6.4): the lock is taken to read and again to write back, since a session runs for minutes and any hand may edit the file directly meanwhile regardless (I8, §5.5). An editor exiting non-zero writes nothing (exit `1`); text that comes back unchanged writes nothing (exit `0`); text that comes back invalid exits `3`.
+
+**A whole record, as JSON: `add --data`.** A core's `add` builds its record from typed positionals and flags, so a field a core's vocabulary does not spell **cannot enter the tree at all** — which is why Auspex refuses a `data`-bearing proposal outright (§9.3) and why an importer carrying more than a name and a field or two has no door. `--data` is that door, and it is deliberately **a flag on `add`, not a thirteenth verb** (§18): the twelve are frozen, and a core's own flags are the whole of its remaining vocabulary.
+
+It carries **`data` alone** — the record's own object. Everything outside `data` stays where it was: the slug or key is the positional's, the home `-H`'s or `$PWD`'s, refs `--ref`'s, a date key `--at`'s. **A record never carries its own home** (I3), so there is nothing in there for one to override. A **document**'s prose body likewise stays the positional's: `--data` is the frontmatter, never the text (§6.1).
+
+Three rules make it safe to point a machine at:
+
+- **A key the record has no field for is refused, never dropped.** The record's own published schema (§7.2) names its fields, and a key outside that set exits `3` naming both the key and the fields that exist. Silently discarding it would let `--data '{"canvas_id":91}'` write an empty record and exit `0`, which for an importer is a loss that looks like a success.
+- **`--data` beside a flag that names a field is a usage error** (exit `2`). Two sources for one record; merging would invent a precedence rule a hand has to remember, and §18 keeps that kind of hidden behaviour out. Envelope and addressing flags are not fields and stay legal beside it.
+- **It clears every check a typed write clears** — name normalization (§5.1), the within-node slug refusal (§5.4), the core's own `validate` (§7.1), the same envelope, the same confirm and plan token (below). It is a second way to *say* a record, never a second way to write one.
+
+On a **two-shape core** the record names its own shape, because the positional pattern that usually tells them apart is no longer available: Rationes reads an `amount` as a balance and its absence as a holding, and Fasti's write form is the flags' to name and the record's to match — the same discrimination the untagged enum already makes on disk (§5.2, §7.1).
 
 **Exit codes** (machines never parse prose): `0` ok · `1` runtime error · `2` usage error · `3` validation failure · `4` not found · `5` confirmation required · `6` write refused (write verb under `PANTHEON_RULE=1`, §9.3). Errors go to stderr, and their format follows the hand (I8) like every other output: down a pipe the `{"error":{"code":…,"msg":…}}` envelope, at a TTY a plain `error: <msg>` line. The exit code is the same either way. **The hand a failure follows is *stderr's*** — the stream it is written to, not stdout, which a caller may have redirected on its own. The two disagree in the ordinary case rather than an exotic one: `pan cd` is designed to be run inside `$(…)` (§5.5), so its stdout is always a pipe while a human stands at the terminal its stderr writes to. An explicit `-f` still governs both.
 

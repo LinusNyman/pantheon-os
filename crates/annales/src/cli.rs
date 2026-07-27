@@ -85,6 +85,9 @@ enum Cmd {
     /// `ann ecv weight 78.4` · `ann ecv 78.4` · `ann weight 78.4` · `ann 78.4`.
     Add {
         tokens: Vec<String>,
+        /// The whole record as JSON, for what the flags cannot spell (§7.3).
+        #[arg(long = "data", value_name = "JSON")]
+        data: Option<String>,
         /// Mint the series before writing the first reading (§7.3).
         #[arg(short = 'c', long = "create")]
         create: bool,
@@ -228,6 +231,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
     match cmd {
         Cmd::Add {
             tokens,
+            data,
             create,
             at,
             refs,
@@ -236,6 +240,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         } => cmd_add(
             cli,
             tokens,
+            data.as_deref(),
             *create,
             at.as_deref(),
             refs,
@@ -269,6 +274,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
 fn cmd_add(
     cli: &Cli,
     tokens: &[String],
+    data: Option<&str>,
     create: bool,
     at: Option<&str>,
     refs: &[String],
@@ -296,14 +302,30 @@ fn cmd_add(
     };
 
     // `ann ecv weight -c` mints the log empty (§7.3).
-    if create && target.values.is_empty() && note.is_none() && refs.is_empty() {
+    if create && target.values.is_empty() && note.is_none() && refs.is_empty() && data.is_none() {
         return Ok(Response::Json(json!({ "created": identity(&sref) })));
     }
 
     let key = contract::key_from_at(at)?;
-    let record = LogReading {
-        values: target.values.clone(),
-        note: note.map(str::to_string),
+    // `--data` carries the whole record where the flags cannot spell it (§7.3). A
+    // reading's values are the words after the series name, so those count as a field
+    // named twice just as `--note` does; the key is `--at`'s and stays the envelope's.
+    let record = match data {
+        Some(json) => {
+            let mut named = Vec::new();
+            if note.is_some() {
+                named.push("--note");
+            }
+            if !target.values.is_empty() {
+                named.push("the words after the series name");
+            }
+            contract::refuse_data_with_fields(&named)?;
+            contract::record_from_json::<Annales>(json)?
+        }
+        None => LogReading {
+            values: target.values.clone(),
+            note: note.map(str::to_string),
+        },
     };
     Annales::validate(&record)?;
     let line = Line {

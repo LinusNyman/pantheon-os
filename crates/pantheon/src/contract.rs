@@ -449,6 +449,92 @@ fn today() -> String {
     format!("{:04}{:02}{:02}", date.year(), date.month(), date.day())
 }
 
+// ── a whole record, ingested as JSON (§7.3, §8) ──────────────────────────────
+
+/// Parse `add --data <json>` into a core's own record type (§7.3).
+///
+/// **Why the flag exists.** Every core's `add` builds its record from typed positionals
+/// and flags, so a field a core's vocabulary does not spell **cannot enter the tree** —
+/// which is why Auspex refuses a `data`-bearing proposal (§9.3, §9.5) and why no
+/// importer carrying more than a name and a field or two could write through the
+/// contract at all. This is the one door for a whole record, and both of them use it.
+///
+/// **It is a flag on `add`, not a thirteenth verb** (§18): the twelve are frozen, and a
+/// core's own flags are its whole remaining vocabulary. So this ingests *`data` alone* —
+/// the record's own object. Everything outside `data` stays where it was: the slug or
+/// key comes from the positional, the home from `-H` or `$PWD`, refs from `--ref`, the
+/// key's date from `--at`. **A record never carries its own home** (I3), so there is
+/// nothing here for one to override.
+///
+/// **An unknown key is refused, and that check is this function's own.** Only the
+/// two-shape cores carry `deny_unknown_fields` — they need it to tell their variants
+/// apart — so on the other five serde would *silently drop* a key the record has no
+/// field for, and `--data '{"canvas_id":91}'` would write an empty record and exit `0`.
+/// For an importer that is the silent-loss shape all over again, so the keys are checked
+/// against the record's own `JsonSchema` (already a `Core` bound, and already what
+/// `schema` publishes, §7.2) before anything is built.
+///
+/// The check is deliberately **additive and top-level**: where the schema names its
+/// properties it refuses anything else; where it does not — an untagged enum publishes
+/// `anyOf`, not `properties` — it defers to serde, which for those two cores already
+/// denies. So it never admits what serde would refuse, only refuses more. Reading a
+/// record off disk is untouched: a hand's extra key in a file still loads (I6), and
+/// whether it should is a separate question from what an importer may send.
+///
+/// `C::validate` then runs as it does for a typed build, so a `--data` record clears
+/// every check a hand-typed one does.
+pub fn record_from_json<C: Core>(json: &str) -> Result<C::Record> {
+    let bad = |e: String| {
+        Error::validation(format!(
+            "--data is not a valid {} record: {e} (§7.3). It takes the record's own \
+             `data` object — its home, name, and refs are the file's and the flags' \
+             (I3, §7.3)",
+            C::NAME
+        ))
+    };
+    let value: Value = serde_json::from_str(json).map_err(|e| bad(e.to_string()))?;
+
+    if let Some(given) = value.as_object() {
+        let schema = schemars::schema_for!(C::Record);
+        if let Some(known) = schema.get("properties").and_then(Value::as_object) {
+            let unknown: Vec<&str> = given
+                .keys()
+                .filter(|k| !known.contains_key(*k))
+                .map(String::as_str)
+                .collect();
+            if !unknown.is_empty() {
+                let mut fields: Vec<&str> = known.keys().map(String::as_str).collect();
+                fields.sort_unstable();
+                return Err(bad(format!(
+                    "no such field {} — {} records take {}",
+                    unknown.join(", "),
+                    C::NAME,
+                    fields.join(", ")
+                )));
+            }
+        }
+    }
+    serde_json::from_value(value).map_err(|e| bad(e.to_string()))
+}
+
+/// Refuse `--data` beside a flag that names a field too (§7.3).
+///
+/// Two sources for one record is a usage error rather than a precedence puzzle: merging
+/// would invent a rule about which wins, and a rule a hand has to remember is the kind
+/// of hidden behaviour §18 keeps out. Envelope and addressing flags are *not* fields and
+/// stay legal beside `--data` — `--ref`, `--at`, `-c`, `-H`, and the positional that
+/// names the record.
+pub fn refuse_data_with_fields(named: &[&str]) -> Result<()> {
+    match named {
+        [] => Ok(()),
+        _ => Err(Error::usage(format!(
+            "--data carries the whole record, and {} names a field too — give one or the \
+             other (§7.3)",
+            named.join(", ")
+        ))),
+    }
+}
+
 // ── home and series are found, never invented (§7.3) ─────────────────────────
 
 /// A resolved write target: which series, at which node, and the positional values

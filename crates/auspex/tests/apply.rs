@@ -364,3 +364,67 @@ fn an_applied_write_does_not_wake_auspex_again() {
         "the applied `pen add` carried PANTHEON_NO_HOOKS=1, so it woke no `aus` (§9.4)"
     );
 }
+
+/// **A `data`-bearing proposal now applies** (§9.3, §9.5, §7.3).
+///
+/// §9.3 always showed proposals carrying `data`, and Auspex always refused them — not
+/// because a rule may not propose one, but because **no core's CLI could accept a whole
+/// record**, so the only honest answer was to refuse rather than mis-store. The ingest
+/// flag closed that gap, and this is the second consumer it was closed for: a rule may
+/// now propose what a hand can now type.
+///
+/// The grant is untouched by it. `writes=` governs *where* a rule may write; `data` says
+/// what is in the record. A proposal outside its grant is rejected exactly as before.
+#[test]
+fn a_data_bearing_proposal_is_applied_through_the_ingest_flag() {
+    let root = fresh_root();
+    rule(
+        &root,
+        "import",
+        "#!/bin/sh\n# auspex: writes=pensum@ac:add\ncat > /dev/null\n\
+         printf '{\"writes\":[{\"core\":\"pensum\",\"verb\":\"add\",\"home\":\"ac\",\
+         \"name\":\"Reach out to Alex\",\"data\":{\"note\":\"proposed with data\"}}]}\\n'\n",
+    );
+
+    let (code, report) = aus(&root, &["run"]);
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(find(&report, "import")["applied"][0], "pensum@ac:add");
+
+    let (code, list) = pen(&root, &["list", "-H", "ac", "--all"]);
+    assert_eq!(code, 0, "{list}");
+    assert_eq!(list[0]["key"], "reach_out_to_alex");
+    assert_eq!(
+        list[0]["data"]["note"], "proposed with data",
+        "the field the flags could not spell reached the record: {list}"
+    );
+
+    // And it stays idempotent: the same proposal on the same key is the core's own
+    // overwrite, never a second record (§9.5).
+    let (code, _) = aus(&root, &["run"]);
+    assert_eq!(code, 0);
+    assert_eq!(tasks_at_ac(&root).len(), 1);
+}
+
+/// **`data` on a verb that writes none is refused, and the batch with it** (§9.3).
+///
+/// The ingest flag is `add`'s alone — an `edit` would need per-field merge semantics,
+/// which is a different design (§7.2). A rule proposing `data` on anything else is ahead
+/// of the engine and is told so, rather than having the field silently dropped.
+#[test]
+fn data_on_a_verb_that_cannot_carry_it_is_refused() {
+    let root = fresh_root();
+    rule(
+        &root,
+        "overreach",
+        "#!/bin/sh\n# auspex: writes=pensum@ac:rm\ncat > /dev/null\n\
+         printf '{\"writes\":[{\"core\":\"pensum\",\"verb\":\"rm\",\"home\":\"ac\",\
+         \"key\":\"anything\",\"data\":{\"note\":\"x\"}}]}\\n'\n",
+    );
+
+    let (_, report) = aus(&root, &["run"]);
+    let errors = find(&report, "overreach")["errors"][0]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(errors.contains("only `add` writes"), "{report}");
+}
