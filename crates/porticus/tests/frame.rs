@@ -343,6 +343,120 @@ fn quick_add_opens_the_tree_modal() {
     );
 }
 
+/// **A Full view's `a` opens the same modal**, because a Full view draws no rail (P§3)
+/// and so has no cursor to add at.
+///
+/// Before this, `a` on an Agenda, a Calendar, a Horizon or a Timeline built its target
+/// from the invisible tree cursor — the first node in the tree on a fresh launch — so the
+/// record landed at a home the hand never saw and was never shown. Fixed in Porticus
+/// rather than per view, so it holds for all twelve at once (P-II).
+#[test]
+fn a_full_views_add_picks_its_home_off_the_tree() {
+    struct FullAdder;
+    impl App for FullAdder {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(
+                Agenda::of(|| vec![row("buy_milk", "ac")]).offering(&[Action::Add]),
+            )]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, _t: &Target) -> Option<Invocation> {
+            None
+        }
+    }
+    let root = fresh_root();
+    let frame = porticus::drive(&mut FullAdder, &root, &porticus::keys("a"), 72, 14).unwrap();
+    assert!(
+        frame.contains("pick a node"),
+        "`a` on a Full view asks which home: {frame}"
+    );
+    // And taking a node hands off to the ordinary add form, so `a` still ends in one
+    // question about the record itself.
+    let frame =
+        porticus::drive(&mut FullAdder, &root, &porticus::keys("a<enter>"), 72, 14).unwrap();
+    assert!(frame.contains("name"), "the add form followed: {frame}");
+}
+
+/// The detour through the modal **keeps the date the view named** (P§4, P§7).
+///
+/// A Calendar's `a` is dated by its cell, and routing `a` through the pick-a-node modal
+/// would have thrown that away had `Picking::Home` not re-read `view_at` when the node is
+/// taken. So the cell still dates the add; only the home is now asked for out loud.
+#[test]
+fn a_picked_home_still_carries_the_views_date() {
+    use porticus::views::Calendar;
+
+    struct Dated {
+        seen: Option<Target>,
+    }
+    impl App for Dated {
+        fn ident(&self) -> Ident {
+            Fake.ident()
+        }
+        fn lineup(&mut self) -> Vec<Box<dyn View>> {
+            vec![Box::new(Calendar::of(Vec::new).offering(&[Action::Add]))]
+        }
+        fn count_at(&mut self, _node: &Code) -> usize {
+            0
+        }
+        fn writer(&self) -> Writer {
+            Writer::InProcess
+        }
+        fn on_action(&mut self, _a: Action, target: &Target) -> Option<Invocation> {
+            self.seen = Some(target.clone());
+            None
+        }
+    }
+
+    let root = fresh_root();
+    let mut app = Dated { seen: None };
+    // `a`, take the node the modal opens on, then the form's name and submit.
+    porticus::drive(&mut app, &root, &porticus::keys("a<enter>x<enter>"), 72, 20).unwrap();
+    let Some(Target::Node { node, at, .. }) = app.seen else {
+        panic!("the add reached `on_action` with a node target");
+    };
+    assert_eq!(node.as_str(), "a", "the home is the one taken in the modal");
+    assert_eq!(
+        at.expect("the calendar cell still dates the add").len(),
+        6,
+        "a reading key is YYMMDD (§6.1)"
+    );
+}
+
+/// **Help lists the standard actions**, which it never did (P§4).
+///
+/// `?` showed the eleven Tier-1 chrome rows and stopped, so nothing on screen ever said
+/// that `a` adds or `d` marks done — the two functions written for this
+/// (`Action::label`, `keymap::key_for`) had no caller at all. The greying of an unoffered
+/// action is style, which `as_text` strips, so it is pinned by a unit test in `runtime`.
+#[test]
+fn help_names_the_standard_actions_beside_the_chrome_keys() {
+    let root = fresh_root();
+    let frame = porticus::drive(&mut Fake, &root, &porticus::keys("?"), 90, 16).unwrap();
+    // Tier 1 still there, unchanged.
+    assert!(frame.contains("switch view"), "{frame}");
+    // Tier 2 now beside it — the view's own (`d`, `e`) and the ones it leaves dark.
+    for label in [
+        "add",
+        "edit",
+        "done / toggle",
+        "remove",
+        "rename",
+        "move",
+        "quick add by code",
+    ] {
+        assert!(frame.contains(label), "help names {label}: {frame}");
+    }
+}
+
 /// A lineup must have a `[0]` to open on, and no more than nine views to switch
 /// between (P§3). Both are rejected at `run`, before a terminal is taken.
 #[test]

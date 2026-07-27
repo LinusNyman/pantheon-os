@@ -76,9 +76,24 @@ impl App for PensumApp {
                     ])
                     .empty("no todos here"),
             ),
+            // Every open task, wherever it is filed. It offers the same actions the
+            // records tab does — a row carries its own home (P§7), so `e`/`x`/`r`/`m`
+            // reach it the same way from either tab, and the gap between them was
+            // arbitrary. `a` was the one that mattered: this is the tab a hand sits on to
+            // see the whole list, and it was the one place `a` did nothing at all.
+            // Porticus routes it through the pick-a-node modal here, as it must on any
+            // Full view (P§4) — this list draws no rail, so there is no cursor to add at.
             Box::new(
                 Agenda::of(move || all_rows(&for_agenda))
-                    .offering(&[Action::Edit, Action::Done, Action::Remove])
+                    .offering(&[
+                        Action::Add,
+                        Action::Edit,
+                        Action::Done,
+                        Action::Remove,
+                        Action::Rename,
+                        Action::Move,
+                        Action::QuickAdd,
+                    ])
                     .empty("nothing open"),
             ),
             Box::new(Insights::of(move || panels(&for_insights))),

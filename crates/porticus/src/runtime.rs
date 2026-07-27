@@ -253,7 +253,16 @@ fn draw(
             }
             // The Title splash paints a full-page banner, not a small line box (P§8, C7).
             Overlay::Title => draw_title(frame, ident, theme, area),
-            other => draw_overlay(frame, other, theme, area),
+            // Help lists this view's offered actions (P§4), so the overlay is handed the
+            // set alongside it. Two shared borrows of `state`, which is why it is read
+            // here rather than copied out above the match.
+            other => draw_overlay(
+                frame,
+                other,
+                theme,
+                state.views[state.active].actions(),
+                area,
+            ),
         }
     }
 }
@@ -612,9 +621,22 @@ fn hint(state: &State) -> String {
         .join("   ")
 }
 
-fn draw_overlay(frame: &mut Frame, overlay: &Overlay, theme: Theme, area: Rect) {
+/// `offered` is the **active view's** action set — Help's right-hand column, and the only
+/// thing here that varies by view.
+fn draw_overlay(
+    frame: &mut Frame,
+    overlay: &Overlay,
+    theme: Theme,
+    offered: &[Action],
+    area: Rect,
+) {
+    // The box's own inner width, which Help needs to decide one column or two. The width
+    // is independent of the body — only the height below depends on how many lines it is.
+    let inner = OVERLAY_WIDTH
+        .min(area.width.saturating_sub(2))
+        .saturating_sub(2);
     let body: Vec<Line> = match overlay {
-        Overlay::Help => help_lines(theme),
+        Overlay::Help => help_lines(theme, offered, inner),
         Overlay::Search { buffer } => {
             vec![Line::from(Span::styled(format!("/{buffer}"), theme.text()))]
         }
@@ -685,7 +707,11 @@ fn draw_overlay(frame: &mut Frame, overlay: &Overlay, theme: Theme, area: Rect) 
         Overlay::Tree { .. } | Overlay::Title => Vec::new(),
     };
 
-    let box_area = centred(area, 72, u16::try_from(body.len() + 2).unwrap_or(8));
+    let box_area = centred(
+        area,
+        OVERLAY_WIDTH,
+        u16::try_from(body.len() + 2).unwrap_or(8),
+    );
     frame.render_widget(Clear, box_area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -723,17 +749,80 @@ fn form_lines(fields: &[(FieldSpec, String)], focus: usize, theme: Theme) -> Vec
         .collect()
 }
 
-/// Help is generated from the live keymap (P§4), so it cannot drift from the bindings.
-fn help_lines(theme: Theme) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    for (key, what) in keymap::CHROME_HELP {
-        lines.push(Line::from(vec![
+/// Help is generated from the live keymap (P§4), so it cannot drift from the bindings:
+/// **Tier 1 on the left, the active view's Tier 2 on the right.**
+///
+/// Tier 2 was missing entirely until now — `?` listed the chrome keys and nothing else, so
+/// nothing on screen ever said that `a` adds or `d` marks done. [`Action::label`] was
+/// written for exactly this ("the label Help shows") and had no caller;
+/// [`keymap::key_for`] had none either.
+///
+/// An action the view does not offer is listed **dim rather than omitted**: P§5 says its
+/// key is greyed out of Help, which is a different claim from absent — the reservation is
+/// suite-wide, so the key is not free for something else even on a view that ignores it.
+///
+/// Two columns where they fit, because eleven chrome rows plus nine action rows outrun a
+/// short terminal and [`draw_overlay`] clips its body rather than scrolling it. Below
+/// [`HELP_TWO_COLUMN`] they stack instead: a wrapped second column reads as garbage, and a
+/// list that clips at the bottom at least stays a list.
+fn help_lines(theme: Theme, offered: &[Action], width: u16) -> Vec<Line<'static>> {
+    let action_row = |i: usize| -> Option<Vec<Span<'static>>> {
+        let &action = keymap::TIER_2.get(i)?;
+        let (key_style, label_style) = if offered.contains(&action) {
+            (theme.name(), theme.text())
+        } else {
+            (theme.dim(), theme.dim())
+        };
+        Some(vec![
+            Span::styled(format!("{:<6}", keymap::key_for(action)), key_style),
+            Span::styled(action.label(), label_style),
+        ])
+    };
+    // `pad` holds the label field open so the right column lines up. Stacked, there is
+    // nothing to its right and the padding would run the line past a narrow box — where
+    // `Wrap` puts the blanks on a line of their own, which reads as a gap between rows.
+    let chrome_row = |i: usize, pad: bool| -> Option<Vec<Span<'static>>> {
+        let (key, what) = keymap::CHROME_HELP.get(i)?;
+        let label = if pad {
+            format!("{what:<20}")
+        } else {
+            (*what).to_owned()
+        };
+        Some(vec![
             Span::styled(format!("{key:<14}"), theme.name()),
-            Span::styled((*what).to_string(), theme.text()),
-        ]));
+            Span::styled(label, theme.text()),
+        ])
+    };
+
+    if width < HELP_TWO_COLUMN {
+        return (0..keymap::CHROME_HELP.len())
+            .filter_map(|i| chrome_row(i, false))
+            .chain((0..keymap::TIER_2.len()).filter_map(action_row))
+            .map(Line::from)
+            .collect();
     }
-    lines
+    let rows = keymap::CHROME_HELP.len().max(keymap::TIER_2.len());
+    (0..rows)
+        .map(|i| {
+            // A missing chrome row still holds the column open, so the right one stays
+            // aligned — only reachable if Tier 2 ever outgrows the chrome list.
+            let mut spans =
+                chrome_row(i, true).unwrap_or_else(|| vec![Span::raw(" ".repeat(HELP_GUTTER))]);
+            spans.extend(action_row(i).unwrap_or_default());
+            Line::from(spans)
+        })
+        .collect()
 }
+
+/// A line overlay's box width, before the terminal narrows it.
+const OVERLAY_WIDTH: u16 = 72;
+
+/// The inner width Help's two columns need: `14 + 20` for the chrome pair, `6 + 22` for
+/// the widest action pair (`done / toggle all here`).
+const HELP_TWO_COLUMN: u16 = 62;
+
+/// The width of Help's left column, as one blank run — the two padded fields above it.
+const HELP_GUTTER: usize = 34;
 
 fn centred(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width.saturating_sub(2));
@@ -1131,7 +1220,17 @@ fn begin(
     // `A` opens the tree as a modal to pick a home at any node (P§4), then hands off to
     // the same add form `a` opens — so a quick add differs only in how the home is
     // chosen. Its own rail leaves the browsing cursor untouched.
-    if action == Action::QuickAdd {
+    //
+    // **A Full view's `a` goes the same way**, because a Full view draws no rail (P§3) —
+    // its tree cursor is invisible, so `a`'s home was a node the hand could not see, which
+    // on a fresh launch is silently the first node in the tree. Atrium's agenda worked
+    // around this by offering `A` alone; done here it holds for every Full view at once
+    // (P-II) — Fasti's Calendar, Speculum's Horizon and Studium's dated lists were all
+    // writing to an unseen home. The date the view names survives the detour, since
+    // `Picking::Home` re-reads `view_at` when the node is taken.
+    if action == Action::QuickAdd
+        || (action == Action::Add && state.views[state.active].layout() == Layout::Full)
+    {
         state.overlays.push(Overlay::Tree {
             rail: Rail::new(&state.root)?,
             picking: Picking::Home,
@@ -2022,5 +2121,77 @@ mod tests {
             Constraint::Length(WIDE_RAIL)
         ));
         assert!(matches!(rail_cut(200).1[0], Constraint::Length(WIDE_RAIL)));
+    }
+
+    /// Help's Tier-2 column: **offered reads as a binding, unoffered as a reservation**
+    /// (P§4, P§5).
+    ///
+    /// Pinned here rather than in a frame test because `as_text` strips style, so the
+    /// greying — the whole distinction between "this key acts" and "this key is spoken
+    /// for" — is invisible to the rendered string.
+    fn a_theme() -> super::Theme {
+        super::Theme::of(&crate::Ident {
+            name: "pensum",
+            short: "pen",
+            tagline: "intention",
+            symbol: '♂',
+            accent: crate::ident::accent::MINIUM,
+        })
+    }
+
+    #[test]
+    fn help_greys_the_actions_the_view_does_not_offer() {
+        use super::{Action, help_lines, keymap};
+
+        let theme = a_theme();
+        // Wide enough for two columns, which is where the two styles sit side by side.
+        let lines = help_lines(theme, &[Action::Done], super::HELP_TWO_COLUMN);
+
+        // The Tier-2 key span is the third on a row (chrome key, chrome label, then it).
+        let key_style = |action: Action| {
+            let i = keymap::TIER_2
+                .iter()
+                .position(|a| *a == action)
+                .expect("every action is listed");
+            lines[i].spans[2].style
+        };
+        assert_eq!(
+            key_style(Action::Done),
+            theme.name(),
+            "the offered action is lit"
+        );
+        assert_eq!(
+            key_style(Action::Add),
+            theme.dim(),
+            "an unoffered one is greyed, not dropped"
+        );
+        // Every Tier-2 action gets a row, offered or not — the reservation is suite-wide.
+        assert!(lines.len() >= keymap::TIER_2.len());
+    }
+
+    /// Narrow, Help **stacks rather than wraps**.
+    ///
+    /// `draw_overlay` neither scrolls nor truncates, so a second column that does not fit
+    /// is broken across lines by `Wrap` and the two columns interleave — worse than a list
+    /// that runs off the bottom, which is what the chrome rows alone already did.
+    #[test]
+    fn narrow_help_stacks_its_two_columns() {
+        use super::{Action, HELP_TWO_COLUMN, help_lines, keymap};
+
+        let theme = a_theme();
+        let wide = help_lines(theme, &[Action::Add], HELP_TWO_COLUMN);
+        let narrow = help_lines(theme, &[Action::Add], HELP_TWO_COLUMN - 1);
+        assert_eq!(
+            wide.len(),
+            keymap::CHROME_HELP.len().max(keymap::TIER_2.len()),
+            "side by side, the taller column sets the row count"
+        );
+        assert_eq!(
+            narrow.len(),
+            keymap::CHROME_HELP.len() + keymap::TIER_2.len(),
+            "stacked, every row is its own line"
+        );
+        // And a stacked chrome label is unpadded, or the pad itself wraps to a blank line.
+        assert_eq!(narrow[0].spans[1].content.as_ref(), "help");
     }
 }

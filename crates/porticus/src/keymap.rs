@@ -88,6 +88,25 @@ pub fn key_for(action: Action) -> char {
     }
 }
 
+/// The Tier-2 actions in **binding order**, for Help (P§4).
+///
+/// Written here beside [`action`] and [`key_for`] rather than derived from `Action`'s
+/// declaration, so the order a hand reads is the order the keys are bound in and the two
+/// cannot drift. The list is what makes Help complete: an action the active view does not
+/// offer is still listed — greyed, since the key stays reserved suite-wide (P§5) — and a
+/// reservation a hand cannot see is one they will try to rebind.
+pub const TIER_2: &[Action] = &[
+    Action::Add,
+    Action::Edit,
+    Action::Done,
+    Action::Remove,
+    Action::Rename,
+    Action::Move,
+    Action::QuickAdd,
+    Action::DoneAll,
+    Action::RemoveAll,
+];
+
 /// Whether a key is claimed by Tier 1 or Tier 2.
 ///
 /// A Tier-3 key may collide with **neither** — a reserved key stays reserved even in a

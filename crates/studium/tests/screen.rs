@@ -497,12 +497,17 @@ fn the_rest_of_a_study_life(root: &Path) {
     // ── G3: log study time (§19.8) ───────────────────────────────────────────
     // `5` is the study tab; `a` opens **its own** form, not the app's grade form — a
     // lens's `a` means a different record on each tab.
-    let form = drive("5a");
+    //
+    // The `<enter>` before the form is the pick-a-node modal: a study tab is an Agenda, a
+    // Full view draws no rail, and Porticus therefore asks which home before opening the
+    // form rather than filing at a cursor the hand cannot see (P§4). Taking the node the
+    // modal opens on is the home this write used to land at silently.
+    let form = drive("5a<enter>");
     assert!(
         form.contains("hours") && !form.contains("credits"),
         "the study tab's `a` opens the study form, not the grade form: {form}"
     );
-    drive("5alectures<tab>2.5<tab>250610<tab>y<enter>");
+    drive("5a<enter>lectures<tab>2.5<tab>250610<tab>y<enter>");
     let logged = Command::new(bin_dir().join("ann"))
         .arg("-C")
         .arg(root)
@@ -519,7 +524,7 @@ fn the_rest_of_a_study_life(root: &Path) {
     // ── G3: place an exam (§19.8) ────────────────────────────────────────────
     // `4` is the deadlines tab. Its form is Fasti's: series, what, date, what it
     // concerns, and the explicit mint — five fields, none of them a grade's.
-    drive("4atentor<tab>mekanik tenta<tab>260315<tab>fasti:mekanik<tab>y<enter>");
+    drive("4a<enter>tentor<tab>mekanik tenta<tab>260315<tab>fasti:mekanik<tab>y<enter>");
     let placed = Command::new(bin_dir().join("fas"))
         .arg("-C")
         .arg(root)

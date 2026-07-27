@@ -90,12 +90,15 @@ impl App for Atrium {
                 )),
             ])),
             // The day's tasks, each row carrying its own home so the list spans nodes
-            // and each `d` relays to the right one (P§3, P§7). A Full view has no
-            // visible tree cursor, so a new task is added through `A`'s pick-a-home
-            // modal rather than `a`'s invisible one (P§4).
+            // and each `d` relays to the right one (P§3, P§7). A Full view has no visible
+            // tree cursor, so a new task is added through the pick-a-home modal rather
+            // than an invisible one — which is now Porticus's rule for *every* Full view
+            // rather than this view offering `A` alone (P§4), so `a` is offered too and
+            // both keys reach the same modal.
             Box::new(
                 Agenda::of(move || tasks(&for_agenda))
                     .offering(&[
+                        Action::Add,
                         Action::Done,
                         Action::Edit,
                         Action::Remove,

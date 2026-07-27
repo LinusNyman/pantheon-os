@@ -605,6 +605,36 @@ change must not undo:
   beyond `event`. What makes a sitting an exam is the reference to its enrolment, and a hand
   writes it — a lens inferring one would be deciding a core's vocabulary (I5).
 
+### Improvement phase — Wave 7 (`a` on a Full view · Help's Tier 2)
+
+Not a plan item — a user-testing report ("why can't I add todos in the Pensum TUI?"), and both
+halves turned out to be **`porticus` failing to implement P§4 rather than a design call**. One
+edit each, so all twelve moved (P-II).
+
+- **A `Full` view's `a` opens the node picker**, as P§4's Pick row always said ("a `Full`-view
+  add … for a write with no ambient node"). It did not: `target_for` handed `Action::Add` the
+  **rail cursor**, and a Full view draws no rail — so `a` filed at a node the hand could not
+  see, silently the tree's first node on a fresh launch. Fasti's Calendar, Speculum's Horizon
+  and Studium's two dated lists were all writing to an unseen home. Routed in `act()` for
+  every Full view at once; **the date survives the detour** because `Picking::Home` re-reads
+  `view_at` when the node is taken, which is what keeps a Calendar cell dating its own add.
+  A screen test that types `a` on a Full view now needs an `<enter>` to take the node.
+- **Help lists Tier 2**, which P§4 also always said ("chrome keys plus the current view's
+  own"). `help_lines` folded `CHROME_HELP` and stopped, so nothing on screen ever said that
+  `a` adds or `d` marks done — and `Action::label` ("the label Help shows") and
+  `keymap::key_for` had **no caller at all**, which is the tell. Now two columns where they
+  fit and stacked below `HELP_TWO_COLUMN`: the box neither scrolls nor truncates, so a
+  wrapped second column interleaves with the first. Stacked, the chrome label is **unpadded**
+  — the pad itself wraps to a blank line and reads as a gap between rows.
+- **An unoffered action is greyed, never dropped** (P§5). The reservation is suite-wide, and
+  one a hand cannot see is one they will try to rebind. `as_text` strips style, so the greying
+  is pinned by a unit test in `runtime`, not a frame test.
+- **Pensum's agenda offers what its records tab offers.** A row carries its own home (P§7), so
+  `e`/`x`/`r`/`m` always worked from either tab and the gap was arbitrary; `a` was the one that
+  mattered, since the agenda is the tab a hand sits on to see every open task and was the one
+  place `a` did nothing at all. Atrium's agenda gains `Add` for the same reason — its "offer
+  `A` alone" workaround is now handled centrally.
+
 ### Step 6's durable rules (the chrome)
 
 - **A view declares intent; Porticus runs the flow** (P-II). A view says which `Action`s it
