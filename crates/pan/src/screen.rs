@@ -247,6 +247,14 @@ impl View for TreeTab {
                 Span::styled(ann.keywords.join(", "), theme.text()),
             ]));
         }
+        // The node's own fields (§5.2), each on its own row under the typed four —
+        // rule 4's "fields, not nodes", which is only readable if it is shown.
+        for (key, value) in &ann.fields {
+            lines.push(Line::from(vec![
+                Span::styled(format!("{key:<12}"), theme.dim()),
+                Span::styled(value.clone(), theme.text()),
+            ]));
+        }
 
         // Which cores have files here (§10.1). Read off the **filenames** — a token
         // names its owning core, so this needs no core linked and none imported (I5,

@@ -175,3 +175,48 @@ fn a_verb_still_wins_over_a_code() {
         "`doctor` ran as a verb rather than being looked up as a code: {value}"
     );
 }
+
+/// **`merge` is a verb, so it wins over a node code** — the pre-pass must not insert the
+/// implicit `lookup` in front of it (§7.3, §5.5).
+///
+/// A verb only wins if [`with_lookup_verb`] knows it is one, and `pan`'s verb set is a
+/// hand-kept list. The tell that it was missed is the error: a code lookup fails at code
+/// parsing, a verb at the root it was given none of.
+#[test]
+fn merge_is_a_verb_and_wins_over_a_code() {
+    let (code, _, stderr) = pan(&["merge", "csa", "--into", "cso"]);
+    assert_eq!(code, 2, "no root named is a usage error (§6.2): {stderr}");
+    assert!(
+        stderr.contains("PANTHEON_ROOT") || stderr.contains("root"),
+        "`merge` ran as a verb rather than being looked up as a code: {stderr}"
+    );
+    // …and it is named on the surface a pipe gets, so a hand and an LLM find it (I8).
+    let (_, value, _) = pan(&[]);
+    let verbs = value["verbs"].as_array().cloned().unwrap_or_default();
+    assert!(verbs.iter().any(|v| v == "merge"), "{value}");
+}
+
+/// **`annotate` takes a key it has never heard of** and answers with it in `fields`
+/// (§5.2). The set was closed at four, which left placement rule 4 — "fields, not nodes" —
+/// with nowhere to record a field at all.
+#[test]
+fn annotate_takes_an_unknown_key_as_a_field() {
+    let root = std::env::temp_dir().join(format!("pan-grammar-fields-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let at = root.to_string_lossy().into_owned();
+
+    assert_eq!(
+        pan(&["-C", &at, "new", "root", "c", "contextus", "-y"]).0,
+        0
+    );
+    let (code, value, stderr) = pan(&["-C", &at, "annotate", "c", "--set", "warrant=negotium"]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(value["fields"]["warrant"], "negotium", "{value}");
+    // The typed four keep their own shapes beside it.
+    let (_, value, _) = pan(&["-C", &at, "annotate", "c", "--set", "deity=Mercurius"]);
+    assert_eq!(value["deity"], "Mercurius", "{value}");
+    assert_eq!(value["fields"]["warrant"], "negotium", "{value}");
+
+    let _ = std::fs::remove_dir_all(&root);
+}

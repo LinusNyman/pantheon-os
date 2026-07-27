@@ -3,6 +3,7 @@
 //! guards against acting on a stale review: it hashes the exact computed change, so
 //! anything moved underneath in between forces a fresh look (§7.3).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -26,6 +27,16 @@ pub enum Change {
         to: PathBuf,
     },
     Remove {
+        rel_path: PathBuf,
+    },
+    /// A directory the plan has already emptied, removed with `remove_dir` (§10.1).
+    ///
+    /// The twin of `Remove` that refuses to destroy a surprise: `Remove` recurses, which
+    /// is right for `rm` (the node is *proven* empty first) and wrong for `merge`, where
+    /// the source dir is empty only because this same plan just moved everything out of
+    /// it. Anything that appeared underneath in between must stop the removal, not be
+    /// swept up by it.
+    RemoveEmptyDir {
         rel_path: PathBuf,
     },
     RewriteRefs {
@@ -58,6 +69,9 @@ impl Change {
             }
             Change::Remove { rel_path } => {
                 json!({ "op": "remove", "path": rel_path.to_string_lossy() })
+            }
+            Change::RemoveEmptyDir { rel_path } => {
+                json!({ "op": "remove_empty_dir", "path": rel_path.to_string_lossy() })
             }
             Change::RewriteRefs {
                 rel_path, from, to, ..
@@ -116,16 +130,100 @@ impl Plan {
         })
     }
 
+    /// Refuse a plan that would destroy something already on disk (§5.4, §10.1).
+    ///
+    /// `std::fs::rename` **replaces** whatever sits at its destination, so a plan whose
+    /// `to` is occupied eats a file silently and still exits `0`. Every collision is
+    /// collected and named at once, so one dry-run answers for the whole plan rather
+    /// than failing on the first.
+    ///
+    /// It **simulates** rather than asking the disk directly, and that is the whole of
+    /// the work: a plan is a *sequence*, and a recode renames the branch's directory
+    /// first — so a later change's `to` names a path that does not exist yet, while the
+    /// file it would destroy sits under the old one. Each virtual path is therefore
+    /// mapped back through the renames already planned before the (unchanged) tree is
+    /// asked, and a path this plan has already vacated is not a collision.
+    ///
+    /// Also the pre-flight §10.1 wanted for its own sake: an occupied destination is
+    /// refused whether it holds a file or a directory, so a plan aborting halfway on
+    /// `ENOTEMPTY` — a partial apply, repaired by hand — never starts.
+    pub fn preflight(&self, root: &Path) -> Result<()> {
+        let mut renames: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut gone: HashSet<PathBuf> = HashSet::new();
+        let mut collisions: Vec<String> = Vec::new();
+
+        for change in &self.changes {
+            match change {
+                Change::Rename { from, to } => {
+                    let real_from = real_path(&renames, from);
+                    let real_to = real_path(&renames, to);
+                    if !gone.contains(&real_to) && occupied(&root.join(&real_to)) {
+                        // Named by where they sit *now*, not by their names in the plan:
+                        // a plan path is virtual (it may live under a rename this plan
+                        // has not made yet), and what a hand has to move is real.
+                        collisions.push(format!(
+                            "{} is in the way of {}",
+                            real_to.display(),
+                            real_from.display()
+                        ));
+                    }
+                    gone.insert(real_from);
+                    gone.remove(&real_to);
+                    renames.push((from.clone(), to.clone()));
+                }
+                Change::Remove { rel_path } | Change::RemoveEmptyDir { rel_path } => {
+                    gone.insert(real_path(&renames, rel_path));
+                }
+                // `create_dir_all` is idempotent; a rewrite edits a file in place.
+                Change::Mkdir { .. }
+                | Change::RewriteRefs { .. }
+                | Change::RewriteHeader { .. } => {}
+            }
+        }
+        if collisions.is_empty() {
+            return Ok(());
+        }
+        Err(Error::validation(format!(
+            "{} of this plan's renames would overwrite something already there, and \
+             nothing was applied — move what is in the way, then run it again (§5.4): {}",
+            collisions.len(),
+            collisions.join("; ")
+        )))
+    }
+
     /// Apply the plan against the tree root. Node mints are `create_dir`; a crash
     /// leaves a partial tree that `pan validate` reports and re-running completes.
     pub fn apply(&self, root: &Path) -> Result<()> {
+        // Nothing a plan did not name may be destroyed by it (§5.4).
+        self.preflight(root)?;
         for change in &self.changes {
             match change {
                 Change::Mkdir { rel_path, .. } => {
                     std::fs::create_dir_all(root.join(rel_path))?;
                 }
                 Change::Rename { from, to } => {
-                    std::fs::rename(root.join(from), root.join(to))?;
+                    let dest = root.join(to);
+                    // Asked again, a hair before the call that would replace it. The
+                    // pre-flight is a plan-time answer and the plan token does not close
+                    // the window it leaves: the token is checked against a freshly
+                    // *computed* plan, recomputed from the same tree, so a file created
+                    // in between is invisible to both. (An atomic no-clobber rename —
+                    // `renameat2(RENAME_NOREPLACE)`, `renamex_np(RENAME_EXCL)` — would
+                    // close it outright, at the cost of `libc` and `unsafe` in the spine
+                    // and a Windows arm beside them.)
+                    if occupied(&dest) {
+                        return Err(Error::validation(format!(
+                            "{} appeared at the destination since the plan was computed — \
+                             the rename would overwrite it, so it was not made (§5.4)",
+                            to.display()
+                        )));
+                    }
+                    std::fs::rename(root.join(from), dest)?;
+                }
+                Change::RemoveEmptyDir { rel_path } => {
+                    // `remove_dir`, never `remove_dir_all`: anything that arrived under
+                    // it since the plan was computed stops the removal (§5.4).
+                    std::fs::remove_dir(root.join(rel_path))?;
                 }
                 Change::Remove { rel_path } => {
                     let target = root.join(rel_path);
@@ -173,6 +271,29 @@ impl Plan {
             ))
         }
     }
+}
+
+/// Whether anything at all sits at `path`.
+///
+/// `symlink_metadata`, not [`Path::exists`]: a **dangling symlink** is a name a rename
+/// would replace just the same, and `exists` follows the link and answers `false`.
+fn occupied(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
+}
+
+/// Map a path in the plan's *virtual* tree back to where it lives on the unchanged
+/// tree, by undoing the renames planned before it — newest first, since a later rename
+/// may sit under an earlier one's target.
+fn real_path(renames: &[(PathBuf, PathBuf)], virt: &Path) -> PathBuf {
+    let mut out = virt.to_path_buf();
+    for (from, to) in renames.iter().rev() {
+        if out == *to {
+            out.clone_from(from);
+        } else if let Ok(rest) = out.strip_prefix(to) {
+            out = from.join(rest);
+        }
+    }
+    out
 }
 
 /// A command's result: emitted data, or a plan awaiting confirmation / dry-run.

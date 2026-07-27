@@ -9,9 +9,9 @@ use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
     Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
-    Severity, Shape, build_tree, normalize, plan_mv, plan_mv_file, plan_new, plan_rename,
-    plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm, resolve_all, resolve_code,
-    validate, with_record_lock,
+    Severity, Shape, build_tree, normalize, plan_merge, plan_mv, plan_mv_files, plan_new,
+    plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm, resolve_all,
+    resolve_code, validate, with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -183,8 +183,8 @@ fn mv_file_rehomes_a_misfiled_record() {
         r#"{"refs":[],"data":{}}"#,
     );
 
-    let misfiled = std::path::Path::new("c_contextus/c_s_societas/cs__/csa__person__mara.json");
-    let (plan, _) = plan_mv_file(&root, misfiled, &Code::parse("csa").unwrap()).unwrap();
+    let misfiled = std::path::PathBuf::from("c_contextus/c_s_societas/cs__/csa__person__mara.json");
+    let (plan, _) = plan_mv_files(&root, &[misfiled], &Code::parse("csa").unwrap()).unwrap();
     plan.apply(&root).unwrap();
 
     assert!(
@@ -2057,4 +2057,506 @@ fn rename_prefix_cascades_the_grants_the_repair_invalidates() {
         std::fs::read_to_string(root.join("c_contextus/c_s_societas/ct__/ct__function__nudge.sh"))
             .expect("the rule kept its name past the prefix rewrite");
     assert!(text.contains("writes=pensum@ct:add"), "{text}");
+}
+
+// ── the pre-flight: no plan may destroy what it did not name (§5.4, §10.1) ────
+
+/// **A rename refuses to overwrite a file at its target** — the defect that made this
+/// pre-flight necessary.
+///
+/// `std::fs::rename` replaces whatever sits at the destination, and a recode plans one
+/// rename per file whose code prefix changes. A stray `csa`-prefixed file beside the
+/// `cs`-prefixed one it will be renamed to was therefore destroyed silently, at exit `0`.
+///
+/// The load-bearing assertion is the second pair: **both files are still there**. The
+/// refusal is only worth having because nothing moved.
+#[test]
+fn a_rename_refuses_to_overwrite_a_file_at_its_target() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    let node = root.join("c_contextus/c_s_societas/cs_a_amicitia");
+    std::fs::write(node.join("csa_notes.md"), "the real notes").unwrap();
+    // A stray carrying the code the rename is about to produce.
+    std::fs::write(node.join("cst_notes.md"), "a misfiled stray").unwrap();
+
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("csa").unwrap(), Some("t"), None, None).unwrap();
+    let err = plan.apply(&root).unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+    assert!(err.to_string().contains("cst_notes.md"), "{err}");
+
+    // Two files went in and two are still here, under the name they had.
+    assert_eq!(
+        std::fs::read_to_string(node.join("csa_notes.md")).unwrap(),
+        "the real notes"
+    );
+    assert_eq!(
+        std::fs::read_to_string(node.join("cst_notes.md")).unwrap(),
+        "a misfiled stray"
+    );
+}
+
+/// **The pre-flight sees past the renames the plan itself makes.**
+///
+/// A recode renames the branch's directory *first*, so the colliding file's planned
+/// destination (`cs_t_.../csa_x.md` → `cs_t_.../cst_x.md`) names a directory that does not
+/// exist yet, while the file it would destroy sits under the old one. Asking the disk
+/// about the destination as written finds nothing and waves the plan through — which is
+/// exactly how this shipped. Each virtual path is mapped back through the plan's own
+/// renames before the tree is asked, and **every** collision is named at once, so one
+/// dry-run answers for the whole plan.
+#[test]
+fn the_preflight_maps_a_path_back_through_the_plans_own_renames() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    let node = root.join("c_contextus/c_s_societas/cs_a_amicitia");
+    for (name, body) in [
+        ("csa_one.md", "one"),
+        ("cst_one.md", "blocker one"),
+        ("csa_two.md", "two"),
+        ("cst_two.md", "blocker two"),
+    ] {
+        std::fs::write(node.join(name), body).unwrap();
+    }
+
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("csa").unwrap(), Some("t"), None, None).unwrap();
+    let err = plan.preflight(&root).unwrap_err();
+    let msg = err.to_string();
+    // Both, not the first — a dry-run that named one problem at a time would take four
+    // rounds to clear a branch.
+    assert!(msg.contains("cst_one.md"), "{msg}");
+    assert!(msg.contains("cst_two.md"), "{msg}");
+    assert!(msg.starts_with("2 of this plan's renames"), "{msg}");
+}
+
+/// **`rename-prefix` refuses a collision across two nodes** — the second half of the same
+/// defect (three files in, three out).
+#[test]
+fn rename_prefix_refuses_a_collision_across_two_nodes() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    let amicitia = root.join("c_contextus/c_s_societas/cs_a_amicitia");
+    let officium = root.join("c_contextus/c_s_societas/cs_o_officium");
+    std::fs::write(amicitia.join("csa_x.md"), "amicitia's own").unwrap();
+    std::fs::write(amicitia.join("cso_x.md"), "a stray from officium").unwrap();
+    std::fs::write(officium.join("cso_x.md"), "officium's own").unwrap();
+
+    let (plan, _) = plan_rename_prefix(&root, "csa", "cso", None).unwrap();
+    assert!(plan.apply(&root).is_err());
+    assert_eq!(
+        std::fs::read_to_string(amicitia.join("csa_x.md")).unwrap(),
+        "amicitia's own"
+    );
+    assert_eq!(
+        std::fs::read_to_string(amicitia.join("cso_x.md")).unwrap(),
+        "a stray from officium"
+    );
+    assert_eq!(
+        std::fs::read_to_string(officium.join("cso_x.md")).unwrap(),
+        "officium's own"
+    );
+}
+
+/// **A directory at a rename target stops the plan before anything moves** (§10.1).
+///
+/// The old asymmetry: a non-empty directory at a target aborted the apply partway with
+/// `ENOTEMPTY` — the node dir renamed, its child did not, and the repair was a hand's —
+/// while a *file* at a target was silently clobbered. Both ends are one answer now.
+#[test]
+fn a_directory_at_a_rename_target_is_refused_before_anything_moves() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "csa", triple("p", "proiectum"));
+    // A stray directory *inside* the branch, squatting on the name the recode is about to
+    // give the child. Not a sibling of the renamed node, so §5.3's own collision check —
+    // which asks the parent — cannot see it.
+    let blocker = root.join("c_contextus/c_s_societas/cs_a_amicitia/cst_p_proiectum/blocker");
+    std::fs::create_dir_all(&blocker).unwrap();
+    std::fs::write(blocker.join("b.txt"), "blocks").unwrap();
+
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("csa").unwrap(), Some("t"), None, None).unwrap();
+    assert!(plan.apply(&root).is_err());
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia").is_dir(),
+        "the node dir must not have moved"
+    );
+    assert!(blocker.join("b.txt").is_file());
+}
+
+// ── the walk: rename-prefix goes where rename and mv go, and no further ───────
+
+/// **`rename-prefix` does not descend into a non-node directory** (§6.3).
+///
+/// It once walked every directory under its scope, which put a project's `.git`,
+/// `node_modules` and `target` inside it: it renamed files in git object stores and build
+/// output. `rename` and `mv` have always left a bulk directory to ride along inside its
+/// parent, and this now matches them — the bound is the node tree, and it needs no ignore
+/// file to find it (§13, §18).
+#[test]
+fn rename_prefix_does_not_descend_into_a_non_node_dir() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    // A project homed at the node, with the three directories a repo grows.
+    let proj = root.join("c_contextus/c_s_societas/cs_a_amicitia/project");
+    for sub in [".git/refs", "node_modules/pkg", "target/demo"] {
+        std::fs::create_dir_all(proj.join(sub)).unwrap();
+    }
+    std::fs::write(proj.join(".git/refs/csa_ref"), "git").unwrap();
+    std::fs::write(proj.join("node_modules/pkg/csa_mod.js"), "nm").unwrap();
+    std::fs::write(proj.join("target/demo/csa_art.md"), "tgt").unwrap();
+    // …and one real record at the same node, so the plan is not empty for the wrong reason.
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_rename_prefix(&root, "csa", "cso", None).unwrap();
+    let paths: Vec<String> = plan
+        .to_json()
+        .get("changes")
+        .and_then(|c| c.as_array())
+        .map(|changes| {
+            changes
+                .iter()
+                .filter_map(|c| {
+                    c.get("from")
+                        .and_then(|f| f.as_str())
+                        .map(ToOwned::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    for machine_made in [".git", "node_modules", "target"] {
+        assert!(
+            !paths.iter().any(|p| p.contains(machine_made)),
+            "{machine_made} is not the tree's to rename: {paths:?}"
+        );
+    }
+    assert!(
+        paths.iter().any(|p| p.ends_with("csa__person__mara.json")),
+        "the record at the node is still repaired: {paths:?}"
+    );
+}
+
+// ── mv-file: any file, and many at once (§7.2, §6.5) ─────────────────────────
+
+/// **`mv-file` re-homes a document and leaves an uncoded name alone.**
+///
+/// It once refused everything without a `__` in its name, which left nothing at all for
+/// bulk — the overwhelming majority of what a migration moves. A name that carries the
+/// source node's code takes the target's; one that carries no code (a camera's
+/// `IMG_1234.jpg`) is nobody's to rename and moves verbatim. A record still lands in the
+/// meta dir, a document and bulk loose in the open node dir (§6.1, §6.5).
+#[test]
+fn mv_file_rehomes_a_document_and_leaves_an_uncoded_name_alone() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    let from = root.join("c_contextus/c_s_societas/cs_a_amicitia");
+    std::fs::write(from.join("csa_notes.md"), "a document").unwrap();
+    std::fs::write(from.join("IMG_1234.jpg"), "a photo").unwrap();
+    write_record(
+        &root,
+        "csa",
+        "csa__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+
+    let (plan, _) = plan_mv_files(
+        &root,
+        &[
+            from.join("csa_notes.md"),
+            from.join("IMG_1234.jpg"),
+            from.join("csa__/csa__person__mara.json"),
+        ],
+        &Code::parse("cso").unwrap(),
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    let to = root.join("c_contextus/c_s_societas/cs_o_officium");
+    assert!(
+        to.join("cso_notes.md").is_file(),
+        "the document took the code"
+    );
+    assert!(to.join("IMG_1234.jpg").is_file(), "an uncoded name is kept");
+    assert!(
+        to.join("cso__/cso__person__mara.json").is_file(),
+        "a record still lands in the meta dir"
+    );
+    assert!(!from.join("csa_notes.md").exists());
+}
+
+/// **Many sources make one plan** — one token, one confirm, so a shell glob is a single
+/// reviewed transaction — and two of them landing on one name is refused before any move.
+#[test]
+fn mv_file_takes_many_sources_and_refuses_two_onto_one_name() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    let from = root.join("c_contextus/c_s_societas/cs_a_amicitia");
+    std::fs::write(from.join("csa_one.md"), "one").unwrap();
+    std::fs::write(from.join("csa_two.md"), "two").unwrap();
+
+    let (plan, _) = plan_mv_files(
+        &root,
+        &[from.join("csa_one.md"), from.join("csa_two.md")],
+        &Code::parse("cso").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(plan.changes.len(), 2, "two files, one plan");
+    plan.apply(&root).unwrap();
+
+    // A record and a document that would land on the same name: neither is there yet, so
+    // no disk check could see it — the plan has to refuse itself (§5.4).
+    let other = root.join("c_contextus/c_s_societas/cs_o_officium");
+    std::fs::write(other.join("cso_same.md"), "already here").unwrap();
+    std::fs::write(from.join("csa_same.md"), "collides").unwrap();
+    mint(&root, "cs", triple("b", "beata"));
+    let third = root.join("c_contextus/c_s_societas/cs_b_beata");
+    std::fs::write(third.join("csb_same.md"), "collides too").unwrap();
+    let err = plan_mv_files(
+        &root,
+        &[from.join("csa_same.md"), third.join("csb_same.md")],
+        &Code::parse("csa").unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+}
+
+// ── merge: the verb `mv` cannot be (§10.1, §5.3) ──────────────────────────────
+
+/// **`merge` unions two branches**: a child both sides hold is merged into the one already
+/// there, a child only the source holds is moved whole, and the source dissolves.
+///
+/// This is what `mv` cannot do. `mv` refuses a code collision (§5.3) and is right to — a
+/// silent merge would be worse — but that left no verb at all for the case a tree
+/// assembled from two trees is full of.
+#[test]
+fn merge_unions_two_branches_and_dissolves_the_source() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    // A child both sides hold under the same char, spelled with different labels…
+    mint(&root, "csa", triple("g", "grex"));
+    mint(&root, "cso", triple("g", "globus"));
+    // …and one only the source holds, carrying a bulk directory of its own.
+    mint(&root, "csa", triple("h", "hospes"));
+    write_record(
+        &root,
+        "csag",
+        "csag__person__mara.json",
+        r#"{"refs":[],"data":{}}"#,
+    );
+    let bulk = root.join("c_contextus/c_s_societas/cs_a_amicitia/csa_h_hospes/project/.git");
+    std::fs::create_dir_all(&bulk).unwrap();
+    std::fs::write(bulk.join("HEAD"), "ref: refs/heads/main").unwrap();
+
+    let (plan, record) = plan_merge(
+        &root,
+        &Code::parse("csa").unwrap(),
+        &Code::parse("cso").unwrap(),
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    let dst = root.join("c_contextus/c_s_societas/cs_o_officium");
+    // The twin was merged into, not renamed onto: `globus` kept its directory and the
+    // source's record arrived inside it, recoded.
+    assert!(
+        dst.join("cso_g_globus/csog__/csog__person__mara.json")
+            .is_file()
+    );
+    // The child with no twin moved whole, bulk and all, undescended.
+    assert!(dst.join("cso_h_hospes/project/.git/HEAD").is_file());
+    // And the source is gone.
+    assert!(!root.join("c_contextus/c_s_societas/cs_a_amicitia").exists());
+    // The label that had to go is reported, never silently dropped: one code is one node.
+    let dropped = record["relabelled"][0].clone();
+    assert_eq!(dropped["code"], "csog");
+    assert_eq!(dropped["kept"], "globus");
+    assert_eq!(dropped["dropped"], "grex");
+}
+
+/// **A merge refuses every file collision at once and moves nothing.**
+///
+/// Two records of one name, and the two annotation files, are genuine decisions: what a
+/// merged `[code]__.toml` should say is not the tool's to invent. So they are listed and
+/// the hand decides — which is the whole design of this verb, and it is [`Plan::preflight`]
+/// that delivers it rather than anything merge-specific.
+#[test]
+fn merge_refuses_every_file_collision_at_once() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    for (code, slug) in [
+        ("csa", "mara"),
+        ("cso", "mara"),
+        ("csa", "jon"),
+        ("cso", "jon"),
+    ] {
+        write_record(
+            &root,
+            code,
+            &format!("{code}__person__{slug}.json"),
+            r#"{"refs":[],"data":{}}"#,
+        );
+    }
+
+    let (plan, _) = plan_merge(
+        &root,
+        &Code::parse("csa").unwrap(),
+        &Code::parse("cso").unwrap(),
+    )
+    .unwrap();
+    let err = plan.apply(&root).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.starts_with("2 of this plan's renames"), "{msg}");
+    assert!(msg.contains("mara") && msg.contains("jon"), "{msg}");
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__/csa__person__mara.json")
+            .is_file(),
+        "nothing moved"
+    );
+}
+
+/// **A merge into a node's own descendant is refused** — it would move the destination
+/// into itself (§10.1, the guard `mv` already carries).
+#[test]
+fn merge_refuses_a_node_into_its_own_descendant() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    let err = plan_merge(
+        &root,
+        &Code::parse("cs").unwrap(),
+        &Code::parse("csa").unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(err.exit_code(), pantheon::ExitCode::Validation);
+}
+
+// ── annotations: the key set is open, and a field is annotation (§5.2, §18) ───
+
+/// **An unknown annotation key lands in `[fields]`**, and the hand's own TOML survives.
+///
+/// The key set was closed at four, so placement rule 4 — "fields, not nodes" — had nowhere
+/// to land: the only home for a warrant or a role was `keywords`, documented as search
+/// hints for an LLM, which would have made the field indistinguishable from one. The four
+/// typed keys keep their shapes; everything else is a field, namespaced so it can never
+/// shadow one. A field is annotation and never behaviour — nothing reads one to decide
+/// anything (§18).
+#[test]
+fn an_unknown_annotation_key_lands_in_fields() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    let code = Code::parse("cs").unwrap();
+
+    pantheon::set_annotations(
+        &root,
+        &code,
+        &[("deity".to_string(), "Mercurius".to_string())],
+    )
+    .unwrap();
+    // A hand's comment, written into the file between the two calls.
+    let path = root.join("c_contextus/c_s_societas/cs__/cs__.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\n# why Mercurius and not Minerva\n");
+    std::fs::write(&path, text).unwrap();
+
+    pantheon::set_annotations(
+        &root,
+        &code,
+        &[
+            ("warrant".to_string(), "negotium".to_string()),
+            ("role".to_string(), "contractor".to_string()),
+        ],
+    )
+    .unwrap();
+
+    let ann = pantheon::read_annotations(&root, &code).unwrap();
+    assert_eq!(
+        ann.deity.as_deref(),
+        Some("Mercurius"),
+        "the typed key is untouched"
+    );
+    assert_eq!(
+        ann.fields.get("warrant").map(String::as_str),
+        Some("negotium")
+    );
+    assert_eq!(
+        ann.fields.get("role").map(String::as_str),
+        Some("contractor")
+    );
+
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("[fields]"),
+        "namespaced, never top-level: {text}"
+    );
+    assert!(
+        text.contains("# why Mercurius and not Minerva"),
+        "toml_edit keeps a hand's comment (§6.6): {text}"
+    );
+}
+
+/// **A merge cascades the grants its recode invalidates** (§9.2, §10.1).
+///
+/// `writes=core@home` names a *node*, and a merge changes what the branch's nodes are
+/// called just as surely as a `rename` does. A grant left pointing at the dissolved code
+/// is not merely stale but silently wrong: the grant is the whole guard (§9.5), so one
+/// naming nothing authorizes nothing, and every proposal under it is refused with no
+/// error anywhere to read.
+#[test]
+fn merge_cascades_the_grants_the_recode_invalidates() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    mint(&root, "cs", triple("a", "amicitia"));
+    mint(&root, "cs", triple("o", "officium"));
+    write_rule(
+        &root,
+        "csa",
+        "nudge",
+        "#!/bin/sh\n# auspex: writes=pensum@csa:add\necho '{}'\n",
+    );
+
+    let (plan, _) = plan_merge(
+        &root,
+        &Code::parse("csa").unwrap(),
+        &Code::parse("cso").unwrap(),
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+
+    let text = std::fs::read_to_string(
+        root.join("c_contextus/c_s_societas/cs_o_officium/cso__/cso__function__nudge.sh"),
+    )
+    .expect("the rule moved with the branch it sat in");
+    assert!(text.contains("writes=pensum@cso:add"), "{text}");
 }

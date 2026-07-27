@@ -635,6 +635,91 @@ edit each, so all twelve moved (P-II).
   place `a` did nothing at all. Atrium's agenda gains `Add` for the same reason — its "offer
   `A` alone" workaround is now handled centrally.
 
+### Improvement phase — Wave 8 (`pan`'s seven defects; pan-bugs.md)
+
+A user-testing report against `pan 0.1.0`, run on synthetic trees before the `~/aedes`
+migration. **B1 destroyed data silently and B2 made it reachable everywhere**; the rest were
+missing verbs the migration needs. What a later change must not undo:
+
+- **`Plan::preflight` refuses any rename onto an occupied path, and it simulates.**
+  `std::fs::rename` *replaces* its destination, and a recode plans one rename per file
+  whose prefix changes — so a stray `aoi_notes.md` beside `aoa_notes.md` was destroyed at
+  exit `0`. The load-bearing part is that **a naive `to.exists()` misses the flagship
+  case**: a recode renames the branch dir *first*, so the doomed file's planned
+  destination names a directory that does not exist yet while the file itself sits under
+  the old one. Each virtual path is mapped back through the plan's own renames
+  (`real_path`) before the tree is asked, and a path this plan already vacated is not a
+  collision. Every collision is collected so one dry-run answers for the whole plan, and
+  the message names **real** paths — a plan path is virtual and a hand cannot act on it.
+  Called from `Plan::apply` *and* from `pan`'s `run_plan` before the dry-run emit.
+- **`Plan::apply` asks again immediately before each rename.** Plan-time alone is a TOCTOU
+  window and **the plan token does not close it** — the token is checked against a freshly
+  *computed* plan, recomputed from the same tree, so a file created in between is invisible
+  to both. `occupied()` is `symlink_metadata`, never `Path::exists`: a **dangling symlink**
+  is a name a rename replaces just the same. The atomic form (`renameat2(RENAME_NOREPLACE)`
+  / `renamex_np(RENAME_EXCL)`) was deliberately *not* taken — it costs `libc` + `unsafe` in
+  a spine that has neither, plus a Windows arm.
+- **No `--force`, deliberately.** §18 ships no undo, so a clobber must not be one flag
+  away. The escape hatch is to move the blocker aside, which leaves it on disk.
+- **This closed B5 too**: an occupied destination is refused whether it holds a file or a
+  directory, so the old asymmetry (a **non-empty dir** caught by the OS mid-apply with
+  `ENOTEMPTY`, a **file** silently clobbered) is one answer in both directions, and the
+  half-applied plan never starts.
+- **`rename-prefix` walks the node tree and nothing else** (`prefix_contents`, §6.3). It
+  recursed through *every* directory under its scope, so a project homed at a node put
+  `.git`, `node_modules` and `target` inside it — it renamed files in git object stores and
+  build output. It is now bounded exactly as `rename`/`mv` are (`build_tree` + per-node
+  meta dirs + loose files), which is why `crates/` always rode along untouched. **Do not
+  "fix" this with a skip list or `.stignore`** — §13/§18 leave no ignore file any say over
+  the tree, and a hardcoded `node_modules`/`target` list is the same thing spelled
+  differently. The cost is that a loose file in a non-node dir (or at the root) is out of
+  reach, which is B7's accepted constraint and validate's own rule ("stray files at the
+  root are bulk, not the tree's concern"). A **drifted meta dir** (any `…__` name) is still
+  entered — that is what the repair is for.
+- **`mv-file` takes any file and many of them.** It refused everything without a `__`,
+  which left nothing at all for bulk — the overwhelming majority of a migration. A
+  `__`-named file lands in the meta dir, a document or bulk loose in the open node dir
+  (§6.1, §6.5). **Where the code comes from differs by half**: a `__` file names its own
+  code in its first segment (so a *misfiled* one is re-prefixed correctly, §10.2's case),
+  while a document or bulk file takes its *node's*, read off where it sits. A name carrying
+  no code moves verbatim. `tab move` remains the record-level verb — it wakes Auspex, as a
+  core's write does; this is the structural half and knows no core (I5).
+- **`in_root_spelling` is not optional.** One file has more than one absolute name
+  (`/tmp/x` vs `/private/tmp/x`) and a shell glob hands over whichever the cwd wore. Two
+  things break silently on the difference: the plan carries an absolute path where every
+  other change is root-relative, and the node holding the file compares unequal, so its
+  code goes unrecognized and **the prefix is never swapped**. Canonicalize both ends,
+  rebuild on `root`. `pan`'s `beside_the_hand` resolves a *relative* path against the
+  **cwd** first (what a glob produces), keeping ambient cwd out of the spine.
+- **`pan merge <src> --into <dst>` is the verb `mv` cannot be.** `mv` refuses a code
+  collision (§5.3) and is right to, but that left no verb for a tree assembled from two
+  trees. **The union key is the code and it recurses**: a `src` child whose recoded code
+  matches one already at `dst` is merged *into* it, never renamed onto it. Where labels
+  differ, **`dst`'s survives** and the dropped one is reported — one code is one node, so
+  one name has to go and only the existing one is not a guess. **Everything in the open dir
+  moves**, bulk directories included (one rename, never descended into), because what the
+  walk does not carry the final removal would destroy. Grants cascade (`header_cascade`, as
+  for `mv`); refs do not (a def-prefix node keeps its slug on a move). File collisions —
+  two annotation files being the usual pair — are refused and *all* listed by `preflight`;
+  what a merged `[code]__.toml` should say is not the tool's to invent.
+- **`Change::RemoveEmptyDir` is `Remove` that refuses a surprise.** `Remove` recurses
+  (`remove_dir_all`), which is right for `rm` — the node is *proven* empty first — and
+  wrong for `merge`, where the dir is empty only because this same plan just emptied it.
+  Anything that arrived meanwhile must stop the removal, not be swept up by it.
+- **The annotation key set is open, and an unknown key is a *field*** (`[fields]` in
+  `[code]__.toml`, §5.2). It was closed at four, so placement rule 4 — "fields, not nodes"
+  — had nowhere to land: the only home for a warrant or a role was `keywords`, documented
+  as search hints for an LLM, which would have made the field indistinguishable from one.
+  The four typed keys keep their shapes; everything else is namespaced under `[fields]` so
+  it can never shadow one. Surfaced in `pan constitution` and the `pan` node card, because
+  a rule about what colours a record is unreadable if it is not shown. **A field is
+  annotation and never behaviour** (§18): every value is an unvalidated string and **no
+  tool may branch on one** — a field that tuned a tool would be the config file §18 forbids
+  whatever it were called.
+- **B7 is a constraint, not a debt.** `sort/` and `vol_o/` are not in `[char]_[label]`
+  form, so every verb stops at them and `pan validate` cannot be the completeness check
+  there. The naming rule is doing what it says; nothing was changed for it.
+
 ### Step 6's durable rules (the chrome)
 
 - **A view declares intent; Porticus runs the flow** (P-II). A view says which `Action`s it

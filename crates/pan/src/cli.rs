@@ -17,9 +17,9 @@ use serde_json::{Value, json};
 
 use pantheon::mint::NewSpec;
 use pantheon::{
-    Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_mv, plan_mv_file,
-    plan_new, plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm,
-    read_annotations, resolve_all, resolve_code, resolve_root, set_annotations, validate,
+    Annotations, Code, CoreRegistry, Error, Plan, Ref, Result, build_tree, plan_merge, plan_mv,
+    plan_mv_files, plan_new, plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix,
+    plan_rm, read_annotations, resolve_all, resolve_code, resolve_root, set_annotations, validate,
 };
 
 // The screen rides the `tui` feature; drop it and the structural CLI stands alone (§14).
@@ -96,10 +96,11 @@ enum Cmd {
     Doctor,
     /// Rewrite the tree from one format version to the next (§5.5).
     Migrate,
-    /// Re-home one file to another node (§5.5).
+    /// Re-home files to another node — records, documents, bulk alike (§5.5).
     #[command(name = "mv-file")]
     MvFile {
-        file: PathBuf,
+        #[arg(required = true, num_args = 1..)]
+        file: Vec<PathBuf>,
         #[arg(long = "to")]
         to: String,
     },
@@ -108,6 +109,12 @@ enum Cmd {
         code: String,
         #[arg(long = "to")]
         to: String,
+    },
+    /// Dissolve one node into another, unioning the two branches (§5.5).
+    Merge {
+        src: String,
+        #[arg(long = "into")]
+        into: String,
     },
     /// Remove a node (§5.5).
     Rm { code: String },
@@ -168,6 +175,7 @@ const VERBS: &[&str] = &[
     "new",
     "rename",
     "mv",
+    "merge",
     "mv-file",
     "rm",
     "rename-prefix",
@@ -243,7 +251,7 @@ fn help_json() -> Value {
         "about": "the structure: codes, files, refs, node annotations (§5.5, §10)",
         "verbs": [
             "tree", "resolve", "cd", "init", "constitution", "doctor", "migrate",
-            "validate", "annotate", "new", "rename", "mv", "mv-file", "rm",
+            "validate", "annotate", "new", "rename", "mv", "merge", "mv-file", "rm",
             "rename-prefix", "rename-pattern",
         ],
         "bare": "opens the structural TUI at a terminal; emits this down a pipe",
@@ -321,6 +329,7 @@ pub(crate) fn run(cli: &Cli) -> Result<RunOk> {
         // prefix under the branch, plus every rule header naming the code (§9.2).
         Cmd::MvFile { file, to } => cmd_mv_file(cli, file, to),
         Cmd::Mv { code, to } => cmd_mv(cli, code, to),
+        Cmd::Merge { src, into } => cmd_merge(cli, src, into),
         Cmd::Rm { code } => cmd_rm(cli, code),
         Cmd::Rename {
             code,
@@ -360,6 +369,10 @@ fn cmd_new(
 /// is checked against the freshly computed one (stale review → exit 3) and the plan is
 /// applied, returning `applied`.
 fn run_plan(cli: &Cli, root: &std::path::Path, plan: &Plan, applied: Value) -> Result<RunOk> {
+    // Before the plan is shown, not only before it is applied: a review that does not
+    // say a rename would destroy a file is the review that let it happen (§5.4). Every
+    // collision is named at once, so one dry-run answers for the whole plan.
+    plan.preflight(root)?;
     if cli.dry_run {
         return Ok(RunOk::Json(plan.to_json()));
     }
@@ -412,12 +425,39 @@ fn cmd_mv(cli: &Cli, code: &str, to: &str) -> Result<RunOk> {
     run_plan(cli, &root, &plan, json!({ "moved": [record] }))
 }
 
-/// `pan mv-file <file> --to <code>` — re-home one record/series/rule file (§10.1, §7.2).
-fn cmd_mv_file(cli: &Cli, file: &std::path::Path, to: &str) -> Result<RunOk> {
+/// `pan merge <src> --into <dst>` — union two branches, dissolving the source (§10.1).
+/// The verb `mv` cannot be: `mv` refuses a code collision, and a tree assembled from two
+/// trees is full of them.
+fn cmd_merge(cli: &Cli, src: &str, into: &str) -> Result<RunOk> {
+    let root = resolve_root(cli.root.as_deref())?;
+    let (src, into) = (Code::parse(src)?, Code::parse(into)?);
+    let (plan, record) = plan_merge(&root, &src, &into)?;
+    run_plan(cli, &root, &plan, json!({ "merged": [record] }))
+}
+
+/// `pan mv-file <file>… --to <code>` — re-home files to another node (§10.1, §7.2). Many
+/// sources make one plan, so a shell glob is one reviewed transaction.
+fn cmd_mv_file(cli: &Cli, files: &[PathBuf], to: &str) -> Result<RunOk> {
     let root = resolve_root(cli.root.as_deref())?;
     let to = Code::parse(to)?;
-    let (plan, record) = plan_mv_file(&root, file, &to)?;
-    run_plan(cli, &root, &plan, json!({ "moved": [record] }))
+    let files: Vec<PathBuf> = files.iter().map(|f| beside_the_hand(f)).collect();
+    let (plan, moved) = plan_mv_files(&root, &files, &to)?;
+    run_plan(cli, &root, &plan, json!({ "moved": moved }))
+}
+
+/// A relative path a hand typed, resolved **against the working directory** where one
+/// answers — which is what a shell glob produces and what every other tool means by
+/// `*.jpg`. The spine reads a relative path against the tree root, which is right for a
+/// path a script computed and wrong for one a shell just expanded; resolving here keeps
+/// the ambient cwd out of the spine and leaves the root-relative reading as the fallback.
+fn beside_the_hand(file: &std::path::Path) -> PathBuf {
+    if file.is_absolute() {
+        return file.to_path_buf();
+    }
+    match std::env::current_dir().map(|cwd| cwd.join(file)) {
+        Ok(here) if here.is_file() => here,
+        _ => file.to_path_buf(),
+    }
 }
 
 /// `pan rename-prefix <old> <new> [code]` — repair a drifted code prefix over a subtree
@@ -565,10 +605,13 @@ fn cmd_constitution(cli: &Cli, code: Option<&str>) -> Result<RunOk> {
             let root = resolve_root(cli.root.as_deref())?;
             let code = Code::parse(code)?;
             let ann = read_annotations(&root, &code).unwrap_or_default();
+            // The node's fields ride beside its keywords: rule 4 says a field colours a
+            // record, so what is filed here cannot be judged without seeing them (I8).
             json!({
                 "code": code.as_str(),
                 "keywords": ann.keywords,
                 "explanation": ann.explanation,
+                "fields": ann.fields,
             })
         }
     };
@@ -587,11 +630,12 @@ fn cmd_annotate(cli: &Cli, code: &str, set: &[String]) -> Result<RunOk> {
         let (key, value) = item
             .split_once('=')
             .ok_or_else(|| Error::usage(format!("--set expects KEY=VAL, got {item:?}")))?;
-        if !matches!(key, "symbol" | "keywords" | "deity" | "explanation") {
-            return Err(Error::usage(format!(
-                "unknown annotation key {key:?}; expected symbol|keywords|deity|explanation"
-            )));
-        }
+        // The key set is **open**: `symbol`, `keywords`, `deity` and `explanation` keep
+        // their shapes, and anything else is one of the node's own fields, written to
+        // `[fields]` (§5.2). Placement rule 4 — "fields, not nodes" — has nowhere to land
+        // otherwise, and `keywords` is documented as search hints for an LLM, so a field
+        // parked there would be indistinguishable from one. A field is annotation and
+        // never behaviour: nothing reads one to decide anything (§18).
         pairs.push((key.to_string(), value.to_string()));
     }
     set_annotations(&root, &code, &pairs)?;
