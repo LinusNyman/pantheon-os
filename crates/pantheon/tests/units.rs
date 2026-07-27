@@ -2560,3 +2560,95 @@ fn merge_cascades_the_grants_the_recode_invalidates() {
     .expect("the rule moved with the branch it sat in");
     assert!(text.contains("writes=pensum@cso:add"), "{text}");
 }
+
+/// **A rename between two spellings of one name is not a collision** (§5.1, §5.4).
+///
+/// APFS and HFS+ compare names case- and normalization-insensitively, so `träning` in NFD
+/// and `träning` in NFC are byte-different paths naming **one file**. The pre-flight asked
+/// whether the destination merely *existed*, so a normalizing rename collided with itself
+/// — the message printed one path twice, and there was nothing to move out of the way.
+///
+/// What made that severe is *which* rename it refused: normal form is lowercase and NFC
+/// (§5.1), so this is precisely the repair `pan validate` prescribes as
+/// `pan rename <code> --label <normalized>`. The tool diagnosed a fault and then refused
+/// its own fix, and a tree carrying 59 of them could not be repaired at all.
+///
+/// On a case-sensitive filesystem the destination genuinely does not exist and this passes
+/// for the ordinary reason; it is the mac case that needs the identity check.
+#[test]
+fn a_normalizing_rename_is_not_a_collision_with_itself() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    // Built by hand, not minted: `mint` normalizes, and the fixture *is* the un-normalized
+    // name. "tra" + U+0308 COMBINING DIAERESIS + "ning" — NFD.
+    let nfd = "tra\u{0308}ning";
+    let branch = root.join(format!("c_contextus/c_s_societas/cs_t_{nfd}"));
+    std::fs::create_dir_all(branch.join("cst__")).unwrap();
+
+    let (plan, _) = plan_rename(
+        &root,
+        &Code::parse("cst").unwrap(),
+        None,
+        Some("träning"),
+        None,
+    )
+    .unwrap();
+    plan.apply(&root).expect("a normalizing rename must apply");
+
+    let held: Vec<String> = std::fs::read_dir(root.join("c_contextus/c_s_societas"))
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.starts_with("cs_t_"))
+        .collect();
+    assert_eq!(held, vec!["cs_t_träning".to_string()], "one dir, in NFC");
+    assert!(
+        validate(&root, &album_registry())
+            .unwrap()
+            .iter()
+            .all(|f| f.code != FindingCode::NonNormalizedName),
+        "the finding that asked for the rename is answered by it"
+    );
+}
+
+/// **A case-only rename applies too** — the same root cause, and the one every
+/// normalization to lowercase meets, since `pan` lowercases every typed token (§5.1).
+#[test]
+fn a_case_only_rename_applies() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    let branch = root.join("c_contextus/c_s_societas/cs_a_Amicitia");
+    std::fs::create_dir_all(branch.join("csa__")).unwrap();
+
+    let (plan, _) = plan_rename(
+        &root,
+        &Code::parse("csa").unwrap(),
+        None,
+        Some("amicitia"),
+        None,
+    )
+    .unwrap();
+    plan.apply(&root).expect("a case-only rename must apply");
+
+    assert!(
+        root.join("c_contextus/c_s_societas/cs_a_amicitia/csa__")
+            .is_dir()
+    );
+    // The identity check must not have cost the guard: a *different* file at the
+    // destination is still refused, which
+    // `a_rename_refuses_to_overwrite_a_file_at_its_target` asserts in full.
+    let node = root.join("c_contextus/c_s_societas/cs_a_amicitia");
+    std::fs::write(node.join("csa_notes.md"), "the real notes").unwrap();
+    std::fs::write(node.join("cst_notes.md"), "a different file").unwrap();
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("csa").unwrap(), Some("t"), None, None).unwrap();
+    assert!(
+        plan.apply(&root).is_err(),
+        "identity is not a licence to clobber"
+    );
+    assert_eq!(
+        std::fs::read_to_string(node.join("cst_notes.md")).unwrap(),
+        "a different file"
+    );
+}

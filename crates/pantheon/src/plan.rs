@@ -157,7 +157,9 @@ impl Plan {
                 Change::Rename { from, to } => {
                     let real_from = real_path(&renames, from);
                     let real_to = real_path(&renames, to);
-                    if !gone.contains(&real_to) && occupied(&root.join(&real_to)) {
+                    if !gone.contains(&real_to)
+                        && occupied(&root.join(&real_to), &root.join(&real_from))
+                    {
                         // Named by where they sit *now*, not by their names in the plan:
                         // a plan path is virtual (it may live under a rename this plan
                         // has not made yet), and what a hand has to move is real.
@@ -202,7 +204,7 @@ impl Plan {
                     std::fs::create_dir_all(root.join(rel_path))?;
                 }
                 Change::Rename { from, to } => {
-                    let dest = root.join(to);
+                    let (source, dest) = (root.join(from), root.join(to));
                     // Asked again, a hair before the call that would replace it. The
                     // pre-flight is a plan-time answer and the plan token does not close
                     // the window it leaves: the token is checked against a freshly
@@ -211,14 +213,14 @@ impl Plan {
                     // `renameat2(RENAME_NOREPLACE)`, `renamex_np(RENAME_EXCL)` — would
                     // close it outright, at the cost of `libc` and `unsafe` in the spine
                     // and a Windows arm beside them.)
-                    if occupied(&dest) {
+                    if occupied(&dest, &source) {
                         return Err(Error::validation(format!(
                             "{} appeared at the destination since the plan was computed — \
                              the rename would overwrite it, so it was not made (§5.4)",
                             to.display()
                         )));
                     }
-                    std::fs::rename(root.join(from), dest)?;
+                    std::fs::rename(source, dest)?;
                 }
                 Change::RemoveEmptyDir { rel_path } => {
                     // `remove_dir`, never `remove_dir_all`: anything that arrived under
@@ -273,12 +275,54 @@ impl Plan {
     }
 }
 
-/// Whether anything at all sits at `path`.
+/// Whether something **other than `src`** already sits at `dest`.
 ///
-/// `symlink_metadata`, not [`Path::exists`]: a **dangling symlink** is a name a rename
-/// would replace just the same, and `exists` follows the link and answers `false`.
-fn occupied(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok()
+/// Identity, not existence — and the difference is not academic. APFS and HFS+ compare
+/// names case- and normalization-insensitively, so `träning` in NFD and `träning` in NFC
+/// are byte-different paths naming **one file**, as are `Ars` and `ars`. Asked whether the
+/// destination merely *exists*, a rename between two spellings of one name collides with
+/// itself: the message printed one path twice and there was nothing to move out of the
+/// way. That is exactly the rename `pan validate` asks for — name normalization is
+/// lowercase and NFC (§5.1) — so the guard was refusing the repair the tool itself
+/// prescribes, and `pan rename <code> --label <normalized>` could not be run at all.
+///
+/// `symlink_metadata`, not [`Path::exists`], at both ends: a **dangling symlink** is a
+/// name a rename would replace just the same, and `exists` follows the link and answers
+/// `false`. Comparing the link as itself rather than as its target is also what keeps a
+/// symlink out of the walk it points into.
+fn occupied(dest: &Path, src: &Path) -> bool {
+    let Ok(there) = std::fs::symlink_metadata(dest) else {
+        return false;
+    };
+    match std::fs::symlink_metadata(src) {
+        Ok(here) => !same_file(&there, &here),
+        // Something is at the destination and the source is not there to be the same
+        // thing as: a real obstruction.
+        Err(_) => true,
+    }
+}
+
+/// Whether two metadata readings describe one file.
+///
+/// `dev` + `ino` is the question itself rather than a proxy for it — it answers across
+/// hard links and every spelling a case- or normalization-insensitive filesystem accepts.
+#[cfg(unix)]
+fn same_file(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// Off unix there is no `dev`/`ino` in `std`, and the portable answers each cost
+/// something this does not need: `canonicalize` follows symlinks, which would compare a
+/// link against its target, and a `same-file` dependency buys one predicate (§13).
+///
+/// So the answer is **no**, which resolves to *occupied* and refuses. This loosens a
+/// guard against data loss, and the conservative direction for a platform the suite does
+/// not test on is to keep refusing — a case-only rename on Windows is a rename through a
+/// temporary name, where a wrong `true` here is a file destroyed.
+#[cfg(not(unix))]
+fn same_file(_a: &std::fs::Metadata, _b: &std::fs::Metadata) -> bool {
+    false
 }
 
 /// Map a path in the plan's *virtual* tree back to where it lives on the unchanged

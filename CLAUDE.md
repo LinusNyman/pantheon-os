@@ -719,6 +719,37 @@ missing verbs the migration needs. What a later change must not undo:
 - **B7 is a constraint, not a debt.** `sort/` and `vol_o/` are not in `[char]_[label]`
   form, so every verb stops at them and `pan validate` cannot be the completeness check
   there. The naming rule is doing what it says; nothing was changed for it.
+- **B8 — `occupied` asks identity, not existence, and it must stay that way.** The
+  pre-flight above shipped asking whether the destination *existed*, which on **APFS and
+  HFS+ is the wrong question**: those compare names case- and normalization-insensitively,
+  so `träning` NFD and `träning` NFC are byte-different paths naming **one file**, as are
+  `Ars` and `ars`. A normalizing rename therefore collided with *itself* — the message
+  printed one path twice and named nothing a hand could move. What made it severe is which
+  rename it refused: normal form is lowercase and NFC (§5.1), so `pan validate` emitted
+  `pan rename <code> --label <normalized>` as the fix and the tool then refused its own
+  prescription, with 59 of them waiting in the live tree. `occupied(dest, src)` now compares
+  **`dev` + `ino`** — the question itself, not a proxy, answering across hard links and
+  every spelling an insensitive filesystem accepts. Both call sites pass the source:
+  `preflight` has `real_from` in hand, `apply` has `from`.
+  - **Keep `symlink_metadata` at both ends**, never `metadata`: a dangling symlink is a
+    name a rename replaces just the same, and a link must be compared as itself rather
+    than as its target.
+  - **Off unix `same_file` is `false`, so an unknown case refuses.** `canonicalize` would
+    follow symlinks and a `same-file` dep buys one predicate (§13). This fix *loosens* a
+    guard against data loss, so the untested platform keeps the strict answer.
+  - `a_normalizing_rename_is_not_a_collision_with_itself` and `a_case_only_rename_applies`
+    pin it, and **both were confirmed to fail without the identity check** — on a
+    case-sensitive filesystem they would otherwise pass for the ordinary reason and prove
+    nothing. The second also re-asserts that a *genuinely different* file at the
+    destination still refuses: identity is not a licence to clobber.
+- **A stale install is invisible and the whole suite goes stale together.** Everything
+  above is verified against a fresh `cargo build`, which is **not** what a shell runs.
+  `porticus` compiles into all twelve binaries, so a chrome fix reaches none of them until
+  each is reinstalled — reinstalling `pan` alone leaves eleven apps carrying the bug.
+  `cargo install` uses a private target dir per crate, so set `CARGO_TARGET_DIR` to share
+  the dependency build across the twelve or it recompiles the world twelve times under
+  `lto = true`. `pan` is `0.1.1` from this wave so `pan -V` and `pan doctor` can tell the
+  builds apart; a crate version drifts freely beneath `format_version` (§15.5).
 
 ### Step 6's durable rules (the chrome)
 
