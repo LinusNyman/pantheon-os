@@ -35,7 +35,7 @@ jobs:
         with:
           toolchain: "1.88"
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.3
         with:
           tool: cargo-nextest
       # A core's contract test drives its own binary via CARGO_BIN_EXE_<name>, which
@@ -62,7 +62,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.88"
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.3
         with:
           tool: cargo-audit, cargo-deny
       - run: cargo audit                            # advisories
