@@ -752,7 +752,7 @@ pub fn plan_rename_prefix(
         TreeRoot::Forest(nodes) => {
             for node in &nodes {
                 let dirname = dir_name_of(node);
-                let renamed = swap_code_prefix(&dirname, old, new);
+                let renamed = swap_prefix_run(&dirname, old, new);
                 let node_rel = PathBuf::from(&renamed);
                 push_rename(&mut changes, PathBuf::from(&dirname), node_rel.clone());
                 prefix_contents(node, &node_rel, old, new, &mut changes, &mut rules)?;
@@ -784,9 +784,12 @@ pub fn plan_rename_prefix(
 /// `node_rel` is where the node lives after any ancestor rename, for the `Change`
 /// from-paths; the node's own absolute path is read to enumerate its contents.
 ///
-/// **A directory that is neither a meta dir nor a child node is passed over entirely** —
-/// homed bulk, a project's `.git`, a build tree — which is the bound that keeps this walk
-/// the same size as `rename`'s and `mv`'s (§6.3).
+/// **A directory that is neither a meta dir, a child node, nor a name carrying the run is
+/// passed over entirely** — homed bulk, a project's `.git`, a build tree — which is the
+/// bound that keeps this walk the size of `rename`'s and `mv`'s (§6.3). What it now also
+/// reaches is the **masked** directory: one carrying the dead prefix on its own name, which
+/// the node walk cannot hand over because a child is read against its parent's code and the
+/// drift *is* that the two disagree ([`cascade_masked`], D11).
 fn prefix_contents(
     node: &Node,
     node_rel: &Path,
@@ -795,6 +798,7 @@ fn prefix_contents(
     changes: &mut Vec<Change>,
     rules: &mut Vec<(PathBuf, PathBuf)>,
 ) -> Result<()> {
+    let child_paths: Vec<&Path> = node.children.iter().map(|c| c.path.as_path()).collect();
     for entry in std::fs::read_dir(&node.path)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -803,25 +807,47 @@ fn prefix_contents(
             push_rename(
                 changes,
                 node_rel.join(&name),
-                node_rel.join(swap_code_prefix(&name, old, new)),
+                node_rel.join(swap_prefix_run(&name, old, new)),
             );
             continue;
         }
         // A meta dir — the node's own, or a drifted one a crashed rename left behind,
-        // which is exactly what this repair is for. Any other directory is not the
-        // tree's and is neither entered nor renamed.
+        // which is exactly what this repair is for.
         if !name.ends_with("__") {
+            if child_paths.contains(&entry.path().as_path()) {
+                continue; // a child node: the recursion below, which knows its code
+            }
+            // A directory the parser cannot read as a node. Renamed if it carries the
+            // run, and then walked — a masked directory hides a whole branch, not a name.
+            let renamed = swap_prefix_run(&name, old, new);
+            if renamed == name {
+                continue;
+            }
+            let lands_at = node_rel.join(&renamed);
+            push_rename(changes, node_rel.join(&name), lands_at.clone());
+            cascade_masked(&entry.path(), &lands_at, old, new, changes)?;
             continue;
         }
-        let meta_renamed = swap_code_prefix(&name, old, new);
+        let meta_renamed = swap_prefix_run(&name, old, new);
         let meta_rel = node_rel.join(&meta_renamed);
         push_rename(changes, node_rel.join(&name), meta_rel.clone());
         for file in std::fs::read_dir(entry.path())? {
             let file = file?;
             let fname = file.file_name().to_string_lossy().into_owned();
-            let renamed = swap_code_prefix(&fname, old, new);
+            let renamed = swap_prefix_run(&fname, old, new);
             let lands_at = meta_rel.join(&renamed);
             push_rename(changes, meta_rel.join(&fname), lands_at.clone());
+            // A **directory** inside a meta dir — D11's own three-defect example, and where
+            // most of a recode's stranding turns out to live. It is walked whatever its own
+            // name reads: a meta dir holds no bulk to mistake it for (§6.1), so the reason
+            // to enter only what was renamed does not apply here, and a directory already
+            // spelling the live code can still hold a whole branch spelling the dead one.
+            if file.file_type()?.is_dir() {
+                if !NOT_THE_TREES.contains(&fname.as_str()) {
+                    cascade_masked(&file.path(), &lands_at, old, new, changes)?;
+                }
+                continue;
+            }
             // A rule this repair moves, paired to where it lands (§9.2) — moved by its
             // own prefix or by its meta dir's, since a grant goes stale either way.
             // Recognized by the reserved kind segment rather than through `classify`,
@@ -835,7 +861,7 @@ fn prefix_contents(
 
     for child in &node.children {
         let dirname = dir_name_of(child);
-        let child_rel = node_rel.join(swap_code_prefix(&dirname, old, new));
+        let child_rel = node_rel.join(swap_prefix_run(&dirname, old, new));
         push_rename(changes, node_rel.join(&dirname), child_rel.clone());
         prefix_contents(child, &child_rel, old, new, changes, rules)?;
     }
@@ -1168,37 +1194,68 @@ fn recode_contents(
             node_new_rel.join(&new_meta),
         );
         for entry in std::fs::read_dir(&meta_abs)? {
-            let fname = entry?.file_name().to_string_lossy().into_owned();
-            let renamed = swap_code_prefix(&fname, node.code.as_str(), node_new_code.as_str());
+            let entry = entry?;
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            let renamed = recode_name(&fname, &node.code, &node_new_code, old_code, new_code);
+            let lands_at = node_new_rel.join(&new_meta).join(&renamed);
             push_rename(
                 changes,
                 node_new_rel.join(&new_meta).join(&fname),
-                node_new_rel.join(&new_meta).join(&renamed),
+                lands_at.clone(),
             );
+            // A **directory** inside a meta dir. §6.1 gives a meta dir records, series and
+            // rules and nothing else, so the walk never looked inside one — and this is
+            // where the bulk of a recode's stranding turned out to sit: whole branches
+            // filed under a meta dir, every name in them carrying the dead code (D11).
+            if entry.file_type()?.is_dir() {
+                if !NOT_THE_TREES.contains(&fname.as_str()) {
+                    cascade_masked(
+                        &entry.path(),
+                        &lands_at,
+                        old_code.as_str(),
+                        new_code.as_str(),
+                        changes,
+                    )?;
+                }
+                continue;
+            }
             // A rule the recode moves: remembered with where it lands, so the grant
             // cascade can name the path the rewrite will actually find (§9.2, §10.1).
             if matches!(classify(&fname, false, &node.code), FileClass::Rule { .. }) {
-                rules.push((
-                    meta_abs.join(&fname),
-                    node_new_rel.join(&new_meta).join(&renamed),
-                ));
+                rules.push((meta_abs.join(&fname), lands_at));
             }
         }
     }
 
-    // Loose documents (and any code-prefixed loose file) in the open node dir.
+    // The open node dir: loose documents and homed bulk files, and the directories the
+    // node walk cannot address (D11). A child directory whose name takes a char §5.1
+    // rejects is no node's, so a recode passed it over as bulk — and it carried the dead
+    // code on its own name and on every name beneath it. One `mv` stranded 320 entries
+    // that way (§3.13). The meta dir and the real child nodes are handled above and by the
+    // recursion below, which know their codes exactly.
+    let child_paths: Vec<&Path> = node.children.iter().map(|c| c.path.as_path()).collect();
     for entry in std::fs::read_dir(&node.path)? {
         let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            continue; // the meta dir and child node dirs are handled below / by recursion
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_dir = entry.file_type()?.is_dir();
+        if is_dir && (name == old_meta || child_paths.contains(&entry.path().as_path())) {
+            continue;
         }
-        let fname = entry.file_name().to_string_lossy().into_owned();
-        let renamed = swap_code_prefix(&fname, node.code.as_str(), node_new_code.as_str());
-        push_rename(
-            changes,
-            node_new_rel.join(&fname),
-            node_new_rel.join(&renamed),
-        );
+        let renamed = recode_name(&name, &node.code, &node_new_code, old_code, new_code);
+        let lands_at = node_new_rel.join(&renamed);
+        push_rename(changes, node_new_rel.join(&name), lands_at.clone());
+        // Entered only where it was renamed: a directory carrying the branch's prefix is
+        // the tree's and hides a whole branch, one that does not is bulk and rides along
+        // inside its parent as it always has (§6.3).
+        if is_dir && renamed != name {
+            cascade_masked(
+                &entry.path(),
+                &lands_at,
+                old_code.as_str(),
+                new_code.as_str(),
+                changes,
+            )?;
+        }
     }
 
     // Child node dirs, recursively.
@@ -1236,10 +1293,150 @@ fn recode_code(node_code: &Code, old_code: &Code, new_code: &Code) -> Result<Cod
     Code::parse(&format!("{}{tail}", new_code.as_str()))
 }
 
+/// Directories no walk enters, however it reaches them (B2). Machine-made trees hold no
+/// name of the tree's, and a rename inside a git object store or a build output destroys
+/// rather than repairs — so a decoy `[old]…` name in one is still not the tree's to move.
+const NOT_THE_TREES: [&str; 11] = [
+    ".git",
+    "node_modules",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "dist",
+    "build",
+    ".next",
+    "DerivedData",
+    ".cache",
+];
+
+/// Swap a leading **code-prefix run** for `new` — the boundary [`swap_code_prefix`] cannot
+/// see, and the whole of D11.
+///
+/// A stranded name does not merely carry the dead code; it carries the dead code *and its
+/// own remaining tokens*, with no `_` between them. `aook_251001_candela`'s child spells
+/// `aook251001_b_board`, so an exact-code test matches nothing and the entry is passed
+/// over — which is how one move left 320 entries behind (§3.13).
+///
+/// The test is therefore on the **head**: the segment before the first `_`, which in every
+/// name the tree makes is a code — a node dir carries its parent's, a meta dir and a record
+/// carry their own. The head must parse as a code and must open with `old`.
+///
+/// Demanding a head at all is what keeps `assimulation` and `asstderr` out. They are
+/// ordinary words that open with `ass` and carry no `_`, and taking `startswith` for a
+/// prefix test inflated the first stranding count from 2,460 to 5,446.
+///
+/// A head already opening with `new` is left alone where `new` **extends** `old`
+/// (`aot` → `aott`): `aott_f_forge` reads equally as a stranded `aot` and as a correct
+/// `aott`, the name cannot say which, and of the two only renaming a correct name is
+/// unrecoverable. A stranded scan names what this declines; a wrong rename names nothing.
+///
+/// Everything after the run is carried through byte for byte, NFD included (D8) — the
+/// destination is the stored name with a prefix replaced, never a spelling rebuilt.
+fn swap_prefix_run(name: &str, old: &str, new: &str) -> String {
+    let Some((head, _)) = name.split_once('_') else {
+        return name.to_string();
+    };
+    if !head.starts_with(old) || (new.starts_with(old) && head.starts_with(new)) {
+        return name.to_string();
+    }
+    if Code::parse(head).is_err() {
+        return name.to_string();
+    }
+    format!("{new}{}", &name[old.len()..])
+}
+
+/// A name's new spelling under a recode: **this node's code exactly** where that applies,
+/// and the **branch's prefix run** where it does not.
+///
+/// One walk meets three shapes. A name built from the node it sits at
+/// (`assedae__task.jsonl`) takes the exact swap. A name spelling an *ancestor*
+/// (`asseda_e_föreläsning.pdf`, sitting at node `assedae`) and a name spelling a
+/// *descendant* (`aook251001_b_board`, under a masked child of `aook`) are both invisible
+/// to it and are what left thousands of entries behind — the run reaches either, because
+/// every name under the branch opens with the branch's own code.
+///
+/// The exact test goes first because it is the one that survives a **definition-prefix**
+/// code: `csa_john_appleseed` carries a `_`, so it is not a head and the run cannot see it.
+fn recode_name(
+    name: &str,
+    node: &Code,
+    node_new: &Code,
+    branch: &Code,
+    branch_new: &Code,
+) -> String {
+    let exact = swap_code_prefix(name, node.as_str(), node_new.as_str());
+    if exact != name {
+        return exact;
+    }
+    swap_prefix_run(name, branch.as_str(), branch_new.as_str())
+}
+
+/// Cascade a prefix run over a directory the node walk cannot address, and everything
+/// under it (D11).
+///
+/// A **masked** directory is one the tree cannot read as a node: its name takes a char
+/// §5.1 rejects (`aook_251001_candela`), or it still spells the parent code a recode
+/// replaced — which is the drift `rename-prefix` exists to repair and, circularly, the very
+/// thing that hides it from the parser that would find it. Either way `rename`, `mv` and
+/// `rename-prefix` passed it over as bulk and left its whole interior carrying the dead
+/// code.
+///
+/// The walk enters only what it renames. A directory whose own name carries the run is the
+/// tree's; one that does not is bulk, and rides along inside its parent exactly as it
+/// always has (§6.3). So the bound grows by the masked directories and by nothing else,
+/// and [`NOT_THE_TREES`] holds either way.
+///
+/// **That bound is a measured choice, not a guess.** Entering every directory instead takes
+/// the `ass` → `asd` recode from 2,460 stranded names to 80, and of those 80 exactly 7 are
+/// the tree's: the rest are a game's `assult_rifle` assets, referenced by path from its
+/// scene files, and a virtualenv an older bad rename already mangled into `assite-packages`.
+/// Renaming those is destruction, and B2 was that bug once already. What this leaves behind
+/// is a tree name under a bulk directory that carries no prefix of its own
+/// (`…/_res_ska_sf0003_ö1/assea_…​.tex`) — visible in the dry-run, and one `mv-file` each.
+///
+// ponytail: enters only what it renames — a stranded name under an unprefixed bulk dir
+// stays out of reach. Measured at 7 of 11,657 for `ass`. Widen only with a real name for
+// what makes a directory the tree's; `startswith` is not it.
+///
+/// `dir_rel` is where the directory lives *after* the rename that reached it: the plan
+/// stays top-down, so every `from` names a path that exists at the moment its own rename
+/// runs.
+fn cascade_masked(
+    dir_abs: &Path,
+    dir_rel: &Path,
+    old: &str,
+    new: &str,
+    changes: &mut Vec<Change>,
+) -> Result<()> {
+    for entry in std::fs::read_dir(dir_abs)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if NOT_THE_TREES.contains(&name.as_str()) {
+            continue;
+        }
+        let renamed = swap_prefix_run(&name, old, new);
+        if renamed == name {
+            continue;
+        }
+        let lands_at = dir_rel.join(&renamed);
+        push_rename(changes, dir_rel.join(&name), lands_at.clone());
+        // `file_type` reads the entry, not its target, so a symlink is renamed as the name
+        // it is and never walked into — the tree does not follow a link out of itself.
+        if entry.file_type()?.is_dir() {
+            cascade_masked(&entry.path(), &lands_at, old, new, changes)?;
+        }
+    }
+    Ok(())
+}
+
 /// Swap a leading `old_code` prefix (at a `_` boundary) for `new_code` in a file or
 /// directory name. Records/series/rules/meta use `__`, a document a single `_`; in both
 /// the code is exactly the leading `old_code` followed by `_`. A name not beginning with
 /// the code at a boundary (homed bulk, a stray file) is returned unchanged.
+///
+/// The exact test, for a name whose node — and so whose code — the walk already knows.
+/// [`swap_prefix_run`] is its twin for a name the walk had to find by its prefix alone.
 fn swap_code_prefix(name: &str, old_code: &str, new_code: &str) -> String {
     if let Some(rest) = name.strip_prefix(old_code) {
         if rest.starts_with('_') {
