@@ -13,7 +13,7 @@ use crate::classify::{FileClass, classify};
 use crate::code::{Code, NodeName, parse_node_dirname};
 use crate::core::CoreRegistry;
 use crate::envelope::{KeyShape, RawEntity, RawLine, Ref};
-use crate::name::{is_normalized, normalize};
+use crate::name::{fs_spelling, is_normalized, normalize};
 
 /// A validation finding, reported by path (§10.2).
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -254,8 +254,15 @@ fn walk_node(
         // The normal form is a single, deterministic answer (§5.1), so the fix is one
         // command — `pan rename <code> --label <normalized>`. Shown for a hand to run;
         // applying it from the screen waits on the node cascade (§10.1).
-        let fix = normalize(node_label)
-            .map(|norm| format!("pan rename {} --label {norm}", node_code.as_str()));
+        // Suggested in the tree's spelling (D8): the repair for a genuine violation must
+        // not also recompose the name and drop that file out of Syncthing's index.
+        let fix = normalize(node_label).map(|norm| {
+            format!(
+                "pan rename {} --label {}",
+                node_code.as_str(),
+                fs_spelling(&norm)
+            )
+        });
         push_fix(
             findings,
             FindingCode::NonNormalizedName,

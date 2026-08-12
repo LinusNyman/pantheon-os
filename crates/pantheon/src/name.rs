@@ -60,9 +60,37 @@ pub fn normalize_token(input: &str, what: &str) -> crate::Result<String> {
         .ok_or_else(|| crate::Error::usage(format!("{what} normalizes to empty: {input:?}")))
 }
 
-/// Whether `s` is already in normal form — a cheap check for resolve/validate that
-/// avoids allocating a fix when the token is already legal.
+/// The spelling a name is written to disk in: **NFD** (D8).
+///
+/// [`normalize`] answers in NFC because a token is also a *key* — a slug in a record, a
+/// definition in a `core:slug` ref — and those are compared, sorted and shipped between
+/// machines. A **filename** is a different object with a different authority over it:
+/// Syncthing on macOS treats NFD as the canonical on-disk form, and given a composed name
+/// it either renames it back (`autoNormalize=true`, which silently reverted Phase 1 twice)
+/// or refuses to index it at all (`autoNormalize=false`, which dropped 1,367 files out of
+/// the backup). So the token stays composed, the path it becomes is decomposed, and this
+/// function is the boundary between them.
+///
+/// Unconditional rather than `cfg(target_os = "macos")`: one tree is read from more than
+/// one host, and a mint whose output depends on who ran it is a mint that cannot be tested.
+#[must_use]
+pub fn fs_spelling(s: &str) -> String {
+    s.nfd().collect()
+}
+
+/// Whether `s` is already in normal form, **compared under NFC** (D8) — a cheap check for
+/// resolve/validate that avoids allocating a fix when the token is already legal.
+///
+/// Unicode normalization is the one difference this does not count. `övning` composed and
+/// decomposed are the same token: APFS is normalization-insensitive and opens the same
+/// directory for either, so a distinction the filesystem does not make is not `pan`'s to
+/// enforce. Everything else §5.1 folds — case, punctuation, spacing, runs of `_` — is still
+/// a violation and still reported.
+///
+/// Comparing bytes here is what raised ~60 `non_normalized_name` findings against a tree
+/// that is deliberately NFD, each one carrying a suggested fix that recomposed the name and
+/// so dropped that file out of the backup. The tree's spelling is not a defect.
 #[must_use]
 pub fn is_normalized(s: &str) -> bool {
-    normalize(s).as_deref() == Some(s)
+    normalize(s).is_some_and(|n| n.as_str().nfc().eq(s.nfc()))
 }

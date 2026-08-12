@@ -2389,21 +2389,29 @@ fn a_code_parses_when_its_char_arrives_decomposed() {
 
 /// **A recode reaches the children of a node whose char is not ASCII.**
 ///
-/// The mint writes NFC and the filesystem writes NFD, so a node directory and the files
+/// The mint wrote NFC and the filesystem writes NFD, so a node directory and the files
 /// inside it disagree on spelling: `ass_ö_övning` is composed, every `assö_*` in it is
 /// decomposed. Both gates then shut — the exact node-code test compared bytes and missed,
 /// and the prefix run failed because the head would not parse — so the directory was
 /// renamed and its whole interior left carrying the dead code. Measured at 100 stranded
 /// entries on the live `ass` → `asd`.
+///
+/// The composed node is built **by hand** here. D8 closed the write side, so the mint no
+/// longer produces this mismatch — but every directory minted before it did is still in the
+/// tree, so the mismatch has to be constructed to stay tested. It is the fixture, not an
+/// incidental of how the fixture was made.
 #[test]
 fn a_recode_reaches_children_of_a_node_whose_char_is_not_ascii() {
     let root = fresh_root();
     mint(&root, "root", triple("a", "actio"));
     mint(&root, "a", triple("s", "scientia"));
     mint(&root, "as", triple("s", "studium"));
-    mint(&root, "ass", triple("ö", "övning"));
-    let node = root.join("a_actio/a_s_scientia/as_s_studium/ass_ö_övning");
-    assert!(node.is_dir(), "the mint did not write the composed char");
+    // NFC: U+00F6 LATIN SMALL LETTER O WITH DIAERESIS, the spelling the old mint wrote.
+    let nfc_node = "ass_\u{f6}_\u{f6}vning";
+    let node = root
+        .join("a_actio/a_s_scientia/as_s_studium")
+        .join(nfc_node);
+    std::fs::create_dir_all(&node).unwrap();
     // NFD: `o` + COMBINING DIAERESIS — the spelling the filesystem hands back.
     std::fs::write(node.join("asso\u{308}_1.pdf"), "x").unwrap();
 
@@ -2411,8 +2419,18 @@ fn a_recode_reaches_children_of_a_node_whose_char_is_not_ascii() {
         plan_rename(&root, &Code::parse("ass").unwrap(), Some("d"), None, None).unwrap();
     plan.apply(&root).unwrap();
 
-    let landed = root.join("a_actio/a_s_scientia/as_d_studium/asd_ö_övning");
-    assert!(landed.is_dir(), "the non-ASCII node was not renamed");
+    let parent = root.join("a_actio/a_s_scientia/as_d_studium");
+    let nodes_back: Vec<String> = std::fs::read_dir(&parent)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    // The recode substitutes the code run and carries every other byte through, so a node
+    // that was composed stays composed — `pan` does not re-spell what it did not mint (D8).
+    assert!(
+        nodes_back.contains(&"asd_\u{f6}_\u{f6}vning".to_string()),
+        "the non-ASCII node was not renamed, or its spelling was rewritten: {nodes_back:?}"
+    );
+    let landed = parent.join("asd_\u{f6}_\u{f6}vning");
     // Read the entry back rather than asking `is_file`: a normalizing filesystem answers
     // to either spelling, so only the stored bytes prove the tail was carried through.
     let read_back: Vec<String> = std::fs::read_dir(&landed)
@@ -2422,6 +2440,125 @@ fn a_recode_reaches_children_of_a_node_whose_char_is_not_ascii() {
     assert!(
         read_back.contains(&"asdo\u{308}_1.pdf".to_string()),
         "the child was stranded or its NFD lost: {read_back:?}"
+    );
+}
+
+/// **The mint writes the tree's spelling** (D8, the write side).
+///
+/// `pan new` composed every name it minted, which is what put NFC node directories over the
+/// NFD children macOS writes beneath them — the mismatch the test above now has to build by
+/// hand. Syncthing on macOS treats NFD as canonical: given a composed name it either
+/// renames it back (`autoNormalize=true`, which silently reverted Phase 1 twice) or refuses
+/// to index it at all (`autoNormalize=false`, which dropped 1,367 files out of the backup).
+///
+/// Read the entry back rather than asking `is_dir`: APFS answers to either spelling, so
+/// only the stored bytes prove which one was written.
+#[test]
+fn the_mint_writes_the_trees_spelling() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("s", "scientia"));
+    mint(&root, "as", triple("s", "studium"));
+    mint(&root, "ass", triple("ö", "övning"));
+
+    let held: Vec<String> = std::fs::read_dir(root.join("a_actio/a_s_scientia/as_s_studium"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        held.contains(&"ass_o\u{308}_o\u{308}vning".to_string()),
+        "the mint did not write the decomposed name (D8): {held:?}"
+    );
+    assert!(
+        !held.contains(&"ass_\u{f6}_\u{f6}vning".to_string()),
+        "the mint still writes NFC (D8): {held:?}"
+    );
+}
+
+/// **A typed label is minted decomposed; an untouched one is carried through** (D8).
+///
+/// The two halves of a rename have different authorities over spelling. A label arriving on
+/// the command line is a fresh mint and is written in the tree's spelling. A label nobody
+/// typed is not `pan`'s to re-spell — it is carried byte for byte, which is what keeps a
+/// bare `--char` recode the pure prefix substitution that `ass` → `asd` measured at 3,361
+/// renames with the whole tail intact.
+#[test]
+fn a_typed_label_is_minted_decomposed_and_an_untouched_one_is_carried() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    let parent = root.join("c_contextus/c_s_societas");
+    // Composed, built by hand as the old mint would have left it.
+    let branch = parent.join("cs_t_tr\u{e4}ning");
+    std::fs::create_dir_all(branch.join("cst__")).unwrap();
+
+    let entries = |dir: &Path| -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    };
+
+    // No label typed: the recode substitutes the code run and touches nothing else.
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("cst").unwrap(), Some("u"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+    let held = entries(&parent);
+    assert!(
+        held.contains(&"cs_u_tr\u{e4}ning".to_string()),
+        "a carried label was re-spelled: {held:?}"
+    );
+
+    // A typed label is a mint, so it lands in the tree's spelling. It has to be a
+    // *different* label: the no-op guard compares the typed token against the one on disk
+    // and refuses before spelling is ever reached, so `--label` cannot be used to decompose
+    // a composed name in place. Left as it is — under D8 a composed name is not a defect,
+    // so there is nothing that needs that repair.
+    let (plan, _) = plan_rename(
+        &root,
+        &Code::parse("csu").unwrap(),
+        None,
+        Some("övning"),
+        None,
+    )
+    .unwrap();
+    plan.apply(&root).unwrap();
+    let held = entries(&parent);
+    assert!(
+        held.contains(&"cs_u_o\u{308}vning".to_string()),
+        "a typed label was not decomposed: {held:?}"
+    );
+}
+
+/// **A real violation is still reported, and its fix does not recompose the name** (D8).
+///
+/// Loosening `non_normalized_name` to ignore Unicode form must not loosen it to ignore
+/// everything: case, punctuation, spacing and `_` runs are still §5.1 violations. And the
+/// fix `pan validate` prints is the one a hand will run, so it has to be safe to run —
+/// suggesting the composed spelling is what made the old finding a trap.
+#[test]
+fn a_real_violation_is_still_reported_and_its_fix_does_not_recompose() {
+    let root = fresh_root();
+    mint(&root, "root", triple("c", "contextus"));
+    mint(&root, "c", triple("s", "societas"));
+    // Uppercase is a genuine violation; the diaeresis is not. Composed, so that a fix
+    // built by recomposing and a fix built by decomposing are visibly different strings.
+    let branch = root.join("c_contextus/c_s_societas/cs_t_Tr\u{e4}ning");
+    std::fs::create_dir_all(branch.join("cst__")).unwrap();
+
+    let findings = validate(&root, &album_registry()).unwrap();
+    let finding = findings
+        .iter()
+        .find(|f| f.code == FindingCode::NonNormalizedName)
+        .expect("an uppercase label is still a violation (§5.1)");
+    let fix = finding.fix.as_deref().expect("the finding carries a fix");
+    assert!(
+        fix.contains("tra\u{308}ning"),
+        "the fix is not in the tree's spelling: {fix:?}"
+    );
+    assert!(
+        !fix.contains("tr\u{e4}ning"),
+        "the fix recomposes the name and would drop it out of the backup: {fix:?}"
     );
 }
 
@@ -2929,13 +3066,21 @@ fn merge_cascades_the_grants_the_recode_invalidates() {
 /// whether the destination merely *existed*, so a normalizing rename collided with itself
 /// — the message printed one path twice, and there was nothing to move out of the way.
 ///
-/// What made that severe is *which* rename it refused: normal form is lowercase and NFC
-/// (§5.1), so this is precisely the repair `pan validate` prescribes as
+/// What made that severe is *which* rename it refused: normal form was lowercase and NFC
+/// (§5.1), so this was precisely the repair `pan validate` prescribed as
 /// `pan rename <code> --label <normalized>`. The tool diagnosed a fault and then refused
 /// its own fix, and a tree carrying 59 of them could not be repaired at all.
 ///
+/// **D8 moved the destination but not the guard.** A name is written to disk decomposed
+/// now, so this rename lands the label back in the spelling it already had — a rename of a
+/// path onto *itself*, which is the sharpest form of the self-collision B8 fixed rather
+/// than a weaker one. What it is no longer is a repair anyone asked for: a decomposed label
+/// is not a finding, asserted below both before and after.
+///
 /// On a case-sensitive filesystem the destination genuinely does not exist and this passes
-/// for the ordinary reason; it is the mac case that needs the identity check.
+/// for the ordinary reason; it is the mac case that needs the identity check. The
+/// lowercasing half of the original scenario is covered by `a_case_only_rename_applies`,
+/// which is ASCII throughout and so untouched by D8.
 #[test]
 fn a_normalizing_rename_is_not_a_collision_with_itself() {
     let root = fresh_root();
@@ -2946,6 +3091,13 @@ fn a_normalizing_rename_is_not_a_collision_with_itself() {
     let nfd = "tra\u{0308}ning";
     let branch = root.join(format!("c_contextus/c_s_societas/cs_t_{nfd}"));
     std::fs::create_dir_all(branch.join("cst__")).unwrap();
+    assert!(
+        validate(&root, &album_registry())
+            .unwrap()
+            .iter()
+            .all(|f| f.code != FindingCode::NonNormalizedName),
+        "a decomposed label was a finding before the rename (D8)"
+    );
 
     let (plan, _) = plan_rename(
         &root,
@@ -2962,13 +3114,17 @@ fn a_normalizing_rename_is_not_a_collision_with_itself() {
         .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
         .filter(|n| n.starts_with("cs_t_"))
         .collect();
-    assert_eq!(held, vec!["cs_t_träning".to_string()], "one dir, in NFC");
+    assert_eq!(
+        held,
+        vec![format!("cs_t_{nfd}")],
+        "one dir, and in the spelling the tree already held (D8)"
+    );
     assert!(
         validate(&root, &album_registry())
             .unwrap()
             .iter()
             .all(|f| f.code != FindingCode::NonNormalizedName),
-        "the finding that asked for the rename is answered by it"
+        "a decomposed label is not a finding (D8)"
     );
 }
 

@@ -74,6 +74,13 @@ pub fn plan_new(root: &Path, parent: &str, spec: NewSpec) -> Result<(Plan, Value
     let siblings = child_node_names(&parent_path, parent_code.as_ref())?;
     check_no_collision(&siblings, &new_code)?;
 
+    // The whole leaf segment is minted here from typed tokens, so all of it — the parent's
+    // code prefix as much as the char and the label — is written in the tree's spelling
+    // (D8). The code, char and label in the contract below stay composed: they are keys,
+    // not paths. Minting NFC is what put composed node directories over decomposed
+    // children and stranded 100 entries in `ass` → `asd`.
+    let dirname = name::fs_spelling(&dirname);
+
     let base = parent_path.strip_prefix(root).unwrap_or(Path::new(""));
     let rel_path = base.join(&dirname);
 
