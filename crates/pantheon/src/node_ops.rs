@@ -15,6 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::cascade::plan_cascade;
 use crate::classify::{FileClass, RESERVED_KIND_FUNCTION, classify};
@@ -1333,17 +1334,25 @@ const NOT_THE_TREES: [&str; 11] = [
 ///
 /// Everything after the run is carried through byte for byte, NFD included (D8) — the
 /// destination is the stored name with a prefix replaced, never a spelling rebuilt.
+///
+/// The head is matched under NFC and its code parsed with combining marks allowed, so a
+/// node whose char is `ö` reaches its own children: `assefp_ö_övning` is stored NFC and
+/// every `assefpö_*` inside it NFD, and before that the head failed to parse and the whole
+/// directory was passed over as bulk.
 fn swap_prefix_run(name: &str, old: &str, new: &str) -> String {
     let Some((head, _)) = name.split_once('_') else {
         return name.to_string();
     };
-    if !head.starts_with(old) || (new.starts_with(old) && head.starts_with(new)) {
+    let Some(run) = nfc_prefix_len(head, old) else {
+        return name.to_string();
+    };
+    if nfc_prefix_len(new, old).is_some() && nfc_prefix_len(head, new).is_some() {
         return name.to_string();
     }
     if Code::parse(head).is_err() {
         return name.to_string();
     }
-    format!("{new}{}", &name[old.len()..])
+    format!("{}{}", spell_like(new, &name[..run]), &name[run..])
 }
 
 /// A name's new spelling under a recode: **this node's code exactly** where that applies,
@@ -1415,7 +1424,10 @@ fn cascade_masked(
         if NOT_THE_TREES.contains(&name.as_str()) {
             continue;
         }
-        let renamed = swap_prefix_run(&name, old, new);
+        let mut renamed = swap_prefix_run(&name, old, new);
+        if renamed == name {
+            renamed = swap_dir_code_dot(&name, dir_abs, old, new);
+        }
         if renamed == name {
             continue;
         }
@@ -1430,20 +1442,136 @@ fn cascade_masked(
     Ok(())
 }
 
-/// Swap a leading `old_code` prefix (at a `_` boundary) for `new_code` in a file or
-/// directory name. Records/series/rules/meta use `__`, a document a single `_`; in both
-/// the code is exactly the leading `old_code` followed by `_`. A name not beginning with
-/// the code at a boundary (homed bulk, a stray file) is returned unchanged.
+/// A bare `[code].[ext]` name inside a **masked** directory, where the code is the one the
+/// directory's own name spells.
+///
+/// [`swap_prefix_run`] cannot see these: `asseta.pdf` carries no `_`, so it has no head, and
+/// that refusal is exactly what keeps `assets` and `assimulation` safe. But a masked walk
+/// has no node code to test against either — the directory it is standing in was never a
+/// node the parser would yield.
+///
+/// The directory's *name* is the missing code. `asset_a_after_action_review` spells `asset`
+/// and takes the char `a`, so a file beside it named `asseta.*` carries that node's code and
+/// nothing else could have produced it. `assedai2_doc` spells `assedai2` the same way. A
+/// directory whose name yields no code — `appcat`, `cache`, `src` — yields no match, which
+/// is what refuses `assessment-config.yaml` and a Haskell build cache's `assolver-plan`.
+///
+/// So the test is: the stem before the first `.` equals a code the containing directory's
+/// name spells, and that code opens with `old`. A stem that merely *starts* like one is not
+/// a hit — the equality is the whole guard, and it is what a run at a `.` could never be.
+fn swap_dir_code_dot(name: &str, dir_abs: &Path, old: &str, new: &str) -> String {
+    if name.contains('_') {
+        return name.to_string();
+    }
+    let Some((stem, _)) = name.split_once('.') else {
+        return name.to_string();
+    };
+    let Some(dirname) = dir_abs.file_name().and_then(|n| n.to_str()) else {
+        return name.to_string();
+    };
+    let parts: Vec<&str> = dirname.split('_').collect();
+    let mut codes = vec![parts[0].to_string()];
+    // `{code}_{char}_{label}` and the label-less `{code}_{char}`: the char is one letter or
+    // one-or-two digits. A longer second segment is a label, not a char.
+    if parts.len() >= 2 {
+        let ch = parts[1];
+        let short_digits =
+            !ch.is_empty() && ch.len() <= 2 && ch.bytes().all(|b| b.is_ascii_digit());
+        if ch.chars().count() == 1 && ch.chars().all(char::is_alphabetic) || short_digits {
+            codes.push(format!("{}{ch}", parts[0]));
+        }
+    }
+    let nfc_stem: String = stem.nfc().collect();
+    if !codes
+        .iter()
+        .any(|c| c.nfc().collect::<String>() == nfc_stem)
+    {
+        return name.to_string();
+    }
+    let Some(run) = nfc_prefix_len(name, old) else {
+        return name.to_string();
+    };
+    format!("{}{}", spell_like(new, &name[..run]), &name[run..])
+}
+
+/// Swap a leading `old_code` prefix (at a `_` or `.` boundary) for `new_code` in a file or
+/// directory name. Records/series/rules/meta use `__`, a document a single `_`, and a bare
+/// `[code].[ext]` an extension dot; in all three the code is exactly the leading `old_code`
+/// followed by that boundary. A name not beginning with the code at a boundary (homed bulk,
+/// a stray file) is returned unchanged.
+///
+/// The match is under NFC (see [`nfc_prefix_len`]) because a node's own directory and the
+/// files inside it can disagree on spelling — the mint writes NFC, the filesystem writes
+/// NFD — and a byte-exact compare silently strands every file on the other side of it.
 ///
 /// The exact test, for a name whose node — and so whose code — the walk already knows.
 /// [`swap_prefix_run`] is its twin for a name the walk had to find by its prefix alone.
 fn swap_code_prefix(name: &str, old_code: &str, new_code: &str) -> String {
-    if let Some(rest) = name.strip_prefix(old_code) {
-        if rest.starts_with('_') {
-            return format!("{new_code}{rest}");
-        }
+    let Some(run) = nfc_prefix_len(name, old_code) else {
+        return name.to_string();
+    };
+    let rest = &name[run..];
+    // `_` opens a label, `__` a file field, `.` an extension. All three are boundaries, and
+    // the third is the one a bare `[code].[ext]` name needs: `asseta.aux` beside the node
+    // `asseta` carries that code as surely as `asseta_notes.md` does, and only the exact
+    // node code is trusted at a `.` — a *run* match there would rename `assets` (§5, the
+    // `startswith` trap), which is destruction.
+    //
+    // A **digit** is the fourth, and it is a boundary for the same reason the others are:
+    // no word continues a code with one. `asseff_t_tentamen` holds ninety exam PDFs named
+    // `assefft250113l.pdf` — the node's code with a date run straight onto it — and they are
+    // as much the node's as any `assefft_*`. `assets`, `assrc`, `assettings` and
+    // `assimulation` all continue with a letter and none of them can ever match here.
+    if rest.starts_with('_')
+        || rest.starts_with('.')
+        || rest.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return format!("{}{rest}", spell_like(new_code, &name[..run]));
     }
     name.to_string()
+}
+
+/// `new` spelled in the normalization the run it replaces was written in.
+///
+/// The replacement is the one part of a rename that is *rebuilt* rather than carried, so it
+/// is the one place a composed spelling can leak into a decomposed tree. Syncthing on macOS
+/// requires NFD and silently refuses to back up what is not (D8), so a recode that quietly
+/// recomposed a name would break the backup of every file it touched. A run carrying a
+/// combining mark takes a decomposed replacement; an ASCII run leaves `new` as it is.
+fn spell_like(new: &str, run_text: &str) -> String {
+    if run_text == run_text.nfc().collect::<String>() {
+        return new.to_string();
+    }
+    new.nfd().collect()
+}
+
+/// The byte length of the leading run of `name` that spells `code`, compared under NFC.
+///
+/// The tree holds both spellings of the same name: a `pan new` mint writes NFC and macOS
+/// writes NFD (D8), and they sit in the same directory — `assefp_ö_övning` is NFC while
+/// every `assefpö_*.pdf` inside it is NFD. A byte-exact `strip_prefix` misses across that
+/// boundary, which is what left a recode's children stranded under a renamed parent.
+///
+/// Comparing whole-name-first is what keeps the run from splitting a composed character:
+/// `asso\u{308}x` against `asso` normalizes to `assöx`, which does not open with `asso`, so
+/// the `o` that belongs to `ö` is never taken as the end of the run.
+///
+/// The length is an offset into `name` **as stored**, so the caller replaces exactly that
+/// run and carries every byte after it through untouched — NFD included.
+fn nfc_prefix_len(name: &str, code: &str) -> Option<usize> {
+    let target: String = code.nfc().collect();
+    let whole: String = name.nfc().collect();
+    if !whole.starts_with(&target) {
+        return None;
+    }
+    let mut acc = String::new();
+    for (i, ch) in name.char_indices() {
+        acc.push(ch);
+        if acc.nfc().collect::<String>() == target {
+            return Some(i + ch.len_utf8());
+        }
+    }
+    None
 }
 
 /// Push a rename, skipping a no-op (source == target) — a name that does not carry the
