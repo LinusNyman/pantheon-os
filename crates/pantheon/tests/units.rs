@@ -2376,6 +2376,171 @@ fn rename_prefix_descends_a_masked_dir_and_keeps_its_nfd() {
     );
 }
 
+/// **A code parses when its char arrives decomposed.** On a decomposed filesystem `ö` is
+/// `o` + U+0308, and a combining mark is neither alphabetic nor numeric — so the parser
+/// refused the whole code, and every gate standing on it shut.
+#[test]
+fn a_code_parses_when_its_char_arrives_decomposed() {
+    assert!(Code::parse("assefpo\u{308}").is_ok(), "NFD code refused");
+    assert!(Code::parse("assefpö").is_ok(), "NFC code refused");
+    // A mark is part of the letter before it; a symbol is still not a code character.
+    assert!(Code::parse("assefp-ö").is_err());
+}
+
+/// **A recode reaches the children of a node whose char is not ASCII.**
+///
+/// The mint writes NFC and the filesystem writes NFD, so a node directory and the files
+/// inside it disagree on spelling: `ass_ö_övning` is composed, every `assö_*` in it is
+/// decomposed. Both gates then shut — the exact node-code test compared bytes and missed,
+/// and the prefix run failed because the head would not parse — so the directory was
+/// renamed and its whole interior left carrying the dead code. Measured at 100 stranded
+/// entries on the live `ass` → `asd`.
+#[test]
+fn a_recode_reaches_children_of_a_node_whose_char_is_not_ascii() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("s", "scientia"));
+    mint(&root, "as", triple("s", "studium"));
+    mint(&root, "ass", triple("ö", "övning"));
+    let node = root.join("a_actio/a_s_scientia/as_s_studium/ass_ö_övning");
+    assert!(node.is_dir(), "the mint did not write the composed char");
+    // NFD: `o` + COMBINING DIAERESIS — the spelling the filesystem hands back.
+    std::fs::write(node.join("asso\u{308}_1.pdf"), "x").unwrap();
+
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("ass").unwrap(), Some("d"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+
+    let landed = root.join("a_actio/a_s_scientia/as_d_studium/asd_ö_övning");
+    assert!(landed.is_dir(), "the non-ASCII node was not renamed");
+    // Read the entry back rather than asking `is_file`: a normalizing filesystem answers
+    // to either spelling, so only the stored bytes prove the tail was carried through.
+    let read_back: Vec<String> = std::fs::read_dir(&landed)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        read_back.contains(&"asdo\u{308}_1.pdf".to_string()),
+        "the child was stranded or its NFD lost: {read_back:?}"
+    );
+}
+
+/// **A bare `[code].[ext]` name follows its node; a word that merely opens with the code
+/// does not.**
+///
+/// `ass.aux` beside the node `ass` carries that code as surely as `ass_notes.md` does, and
+/// nothing but the extension dot says so. The dot is trusted only against the node's *own*
+/// code — a run match there would rename `assets`, which is destruction and was B2 once.
+#[test]
+fn a_bare_code_dot_ext_follows_its_node_but_a_word_does_not() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("s", "scientia"));
+    mint(&root, "as", triple("s", "studium"));
+    let node = root.join("a_actio/a_s_scientia/as_s_studium");
+    std::fs::write(node.join("ass.aux"), "x").unwrap();
+    std::fs::create_dir(node.join("assets")).unwrap();
+    std::fs::write(node.join("assets.json"), "x").unwrap();
+    std::fs::write(node.join("assimulation.md"), "x").unwrap();
+
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("ass").unwrap(), Some("d"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+
+    let landed = root.join("a_actio/a_s_scientia/as_d_studium");
+    assert!(
+        landed.join("asd.aux").is_file(),
+        "[code].[ext] not followed"
+    );
+    assert!(landed.join("assets").is_dir(), "`assets` was renamed");
+    assert!(
+        landed.join("assets.json").is_file(),
+        "`assets.json` renamed"
+    );
+    assert!(
+        landed.join("assimulation.md").is_file(),
+        "`assimulation.md` was renamed"
+    );
+}
+
+/// **A digit continues a code; a letter starts a word.**
+///
+/// `asseff_t_tentamen` holds ninety exam PDFs named `assefft250113l.pdf` — the node's code
+/// with a date run straight onto it, no separator. They are the node's files and a recode
+/// has to take them. Nothing that merely opens with the code can follow it with a digit,
+/// which is what keeps `assets.json`, `assrc` and `assettings.json` out at the same gate.
+#[test]
+fn a_digit_continues_a_code_but_a_letter_starts_a_word() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("s", "scientia"));
+    mint(&root, "as", triple("s", "studium"));
+    let node = root.join("a_actio/a_s_scientia/as_s_studium");
+    std::fs::write(node.join("ass250113l.pdf"), "x").unwrap();
+    std::fs::write(node.join("assrc"), "x").unwrap();
+    std::fs::write(node.join("assettings.json"), "x").unwrap();
+
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("ass").unwrap(), Some("d"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+
+    let landed = root.join("a_actio/a_s_scientia/as_d_studium");
+    assert!(
+        landed.join("asd250113l.pdf").is_file(),
+        "a dated code was not followed"
+    );
+    assert!(landed.join("assrc").is_file(), "`assrc` was renamed");
+    assert!(
+        landed.join("assettings.json").is_file(),
+        "`assettings.json` was renamed"
+    );
+}
+
+/// **Inside a masked directory, a bare `[code].[ext]` is read against the directory's own
+/// name** — the only code available where the parser never yielded a node.
+///
+/// `asst_a_review` spells `asst` and takes the char `a`, so `assta.pdf` beside it carries
+/// that code and nothing else could have written it. `assets.json` in the same directory
+/// spells nothing the directory does, and stays. Equality against the directory's code is
+/// the whole guard: a *run* at a `.` would take both.
+#[test]
+fn a_masked_bare_code_dot_ext_is_read_against_its_directory() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("s", "scientia"));
+    mint(&root, "as", triple("s", "studium"));
+    let node = root.join("a_actio/a_s_scientia/as_s_studium");
+    // A six-digit char is no char §5.1 will read, so this directory is masked and its
+    // interior is reached only by the cascade.
+    let masked = node.join("ass_251001_candela").join("asst_a_review");
+    std::fs::create_dir_all(&masked).unwrap();
+    std::fs::write(masked.join("assta.pdf"), "x").unwrap();
+    std::fs::write(masked.join("assets.json"), "x").unwrap();
+    std::fs::write(masked.join("assessment-config.yaml"), "x").unwrap();
+
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("ass").unwrap(), Some("d"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+
+    let landed = root
+        .join("a_actio/a_s_scientia/as_d_studium")
+        .join("asd_251001_candela")
+        .join("asdt_a_review");
+    assert!(landed.is_dir(), "the masked interior was not reached");
+    assert!(
+        landed.join("asdta.pdf").is_file(),
+        "the directory's own code was not followed"
+    );
+    assert!(
+        landed.join("assets.json").is_file(),
+        "`assets.json` was renamed — a run at a `.` got through"
+    );
+    assert!(
+        landed.join("assessment-config.yaml").is_file(),
+        "`assessment-config.yaml` was renamed"
+    );
+}
+
 /// **A word that merely opens with the prefix is not a prefix hit** (D11's measurement
 /// trap), and a machine-made tree inside a masked directory is still out of bounds (B2).
 ///

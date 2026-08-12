@@ -7,6 +7,8 @@
 //! single `_` (definition-prefix) but never `__` (the file-field separator, §5.2)
 //! and never a trailing `_` (that is a directory device, not part of the code).
 
+use unicode_normalization::char::is_combining_mark;
+
 use crate::{Error, Result};
 
 /// A validated full code — e.g. `csa` (triple) or `csa_john_appleseed`
@@ -88,7 +90,14 @@ impl Code {
                 "code {s:?} opens with {first:?}; a code opens with a letter, never a digit (§5.1)"
             )));
         }
-        if let Some(bad) = s.chars().find(|c| !(c.is_alphanumeric() || *c == '_')) {
+        // A combining mark is part of the letter before it, not a character of its own: on
+        // a decomposed filesystem `ö` arrives as `o` + U+0308, and rejecting the mark
+        // rejects the whole code. The tree holds both spellings — a `pan new` mint writes
+        // NFC, macOS writes NFD (D8) — so the parser has to read either.
+        if let Some(bad) = s
+            .chars()
+            .find(|c| !(c.is_alphanumeric() || *c == '_' || is_combining_mark(*c)))
+        {
             return Err(Error::usage(format!(
                 "code {s:?} has an illegal character {bad:?}"
             )));
