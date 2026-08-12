@@ -8,10 +8,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use pantheon::code::parse_node_dirname;
 use pantheon::mint::NewSpec;
 use pantheon::{
-    Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Ref, RefOutcome, SeriesRef,
-    Severity, Shape, build_tree, normalize, plan_merge, plan_mv, plan_mv_files, plan_new,
-    plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm, resolve_all,
-    resolve_code, validate, with_record_lock,
+    Change, Code, CoreRegistry, DiscoveredCore, FindingCode, Key, Line, Plan, Ref, RefOutcome,
+    SeriesRef, Severity, Shape, build_tree, normalize, plan_merge, plan_mv, plan_mv_files,
+    plan_new, plan_rename, plan_rename_def, plan_rename_pattern, plan_rename_prefix, plan_rm,
+    resolve_all, resolve_code, validate, with_record_lock,
 };
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -2250,6 +2250,202 @@ fn rename_prefix_does_not_descend_into_a_non_node_dir() {
     assert!(
         paths.iter().any(|p| p.ends_with("csa__person__mara.json")),
         "the record at the node is still repaired: {paths:?}"
+    );
+}
+
+// ── the masked directory: what the parser cannot read, the walk still repairs (D11) ──
+
+/// The `from` paths of a plan's renames, in the order they would be applied.
+fn plan_froms(plan: &Plan) -> Vec<String> {
+    plan.changes
+        .iter()
+        .filter_map(|c| match c {
+            Change::Rename { from, .. } => Some(from.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// **`rename-prefix` repairs the children the parser cannot see** (D11).
+///
+/// The shape a half-finished recode leaves: the node dir wears its new code and every
+/// child still spells the old one. Those children are exactly what the repair is for, and
+/// exactly what the node walk refuses to hand it — a child is read against its parent's
+/// code, and the drift *is* that the two disagree. Measured on this fixture in Phase 4,
+/// `rename-prefix aom aotm aotm` planned **one** change, the loose file, and left all
+/// three directories carrying the dead prefix.
+#[test]
+fn rename_prefix_repairs_children_the_parser_cannot_read() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("o", "opus"));
+    mint(&root, "ao", triple("t", "tutela"));
+    mint(&root, "aot", triple("m", "millesimals"));
+    let node = root.join("a_actio/a_o_opus/ao_t_tutela/aot_m_millesimals");
+    for child in ["aom_b_bokklubb", "aom_g_gfx", "aom_o_ordforandeposter"] {
+        std::fs::create_dir_all(node.join(child)).unwrap();
+    }
+    std::fs::write(node.join("aom_idea.md"), "idea").unwrap();
+
+    let (plan, _) =
+        plan_rename_prefix(&root, "aom", "aotm", Some(&Code::parse("aotm").unwrap())).unwrap();
+    let froms = plan_froms(&plan);
+    assert_eq!(froms.len(), 4, "three dirs and one file: {froms:?}");
+    plan.apply(&root).unwrap();
+
+    for child in ["aotm_b_bokklubb", "aotm_g_gfx", "aotm_o_ordforandeposter"] {
+        assert!(node.join(child).is_dir(), "{child} was not repaired");
+    }
+    assert!(node.join("aotm_idea.md").is_file());
+}
+
+/// **A scope whose own directory name opens with the old prefix still resolves** (D11).
+///
+/// `aott` lives at `aot_t_tenet_industries`, so the scope's own name carries `aot_` — and
+/// its drifted children carry it too. The repair works inside the scope, so the scope's
+/// own directory is never renamed however its name reads; before this it planned nothing
+/// at all and refused with `no name under the scope carries the code prefix`.
+#[test]
+fn rename_prefix_takes_a_scope_whose_own_name_opens_with_the_old_prefix() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("o", "opus"));
+    mint(&root, "ao", triple("t", "tutela"));
+    mint(&root, "aot", triple("t", "tenet_industries"));
+    let node = root.join("a_actio/a_o_opus/ao_t_tutela/aot_t_tenet_industries");
+    std::fs::create_dir_all(node.join("aot_f_forge")).unwrap();
+    // A sibling that is already right. `aott_g_grid` reads equally as a stranded `aot`
+    // and as a correct `aott`, and only one of the two readings can be undone.
+    std::fs::create_dir_all(node.join("aott_g_grid")).unwrap();
+
+    let (plan, _) =
+        plan_rename_prefix(&root, "aot", "aott", Some(&Code::parse("aott").unwrap())).unwrap();
+    plan.apply(&root).unwrap();
+
+    assert!(node.is_dir(), "the scope root is never renamed");
+    assert!(node.join("aott_f_forge").is_dir());
+    assert!(
+        node.join("aott_g_grid").is_dir(),
+        "a name already carrying the new prefix is left alone"
+    );
+}
+
+/// **A masked directory is descended into, and every byte outside the prefix survives**
+/// (D11 criteria 1 and 3; D8).
+///
+/// `aotm_251001_candela` takes a six-digit char, which fails §5.1, so no walk can address
+/// it — and it is three levels of masking deep. The names inside are NFD and must stay
+/// NFD: the destination is the stored bytes with a prefix run swapped, never a spelling
+/// rebuilt from a literal (§3.13's near miss, caught by the Phase 4 preflight).
+#[test]
+fn rename_prefix_descends_a_masked_dir_and_keeps_its_nfd() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("o", "opus"));
+    mint(&root, "ao", triple("t", "tutela"));
+    mint(&root, "aot", triple("m", "millesimals"));
+    let node = root.join("a_actio/a_o_opus/ao_t_tutela/aot_m_millesimals");
+    // NFD: `a` + COMBINING RING ABOVE, never the precomposed `å`.
+    let nfd = "a\u{030a}rskursma\u{0308}rke";
+    let deep = node
+        .join("aom_251001_candela")
+        .join("aom251001_p_photos")
+        .join(format!("aom251001p_{nfd}"));
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(deep.join(format!("aom251001p_{nfd}_note.md")), "n").unwrap();
+
+    let (plan, _) =
+        plan_rename_prefix(&root, "aom", "aotm", Some(&Code::parse("aotm").unwrap())).unwrap();
+    plan.apply(&root).unwrap();
+
+    let landed = node
+        .join("aotm_251001_candela")
+        .join("aotm251001_p_photos")
+        .join(format!("aotm251001p_{nfd}"));
+    assert!(landed.is_dir(), "the masked interior was not reached");
+    assert!(landed.join(format!("aotm251001p_{nfd}_note.md")).is_file());
+    // The bytes, not just the name: a normalizing filesystem would answer `is_dir` to
+    // either spelling, so the directory's own entry is read back and compared.
+    let read_back: Vec<String> = std::fs::read_dir(landed.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        read_back.contains(&format!("aotm251001p_{nfd}")),
+        "NFD was not preserved: {read_back:?}"
+    );
+}
+
+/// **A word that merely opens with the prefix is not a prefix hit** (D11's measurement
+/// trap), and a machine-made tree inside a masked directory is still out of bounds (B2).
+///
+/// `assimulation` and `asstderr` are ordinary words beginning with `ass`; taking
+/// `startswith` for a prefix test inflated the first stranding count from 2,460 to 5,446.
+/// A tree name always carries a `_` after its code, so the head before the first `_` is
+/// the whole test. And a repo homed *inside* a masked directory is reached by the walk for
+/// the first time here — its `.git` and `node_modules` must stay untouched.
+#[test]
+fn rename_prefix_skips_a_word_that_opens_with_the_prefix_and_prunes_the_machine_made() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("s", "studium"));
+    mint(&root, "as", triple("s", "scholae"));
+    let node = root.join("a_actio/a_s_studium/as_s_scholae");
+    // A masked child — the walk enters this one.
+    let masked = node.join("ass_251001_kurs");
+    std::fs::create_dir_all(masked.join(".git/refs")).unwrap();
+    std::fs::create_dir_all(masked.join("node_modules/pkg")).unwrap();
+    std::fs::write(masked.join(".git/refs/ass_ref"), "git").unwrap();
+    std::fs::write(masked.join("node_modules/pkg/ass_mod.js"), "nm").unwrap();
+    // Ordinary words, and one real stranded name to keep the plan non-empty.
+    std::fs::write(masked.join("assimulation.py"), "sim").unwrap();
+    std::fs::create_dir_all(masked.join("asstderr")).unwrap();
+    std::fs::write(masked.join("ass251001_note.md"), "n").unwrap();
+
+    let (plan, _) =
+        plan_rename_prefix(&root, "ass", "asd", Some(&Code::parse("ass").unwrap())).unwrap();
+    let froms = plan_froms(&plan);
+    for untouched in [".git", "node_modules", "assimulation", "asstderr"] {
+        assert!(
+            !froms.iter().any(|p| p.contains(untouched)),
+            "{untouched} is not a prefix hit: {froms:?}"
+        );
+    }
+    plan.apply(&root).unwrap();
+    assert!(node.join("asd_251001_kurs/asd251001_note.md").is_file());
+    assert!(node.join("asd_251001_kurs/assimulation.py").is_file());
+    assert!(node.join("asd_251001_kurs/asstderr").is_dir());
+    assert!(node.join("asd_251001_kurs/.git/refs/ass_ref").is_file());
+}
+
+/// **`mv` recodes the interior of a directory it cannot resolve** (D11 criterion 4).
+///
+/// The kthis case: `pan mv aook --to aot` cascaded every resolvable descendant and left
+/// **320** entries inside directories whose names fail §5.1 — masking turned into a
+/// stranding, one move at a time.
+#[test]
+fn mv_recodes_the_interior_of_a_dir_it_cannot_resolve() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("o", "opus"));
+    mint(&root, "ao", triple("o", "officium"));
+    mint(&root, "ao", triple("t", "tutela"));
+    mint(&root, "aoo", triple("k", "kth"));
+    let old = root.join("a_actio/a_o_opus/ao_o_officium/aoo_k_kth");
+    let masked = old.join("aook_251001_candela");
+    std::fs::create_dir_all(masked.join("aook251001_b_board")).unwrap();
+    std::fs::write(masked.join("aook251001_b_board/aook251001b_note.md"), "n").unwrap();
+
+    let (plan, _) = plan_mv(&root, &Code::parse("aook").unwrap(), "aot").unwrap();
+    plan.apply(&root).unwrap();
+
+    let landed = root.join("a_actio/a_o_opus/ao_t_tutela/aot_k_kth/aotk_251001_candela");
+    assert!(landed.is_dir(), "the masked child kept the dead prefix");
+    assert!(
+        landed
+            .join("aotk251001_b_board/aotk251001b_note.md")
+            .is_file(),
+        "the masked interior was stranded"
     );
 }
 
