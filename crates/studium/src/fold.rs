@@ -120,8 +120,8 @@ pub fn figures(root: &Path, home: Option<&str>) -> Value {
         "credits_in_progress": present(annales_present, credits_in_progress),
         "open_courses": open_courses,
         "study_hours": study_hours(root, annales_present, &course_slugs(&spans)),
-        "next_exam": next_exam(root, home, &today_yymmdd()),
-        "period": period_now(&spans, &programmes, &curricula, &today_yymmdd()),
+        "next_exam": next_exam(root, home, &today_ymd()),
+        "period": period_now(&spans, &programmes, &curricula, &today_ymd()),
     })
 }
 
@@ -458,22 +458,22 @@ pub(crate) fn reflections(root: &Path, home: Option<&str>) -> Vec<Value> {
         .collect()
 }
 
-/// `today` plus `days`, as `YYMMDD` — the horizon "the next 28 days" ends at (§19.6).
+/// `today` plus `days`, as `YYYYMMDD` — the horizon "the next 28 days" ends at (§19.6).
 ///
 /// The spine's own date crate (§13), for the one piece of arithmetic a calendar cannot be
 /// compared its way out of. `None` where the day will not read, which widens the window to
 /// everything ahead rather than narrowing it to nothing.
 #[cfg(feature = "tui")]
 fn plus_days(today: &str, days: i32) -> Option<String> {
-    let year: i16 = today.get(..2)?.parse().ok()?;
-    let month: i8 = today.get(2..4)?.parse().ok()?;
-    let day: i8 = today.get(4..6)?.parse().ok()?;
-    let date = jiff::civil::date(2000 + year, month, day)
+    let year: i16 = today.get(..4)?.parse().ok()?;
+    let month: i8 = today.get(4..6)?.parse().ok()?;
+    let day: i8 = today.get(6..8)?.parse().ok()?;
+    let date = jiff::civil::date(year, month, day)
         .checked_add(jiff::Span::new().days(days))
         .ok()?;
     Some(format!(
-        "{:02}{:02}{:02}",
-        date.year() - 2000,
+        "{:04}{:02}{:02}",
+        date.year(),
         date.month(),
         date.day()
     ))
@@ -540,7 +540,7 @@ fn course_ref(line: &Value) -> Option<String> {
         .find_map(|t| t.strip_prefix("fasti:").map(str::to_owned))
 }
 
-/// The day part of a series key — `260315` from `260315` or `260315T0900` (§5.4).
+/// The day part of a series key — `20260315` from `20260315` or `20260315T0900` (§5.4).
 fn day(key: &str) -> String {
     key.split('T').next().unwrap_or(key).to_owned()
 }
@@ -567,9 +567,9 @@ fn round2(x: f64) -> f64 {
     (x * 100.0).round() / 100.0
 }
 
-/// Today as `YYMMDD` (§5.4) — the one clock read, for "next exam" alone (§19.4).
-fn today_yymmdd() -> String {
-    jiff::Zoned::now().strftime("%y%m%d").to_string()
+/// Today as `YYYYMMDD` (§5.4) — the one clock read, for "next exam" alone (§19.4).
+fn today_ymd() -> String {
+    jiff::Zoned::now().strftime("%Y%m%d").to_string()
 }
 
 #[cfg(test)]
@@ -613,14 +613,14 @@ mod tests {
     #[test]
     fn next_is_the_earliest_on_or_after_today() {
         let mut events = vec![
-            ("260315".to_owned(), "sf1624".to_owned()),
-            ("260901".to_owned(), "sf1626".to_owned()),
-            ("260110".to_owned(), "past".to_owned()),
+            ("20260315".to_owned(), "sf1624".to_owned()),
+            ("20260901".to_owned(), "sf1626".to_owned()),
+            ("20260110".to_owned(), "past".to_owned()),
         ];
-        let picked = pick_next(&mut events, "260401").unwrap();
-        assert_eq!(picked, ("260901".to_owned(), "sf1626".to_owned()));
+        let picked = pick_next(&mut events, "20260401").unwrap();
+        assert_eq!(picked, ("20260901".to_owned(), "sf1626".to_owned()));
         // Nothing ahead → nothing (§12).
-        let mut only_past = vec![("250101".to_owned(), "old".to_owned())];
-        assert!(pick_next(&mut only_past, "260401").is_none());
+        let mut only_past = vec![("20250101".to_owned(), "old".to_owned())];
+        assert!(pick_next(&mut only_past, "20260401").is_none());
     }
 }

@@ -12,7 +12,7 @@ expression: pretty(&renamed)
   "record": {
     "core": "fasti",
     "data": {
-      "from": "260101"
+      "from": "20260101"
     },
     "home": "aof",
     "kind": "span",

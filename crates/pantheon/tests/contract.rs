@@ -114,6 +114,9 @@ fn code_and_dirname_parsing() {
         (Some(&cs), "cs_a_amicitia"),
         (Some(&csa), "csa_john_appleseed_"),
         (Some(&csa), "csa_x_thing"),
+        // An enumerated level: the char is one digit, never a padded pair (§5.1).
+        (Some(&csa), "csa_0_first"),
+        (Some(&csa), "csa_a_tenth"),
     ];
     for &(parent, dir) in cases {
         let nn = parse_node_dirname(parent, dir).unwrap();
@@ -121,7 +124,7 @@ fn code_and_dirname_parsing() {
             "  {dir} => code={} form={} char={:?} label={}\n",
             nn.code.as_str(),
             nn.form.as_str(),
-            nn.ch.as_ref().map(pantheon::CharToken::as_code_str),
+            nn.ch,
             nn.label
         ));
     }
@@ -150,7 +153,7 @@ impl pantheon::Core for Album {
 
 #[test]
 fn core_schema_surface() {
-    let schema = pantheon::schema::<Album>(1);
+    let schema = pantheon::schema::<Album>(2);
     insta::assert_snapshot!(
         "core_schema_surface",
         pretty(&serde_json::to_value(&schema).unwrap())
@@ -214,7 +217,7 @@ fn verb_resolve() {
         name: "album".to_string(),
         short: "alb".to_string(),
         kinds: vec![("person".to_string(), Shape::Partitioned)],
-        format_version: 1,
+        format_version: 2,
     }]);
     let refs = [
         pantheon::Ref::parse("album:alex").unwrap(),

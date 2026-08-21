@@ -79,7 +79,7 @@ pub use screen::FastiApp;
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Span {
-    /// The day the period opens, `YYMMDD` — the same shape a series key wears (§5.4),
+    /// The day the period opens, `YYYYMMDD` — the same shape a series key wears (§5.4),
     /// so a span and an event sort against each other without a parser.
     pub from: String,
     /// The day it closes; absent while it is still open (§8.4).
@@ -112,7 +112,7 @@ pub struct Event {
     /// occurrence.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
-    /// When it ends — `hhmm`, or `YYMMDDThhmm` where it runs past its own day. The
+    /// When it ends — `hhmm`, or `YYYYMMDDThhmm` where it runs past its own day. The
     /// *start* is the line's key, which is what makes "a meeting 4–5pm" one record
     /// rather than two (§7.3, §8.4). Absent for an occurrence with no duration: a
     /// deadline is a point.
@@ -253,31 +253,33 @@ fn validate_event(event: &Event) -> Result<()> {
     check_remark(event.note.as_deref())
 }
 
-/// A day is `YYMMDD`, the shape a series key wears (§5.4) — so a span's bounds and an
+/// A day is `YYYYMMDD`, the shape a series key wears (§5.4) — so a span's bounds and an
 /// event's key sort the same way, and a fold can line them up without a parser.
 fn check_day(value: &str, which: &str) -> Result<()> {
-    if value.len() == 6 && value.bytes().all(|b| b.is_ascii_digit()) {
+    if value.len() == pantheon::DATE_WIDTH && value.bytes().all(|b| b.is_ascii_digit()) {
         Ok(())
     } else {
         Err(Error::validation(format!(
-            "{which} is malformed ({value:?}): a day is YYMMDD (§5.4, §8.4)"
+            "{which} is malformed ({value:?}): a day is YYYYMMDD (§5.4, §8.4)"
         )))
     }
 }
 
-/// An end is `hhmm` — the same day — or `YYMMDDThhmm` where the occurrence runs past
+/// An end is `hhmm` — the same day — or `YYYYMMDDThhmm` where the occurrence runs past
 /// it. The same two forms `-a` accepts for the start (§7.3), so a hand types one shape.
 fn check_when(value: &str) -> Result<()> {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     let ok = match value.split_once('T') {
-        Some((day, time)) => digits(day) && day.len() == 6 && digits(time) && time.len() == 4,
+        Some((day, time)) => {
+            digits(day) && day.len() == pantheon::DATE_WIDTH && digits(time) && time.len() == 4
+        }
         None => digits(value) && value.len() == 4,
     };
     if ok {
         Ok(())
     } else {
         Err(Error::validation(format!(
-            "--until is malformed ({value:?}): an end is hhmm or YYMMDDThhmm (§7.3, §8.4)"
+            "--until is malformed ({value:?}): an end is hhmm or YYYYMMDDThhmm (§7.3, §8.4)"
         )))
     }
 }

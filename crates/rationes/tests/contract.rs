@@ -120,7 +120,10 @@ fn balance_file(root: &Path, code: &str, slug: &str) -> PathBuf {
 /// A `crp` account with one reading on it — the fixture most tests start from.
 fn with_checking(root: &Path) {
     assert_eq!(rat(root, &["crp", "checking", "--currency", "usd"]).0, 0);
-    assert_eq!(rat(root, &["crp", "checking", "4200", "-a", "260718"]).0, 0);
+    assert_eq!(
+        rat(root, &["crp", "checking", "4200", "-a", "20260718"]).0,
+        0
+    );
 }
 
 // ── the discovery surface (§7.2) ────────────────────────────────────────────
@@ -178,7 +181,7 @@ fn verb_add_writes_a_balance_reading() {
     assert_eq!(rat(&root, &["crp", "checking", "--currency", "usd"]).0, 0);
     assert!(!balance_file(&root, "crp", "checking").exists());
 
-    let (code, fresh) = rat(&root, &["crp", "checking", "4200", "-a", "260718"]);
+    let (code, fresh) = rat(&root, &["crp", "checking", "4200", "-a", "20260718"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_balance_fresh", pretty(&fresh));
     // The determinant's first reading mints the series, without `-c` (§7.3, §8.3).
@@ -186,7 +189,7 @@ fn verb_add_writes_a_balance_reading() {
 
     // A second reading on the same key is an overwrite — I1's correction path for a
     // figure read wrong, shown and confirmed before it commits (§6.1, §7.3).
-    let (code, pending) = rat(&root, &["crp", "checking", "4250", "-a", "260718"]);
+    let (code, pending) = rat(&root, &["crp", "checking", "4250", "-a", "20260718"]);
     assert_eq!(code, 5);
     insta::assert_snapshot!(
         "verb_add_balance_overwrite_pending",
@@ -194,7 +197,7 @@ fn verb_add_writes_a_balance_reading() {
     );
 
     // A different key is a different reading and runs free.
-    let (code, next) = rat(&root, &["crp", "checking", "4310", "-a", "260719"]);
+    let (code, next) = rat(&root, &["crp", "checking", "4310", "-a", "20260719"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_balance_next_key", pretty(&next));
 }
@@ -205,7 +208,7 @@ fn verb_add_writes_a_balance_reading() {
 fn a_reading_finds_its_holding_without_a_home() {
     let root = fresh_root();
     assert_eq!(rat(&root, &["crb", "bicycle", "-k", "asset"]).0, 0);
-    let (code, written) = rat(&root, &["bicycle", "900", "-a", "260718"]);
+    let (code, written) = rat(&root, &["bicycle", "900", "-a", "20260718"]);
     assert_eq!(code, 0);
     assert_eq!(written["home"], "crb");
     assert!(balance_file(&root, "crb", "bicycle").exists());
@@ -337,11 +340,11 @@ fn verb_rm_at_a_key_drops_one_reading() {
     let root = fresh_root();
     with_checking(&root);
     assert_eq!(
-        rat(&root, &["crp", "checking", "4310", "-a", "260719"]).0,
+        rat(&root, &["crp", "checking", "4310", "-a", "20260719"]).0,
         0
     );
 
-    let (code, removed) = rat(&root, &["rm", "checking", "-a", "260719", "-y"]);
+    let (code, removed) = rat(&root, &["rm", "checking", "-a", "20260719", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_rm_reading", pretty(&removed));
     // The holding and its earlier reading both stand.
@@ -359,7 +362,7 @@ fn verbs_read() {
     let root = fresh_root();
     with_checking(&root);
     assert_eq!(
-        rat(&root, &["crp", "checking", "4310", "-a", "260719"]).0,
+        rat(&root, &["crp", "checking", "4310", "-a", "20260719"]).0,
         0
     );
     assert_eq!(
@@ -370,11 +373,14 @@ fn verbs_read() {
         .0,
         0
     );
-    assert_eq!(rat(&root, &["crb", "bicycle", "900", "-a", "260718"]).0, 0);
+    assert_eq!(
+        rat(&root, &["crb", "bicycle", "900", "-a", "20260718"]).0,
+        0
+    );
     assert_eq!(
         rat(
             &root,
-            &["cri", "passport", "-k", "claim", "--expires", "300101"]
+            &["cri", "passport", "-k", "claim", "--expires", "20300101"]
         )
         .0,
         0
@@ -387,8 +393,8 @@ fn verbs_read() {
         ("get checking", vec!["get", "checking"]),
         ("series checking", vec!["series", "checking"]),
         (
-            "series checking --from 260719",
-            vec!["series", "checking", "--from", "260719"],
+            "series checking --from 20260719",
+            vec!["series", "checking", "--from", "20260719"],
         ),
         ("where passport", vec!["where", "passport"]),
     ] {
@@ -413,7 +419,10 @@ fn net_worth_folds_only_what_carries_a_balance() {
         .0,
         0
     );
-    assert_eq!(rat(&root, &["crb", "bicycle", "900", "-a", "260718"]).0, 0);
+    assert_eq!(
+        rat(&root, &["crb", "bicycle", "900", "-a", "20260718"]).0,
+        0
+    );
     // Priced in another unit, so it folds into its own bucket rather than the total.
     assert_eq!(
         rat(
@@ -423,12 +432,15 @@ fn net_worth_folds_only_what_carries_a_balance() {
         .0,
         0
     );
-    assert_eq!(rat(&root, &["crb", "vanguard", "12", "-a", "260718"]).0, 0);
+    assert_eq!(
+        rat(&root, &["crb", "vanguard", "12", "-a", "20260718"]).0,
+        0
+    );
     // A claim carries no balance and so reaches the fold not at all.
     assert_eq!(
         rat(
             &root,
-            &["cri", "passport", "-k", "claim", "--expires", "300101"]
+            &["cri", "passport", "-k", "claim", "--expires", "20300101"]
         )
         .0,
         0
@@ -465,7 +477,7 @@ fn series_of_a_holding_with_no_readings_is_not_found() {
 #[test]
 fn refusal_a_balance_without_its_determinant() {
     let root = fresh_root();
-    let (code, err) = rat(&root, &["crp", "nonexistent", "4200", "-a", "260718"]);
+    let (code, err) = rat(&root, &["crp", "nonexistent", "4200", "-a", "20260718"]);
     assert_eq!(code, 4, "a missing determinant is not found (§7.3)");
     insta::assert_snapshot!("refusal_balance_without_determinant", pretty(&err));
     assert!(
@@ -475,7 +487,7 @@ fn refusal_a_balance_without_its_determinant() {
     // And a typo on a holding that *does* exist is the same not-found, not a second
     // series beside the first.
     assert_eq!(rat(&root, &["crp", "checking"]).0, 0);
-    let (code, _) = rat(&root, &["crp", "chekcing", "4200", "-a", "260718"]);
+    let (code, _) = rat(&root, &["crp", "chekcing", "4200", "-a", "20260718"]);
     assert_eq!(code, 4);
     assert!(!balance_file(&root, "crp", "chekcing").exists());
 }
@@ -490,12 +502,12 @@ fn refusal_a_balance_on_a_claim() {
     assert_eq!(
         rat(
             &root,
-            &["cri", "passport", "-k", "claim", "--expires", "300101"]
+            &["cri", "passport", "-k", "claim", "--expires", "20300101"]
         )
         .0,
         0
     );
-    let (code, err) = rat(&root, &["cri", "passport", "100", "-a", "260718"]);
+    let (code, err) = rat(&root, &["cri", "passport", "100", "-a", "20260718"]);
     assert_eq!(code, 3);
     insta::assert_snapshot!("refusal_balance_on_a_claim", pretty(&err));
     assert!(!balance_file(&root, "cri", "passport").exists());
@@ -546,11 +558,14 @@ fn refusals_of_the_universal_flags() {
         ),
         ("-k balance on a read", vec!["list", "-k", "balance"]),
         // `-a` dates a reading, and there is no reading here to date.
-        ("-a with no amount", vec!["crp", "checking", "-a", "260718"]),
+        (
+            "-a with no amount",
+            vec!["crp", "checking", "-a", "20260718"],
+        ),
         // A reading is corrected by writing its key again (I1, §7.3).
         (
             "-a on an edit",
-            vec!["edit", "checking", "--note", "x", "-a", "260718"],
+            vec!["edit", "checking", "--note", "x", "-a", "20260718"],
         ),
         // Arity decides the form; content never does (§5.1, §7.3).
         (
@@ -599,7 +614,7 @@ fn dry_run_writes_nothing_and_mints_nothing() {
     let root = fresh_root();
     assert_eq!(rat(&root, &["crp", "checking"]).0, 0);
 
-    let (code, plan) = rat(&root, &["crp", "checking", "4200", "-a", "260718", "-n"]);
+    let (code, plan) = rat(&root, &["crp", "checking", "4200", "-a", "20260718", "-n"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("dry_run_first_reading", pretty(&redact(plan)));
     assert!(!balance_file(&root, "crp", "checking").exists());
@@ -610,7 +625,7 @@ fn dry_run_writes_nothing_and_mints_nothing() {
 fn a_stale_plan_token_is_refused() {
     let root = fresh_root();
     with_checking(&root);
-    let (code, plan) = rat(&root, &["crp", "checking", "4250", "-a", "260718", "-n"]);
+    let (code, plan) = rat(&root, &["crp", "checking", "4250", "-a", "20260718", "-n"]);
     assert_eq!(code, 0);
     let token = plan["token"].as_str().unwrap().to_string();
 
@@ -619,7 +634,7 @@ fn a_stale_plan_token_is_refused() {
         rat(
             &root,
             &[
-                "crp", "checking", "4250", "-a", "260718", "-y", "-p", &token
+                "crp", "checking", "4250", "-a", "20260718", "-y", "-p", &token
             ]
         )
         .0,
@@ -629,7 +644,7 @@ fn a_stale_plan_token_is_refused() {
     let (code, err) = rat(
         &root,
         &[
-            "crp", "checking", "4999", "-a", "260718", "-y", "-p", &token,
+            "crp", "checking", "4999", "-a", "20260718", "-y", "-p", &token,
         ],
     );
     assert_eq!(code, 3);
@@ -644,14 +659,14 @@ fn a_rule_may_plan_but_never_write() {
     with_checking(&root);
     let rule = [("PANTHEON_RULE", "1")];
 
-    let ((code, err), _) = rat_env(&root, &["crp", "checking", "4310", "-a", "260719"], &rule);
+    let ((code, err), _) = rat_env(&root, &["crp", "checking", "4310", "-a", "20260719"], &rule);
     assert_eq!(code, 6);
     insta::assert_snapshot!("refusal_under_rule", pretty(&err));
 
     // `--dry-run` computes without writing, so a rule may still plan (§7.3).
     let ((code, _), _) = rat_env(
         &root,
-        &["crp", "checking", "4310", "-a", "260719", "-n"],
+        &["crp", "checking", "4310", "-a", "20260719", "-n"],
         &rule,
     );
     assert_eq!(code, 0);

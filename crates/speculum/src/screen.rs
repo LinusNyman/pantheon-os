@@ -247,8 +247,11 @@ fn dated_rows(root: &std::path::Path) -> Vec<Row> {
     out
 }
 
-/// Whether a key names a date — six leading digits (`YYMMDD`), optionally trailed by a
-/// time (`260703T1400`). A slug is not a date, so it is not on the horizon (§6.1).
+/// Whether a key names a date — eight leading digits (`YYYYMMDD`), optionally trailed by
+/// a time (`20260703T1400`). A slug is not a date, so it is not on the horizon (§6.1).
 fn is_date_key(key: &str) -> bool {
-    key.len() >= 6 && key.as_bytes()[..6].iter().all(u8::is_ascii_digit)
+    key.len() >= pantheon::DATE_WIDTH
+        && key.as_bytes()[..pantheon::DATE_WIDTH]
+            .iter()
+            .all(u8::is_ascii_digit)
 }

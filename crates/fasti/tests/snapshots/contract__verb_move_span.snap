@@ -10,7 +10,7 @@ expression: pretty(&moved)
   "record": {
     "core": "fasti",
     "data": {
-      "from": "260401"
+      "from": "20260401"
     },
     "home": "aoa",
     "kind": "span",

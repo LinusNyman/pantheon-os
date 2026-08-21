@@ -70,7 +70,7 @@ pub struct Holding {
     /// rather than across it: adding dollars to shares would be a lie (§8.3, I1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub currency: Option<String>,
-    /// When the holding lapses (`YYMMDD`) — a `claim`'s expiry, which §8.3 makes a
+    /// When the holding lapses (`YYYYMMDD`) — a `claim`'s expiry, which §8.3 makes a
     /// **field** precisely because it is one date and not a series of them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires: Option<String>,
@@ -222,7 +222,7 @@ fn validate_holding(holding: &Holding) -> Result<()> {
             KeyShape::Date | KeyShape::DateTime
         ) {
             return Err(Error::validation(format!(
-                "--expires takes the day the holding lapses (YYMMDD), and {expires:?} \
+                "--expires takes the day the holding lapses (YYYYMMDD), and {expires:?} \
                  is not one (§5.4, §8.3)"
             )));
         }

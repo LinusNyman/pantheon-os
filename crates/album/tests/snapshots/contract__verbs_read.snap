@@ -8,8 +8,8 @@ $ alb get mara
   "data": {
     "away": [
       {
-        "from": "260601",
-        "to": "260615"
+        "from": "20260601",
+        "to": "20260615"
       }
     ],
     "gender": "female"
@@ -45,8 +45,8 @@ $ alb list
     "data": {
       "away": [
         {
-          "from": "260601",
-          "to": "260615"
+          "from": "20260601",
+          "to": "20260615"
         }
       ],
       "gender": "female"

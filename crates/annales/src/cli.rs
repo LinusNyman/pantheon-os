@@ -256,7 +256,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Where { tokens } => cmd_where(cli, tokens),
         Cmd::Schema => Ok(Response::Json(serde_json::to_value(pantheon::schema::<
             Annales,
-        >(1))?)),
+        >(2))?)),
         Cmd::Version => Ok(Response::Json(version_json())),
         Cmd::Help => Ok(Response::Json(help_json())),
         Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
@@ -460,7 +460,7 @@ fn cmd_series(
     let sref = target.existing.clone().ok_or_else(|| missing(&target))?;
     let mut lines = ctx.store.read_series(&sref)?;
     // A window is a filter on the collection, never a second verb (§7.2). A `--to`
-    // date also admits that day's timed keys (`260703T1400` is within `--to 260703`).
+    // date also admits that day's timed keys (`20260703T1400` is within `--to 20260703`).
     if let Some(from) = from {
         lines.retain(|l| l.key.as_str() >= from);
     }
@@ -776,7 +776,7 @@ fn version_json() -> Value {
         "name": Annales::NAME,
         "short": "ann",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 

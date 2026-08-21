@@ -104,7 +104,7 @@ struct Fields {
     /// Where you met them — provenance, never a home (I3).
     #[arg(long = "origin", value_name = "O", num_args = 0..=1)]
     origin: Option<Option<String>>,
-    /// A period away, `FROM` or `FROM..TO` in YYMMDD; repeatable (§6.1).
+    /// A period away, `FROM` or `FROM..TO` in YYYYMMDD; repeatable (§6.1).
     #[arg(long = "away", value_name = "PERIOD")]
     away: Vec<String>,
     /// A hand's remark on this agent.
@@ -285,7 +285,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Where { slug } => cmd_where(cli, slug),
         Cmd::Schema => Ok(Response::Json(serde_json::to_value(pantheon::schema::<
             Album,
-        >(1))?)),
+        >(2))?)),
         Cmd::Version => Ok(Response::Json(version_json())),
         Cmd::Help => Ok(Response::Json(help_json())),
     }
@@ -949,7 +949,7 @@ fn version_json() -> Value {
         "name": Album::NAME,
         "short": "alb",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 

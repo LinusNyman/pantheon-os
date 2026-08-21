@@ -17,7 +17,7 @@ Versions live in the workspace manifest (§14); one appears here only where it c
 | File locks | `fd-lock` | one advisory lock per record file (§6.4); cross-platform |
 | Plan tokens | `sha2` | hashes the computed change for `--dry-run` / `--plan` (§7.3) |
 | Editor launch | `shell-words` | splits `$VISUAL`/`$EDITOR` into argv so `code -w` works (§7.3); the child is spawned directly, never through `sh -c` |
-| Time / keys | `jiff` | dates, timestamps, `YYMMDD` keys; it carries the tz database a friend's local clock needs (§8.2, §11.2) |
+| Time / keys | `jiff` | dates, timestamps, `YYYYMMDD` keys; it carries the tz database a friend's local clock needs (§8.2, §11.2) |
 | Errors | `thiserror` (libs) + `anyhow` (bins) | §7.3's exit codes are contract, so a bin maps a typed error to its code and to `{"error":{"code":…,"msg":…}}` at the edge — never `anyhow`'s prose |
 | Tests | `insta` + `cargo-nextest` | snapshot the JSON contract |
 

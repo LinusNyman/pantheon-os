@@ -2,5 +2,5 @@
 source: crates/fasti/tests/contract.rs
 expression: events.clone()
 ---
-{"key":"260719","refs":["fasti:mvp_phase"],"data":{"values":["kickoff"]}}
-{"key":"260720T1400","refs":[],"data":{"values":["demo"],"until":"1500"}}
+{"key":"20260719","refs":["fasti:mvp_phase"],"data":{"values":["kickoff"]}}
+{"key":"20260720T1400","refs":[],"data":{"values":["demo"],"until":"1500"}}

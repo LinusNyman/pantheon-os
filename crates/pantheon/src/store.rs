@@ -359,7 +359,7 @@ impl<C: Core> Store<C> {
 
     /// The present of a series (I1), and the one rule that covers both kinds of key
     /// (§5.4). A **date-keyed** line is a *sample*, so the series folds to the line at
-    /// the latest key — keys sort lexicographically, which for `YYMMDD`(`Thhmm`) is
+    /// the latest key — keys sort lexicographically, which for `YYYYMMDD`(`Thhmm`) is
     /// chronological. A **name-keyed** line is a *record* (a Pensum task), so it is
     /// already its own present and every one survives the fold.
     ///

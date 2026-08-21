@@ -11,7 +11,7 @@ expression: pretty(&unspanned)
       ]
     },
     "home": "aof",
-    "key": "260720",
+    "key": "20260720",
     "kind": "event",
     "refs": [],
     "series": "standups"
@@ -24,7 +24,7 @@ expression: pretty(&unspanned)
       ]
     },
     "home": "aof",
-    "key": "260721",
+    "key": "20260721",
     "kind": "event",
     "refs": [
       "fasti:standups"
@@ -39,7 +39,7 @@ expression: pretty(&unspanned)
       ]
     },
     "home": "aof",
-    "key": "260722",
+    "key": "20260722",
     "kind": "event",
     "refs": [],
     "series": "standups"

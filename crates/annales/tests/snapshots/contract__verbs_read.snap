@@ -13,7 +13,7 @@ series weight:
       ]
     },
     "home": "ecv",
-    "key": "260718",
+    "key": "20260718",
     "kind": "log",
     "refs": [],
     "series": "weight"
@@ -26,13 +26,13 @@ series weight:
       ]
     },
     "home": "ecv",
-    "key": "260719",
+    "key": "20260719",
     "kind": "log",
     "refs": [],
     "series": "weight"
   }
 ]
-series weight --from 260719:
+series weight --from 20260719:
 [
   {
     "core": "annales",
@@ -42,7 +42,7 @@ series weight --from 260719:
       ]
     },
     "home": "ecv",
-    "key": "260719",
+    "key": "20260719",
     "kind": "log",
     "refs": [],
     "series": "weight"
@@ -57,7 +57,7 @@ get weight:
     ]
   },
   "home": "ecv",
-  "key": "260719",
+  "key": "20260719",
   "kind": "log",
   "refs": [],
   "series": "weight"
@@ -68,7 +68,7 @@ list:
     "core": "annales",
     "data": {},
     "home": "ecv",
-    "key": "260718",
+    "key": "20260718",
     "kind": "log",
     "refs": [
       "mappa:office"
@@ -83,7 +83,7 @@ list:
       ]
     },
     "home": "ecv",
-    "key": "260719",
+    "key": "20260719",
     "kind": "log",
     "refs": [],
     "series": "weight"

@@ -83,7 +83,7 @@ fn listed(root: &Path) -> Vec<String> {
 fn seeded() -> PathBuf {
     let root = fresh_root();
     assert_eq!(
-        fas(&root, &["aof", "MVP Phase", "--from", "260101"]),
+        fas(&root, &["aof", "MVP Phase", "--from", "20260101"]),
         0,
         "the fixture record must file"
     );

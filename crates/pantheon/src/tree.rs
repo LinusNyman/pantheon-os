@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use crate::code::{CharToken, Code, CodeForm, NodeName, parse_node_dirname};
+use crate::code::{Code, CodeForm, NodeName, parse_node_dirname};
 use crate::{Error, Result};
 
 /// A node in the ontology tree, its identity read off its directory (§5.1).
@@ -15,7 +15,7 @@ pub struct Node {
     pub code: Code,
     pub form: CodeForm,
     /// The defining char — `None` for a definition-prefix node.
-    pub ch: Option<CharToken>,
+    pub ch: Option<char>,
     pub label: String,
     pub path: PathBuf,
     pub children: Vec<Node>,
@@ -28,7 +28,7 @@ impl Node {
     pub fn to_json(&self) -> serde_json::Value {
         json!({
             "code": self.code.as_str(),
-            "char": self.ch.as_ref().map(CharToken::as_code_str),
+            "char": self.ch.map(|c| c.to_string()),
             "label": self.label,
             "form": self.form.as_str(),
             "children": self.children.iter().map(Node::to_json).collect::<Vec<_>>(),

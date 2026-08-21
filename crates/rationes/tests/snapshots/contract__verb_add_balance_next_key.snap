@@ -9,7 +9,7 @@ expression: pretty(&next)
     "amount": 4310.0
   },
   "home": "crp",
-  "key": "260719",
+  "key": "20260719",
   "kind": "balance",
   "refs": [],
   "series": "checking"

@@ -63,17 +63,12 @@ impl Span {
     }
 }
 
-/// The reading key a dated record wears (§6.1) — `YYMMDD`. Referenced, never coined
+/// The reading key a dated record wears (§6.1) — `YYYYMMDD`. Referenced, never coined
 /// here (I1); the same format Porticus's Calendar speaks, so a window boundary and a
-/// row's `when` compare as plain strings (lexical order is chronological within a
-/// century).
+/// row's `when` compare as plain strings — and with a four-digit year that lexical
+/// order is chronological outright, not merely within one century (§5.4).
 fn key_of(day: Date) -> String {
-    format!(
-        "{:02}{:02}{:02}",
-        day.year().rem_euclid(100),
-        day.month(),
-        day.day()
-    )
+    format!("{:04}{:02}{:02}", day.year(), day.month(), day.day())
 }
 
 /// The dated points across every core, on a window the hand controls.
@@ -188,11 +183,11 @@ where
             .into_iter()
             .filter(|row| {
                 // A dated point's `when` is its key; its date prefix decides the window
-                // (a timed reading `260703T1400` falls on `260703`). An undated row — a
-                // task, a place — has no `when` and never lands on the horizon.
+                // (a timed reading `20260703T1400` falls on `20260703`). An undated row
+                // — a task, a place — has no `when` and never lands on the horizon.
                 row.when.as_deref().is_some_and(|when| {
-                    let day = when.get(..6).unwrap_or(when);
-                    day.len() == 6 && day >= lo.as_str() && day <= hi.as_str()
+                    let day = when.get(..pantheon::DATE_WIDTH).unwrap_or(when);
+                    day.len() == pantheon::DATE_WIDTH && day >= lo.as_str() && day <= hi.as_str()
                 })
             })
             .collect();

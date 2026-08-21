@@ -13,7 +13,7 @@ expression: pretty(&redact(pending))
         ]
       },
       "home": "ecv",
-      "key": "260718",
+      "key": "20260718",
       "kind": "log",
       "refs": [],
       "series": "weight"
@@ -26,14 +26,14 @@ expression: pretty(&redact(pending))
         ]
       },
       "home": "ecv",
-      "key": "260718",
+      "key": "20260718",
       "kind": "log",
       "refs": [],
       "series": "weight"
     },
     "core": "annales",
     "home": "ecv",
-    "key": "260718",
+    "key": "20260718",
     "kind": "log",
     "series": "weight",
     "verb": "add"

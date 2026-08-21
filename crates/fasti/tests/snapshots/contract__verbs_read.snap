@@ -6,8 +6,8 @@ $ fas get mvp_phase
 {
   "core": "fasti",
   "data": {
-    "from": "260101",
-    "to": "260630"
+    "from": "20260101",
+    "to": "20260630"
   },
   "home": "aof",
   "kind": "span",
@@ -25,7 +25,7 @@ $ fas get standups
     ]
   },
   "home": "aof",
-  "key": "260720T1400",
+  "key": "20260720T1400",
   "kind": "event",
   "refs": [],
   "series": "standups"
@@ -41,7 +41,7 @@ $ fas series standups
       ]
     },
     "home": "aof",
-    "key": "260719",
+    "key": "20260719",
     "kind": "event",
     "refs": [
       "fasti:mvp_phase"
@@ -57,14 +57,14 @@ $ fas series standups
       ]
     },
     "home": "aof",
-    "key": "260720T1400",
+    "key": "20260720T1400",
     "kind": "event",
     "refs": [],
     "series": "standups"
   }
 ]
 
-$ fas series standups --from 260720
+$ fas series standups --from 20260720
 [
   {
     "core": "fasti",
@@ -75,7 +75,7 @@ $ fas series standups --from 260720
       ]
     },
     "home": "aof",
-    "key": "260720T1400",
+    "key": "20260720T1400",
     "kind": "event",
     "refs": [],
     "series": "standups"
@@ -87,7 +87,7 @@ $ fas list
   {
     "core": "fasti",
     "data": {
-      "from": "240301"
+      "from": "20240301"
     },
     "home": "aof",
     "kind": "span",
@@ -99,8 +99,8 @@ $ fas list
   {
     "core": "fasti",
     "data": {
-      "from": "260101",
-      "to": "260630"
+      "from": "20260101",
+      "to": "20260630"
     },
     "home": "aof",
     "kind": "span",
@@ -116,7 +116,7 @@ $ fas list
       ]
     },
     "home": "aof",
-    "key": "260720T1400",
+    "key": "20260720T1400",
     "kind": "event",
     "refs": [],
     "series": "standups"
@@ -128,7 +128,7 @@ $ fas list -k span
   {
     "core": "fasti",
     "data": {
-      "from": "240301"
+      "from": "20240301"
     },
     "home": "aof",
     "kind": "span",
@@ -140,8 +140,8 @@ $ fas list -k span
   {
     "core": "fasti",
     "data": {
-      "from": "260101",
-      "to": "260630"
+      "from": "20260101",
+      "to": "20260630"
     },
     "home": "aof",
     "kind": "span",
@@ -161,7 +161,7 @@ $ fas list -k event
       ]
     },
     "home": "aof",
-    "key": "260720T1400",
+    "key": "20260720T1400",
     "kind": "event",
     "refs": [],
     "series": "standups"

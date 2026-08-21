@@ -2,12 +2,12 @@
 source: crates/fasti/tests/contract.rs
 expression: out
 ---
-$ fas edit mvp --to 260901
+$ fas edit mvp --to 20260901
 {
   "core": "fasti",
   "data": {
-    "from": "260101",
-    "to": "260901"
+    "from": "20260101",
+    "to": "20260901"
   },
   "home": "aof",
   "kind": "span",
@@ -15,7 +15,7 @@ $ fas edit mvp --to 260901
   "slug": "mvp"
 }
 
-$ fas edit 260719 'kickoff done'
+$ fas edit 20260719 'kickoff done'
 {
   "core": "fasti",
   "data": {
@@ -24,7 +24,7 @@ $ fas edit 260719 'kickoff done'
     ]
   },
   "home": "aof",
-  "key": "260719",
+  "key": "20260719",
   "kind": "event",
   "refs": [],
   "series": "standups"

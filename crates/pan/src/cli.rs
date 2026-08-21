@@ -698,12 +698,12 @@ fn cmd_doctor() -> RunOk {
         "short": "pan",
         "name": "pantheon",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })];
     let mut absent = Vec::new();
     let mut formats: std::collections::BTreeMap<u64, Vec<String>> =
         std::collections::BTreeMap::new();
-    formats.entry(1).or_default().push("pan".to_string());
+    formats.entry(2).or_default().push("pan".to_string());
 
     for short in KNOWN_SHORTS {
         match probe_version(short) {

@@ -12,7 +12,7 @@ expression: pretty(&redact(pending))
         ]
       },
       "home": "aof",
-      "key": "260719T1600",
+      "key": "20260719T1600",
       "kind": "event",
       "refs": [],
       "series": "standups"
@@ -26,14 +26,14 @@ expression: pretty(&redact(pending))
         ]
       },
       "home": "aof",
-      "key": "260719T1600",
+      "key": "20260719T1600",
       "kind": "event",
       "refs": [],
       "series": "standups"
     },
     "core": "fasti",
     "home": "aof",
-    "key": "260719T1600",
+    "key": "20260719T1600",
     "kind": "event",
     "series": "standups",
     "verb": "add"

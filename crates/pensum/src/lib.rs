@@ -57,7 +57,7 @@ pub use screen::PensumApp;
 /// scheduler, and §18 forbids the second.
 #[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Task {
-    /// The date the doing was done (`YYMMDD`), absent while it is still intended.
+    /// The date the doing was done (`YYYYMMDD`), absent while it is still intended.
     ///
     /// A date rather than a flag, because "done" is a thing that happened on a day
     /// and the record may as well say which. Marking it is an ordinary `edit`: the
@@ -95,7 +95,7 @@ impl Core for Pensum {
                 KeyShape::Date | KeyShape::DateTime
             ) {
                 return Err(Error::validation(format!(
-                    "--done takes the date it was done (YYMMDD), and {done:?} is not \
+                    "--done takes the date it was done (YYYYMMDD), and {done:?} is not \
                      one (§5.4, §7.3)"
                 )));
             }

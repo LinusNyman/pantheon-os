@@ -159,7 +159,7 @@ fn version_is_what_doctor_reads() {
     assert_eq!(version["short"], "aus");
     assert_eq!(version["name"], "auspex");
     assert_eq!(
-        version["format_version"], 1,
+        version["format_version"], 2,
         "a disagreement here is what `pan doctor` exists to report (§15.5)"
     );
     insta::assert_snapshot!("version", pretty(&version));

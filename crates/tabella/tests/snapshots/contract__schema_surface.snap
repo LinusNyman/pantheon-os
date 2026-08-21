@@ -3,7 +3,7 @@ source: crates/tabella/tests/contract.rs
 expression: pretty(&schema)
 ---
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "tabella",
   "record": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",

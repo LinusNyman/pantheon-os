@@ -115,7 +115,7 @@ fn version_json() -> Value {
         "name": "studium",
         "short": "stu",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 

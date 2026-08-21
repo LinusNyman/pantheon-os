@@ -41,12 +41,12 @@ pub fn plan_new(root: &Path, parent: &str, spec: NewSpec) -> Result<(Plan, Value
             };
             let code_str = match &parent_code {
                 Some(p) => format!("{}{ch}", p.as_str()),
-                None => ch.clone(),
+                None => ch.to_string(),
             };
             (
                 dirname,
                 Code::parse(&code_str)?,
-                Value::String(ch),
+                Value::String(ch.to_string()),
                 label,
                 CodeForm::Triple,
             )
@@ -111,18 +111,17 @@ fn resolve_parent(root: &Path, parent: &str) -> Result<(Option<Code>, PathBuf)> 
     Ok((Some(code), path))
 }
 
-/// A defining char is one alphabetic character or two ASCII digits (§5.1),
-/// normalized on the way in.
-pub(crate) fn normalize_char(ch: &str) -> Result<String> {
+/// A defining char is exactly **one** character — a letter or an ASCII digit (§5.1) —
+/// normalized on the way in. An enumerated level counts `0`..`9` and then continues
+/// `a`..`z`, which is also the order the names sort in as text.
+pub(crate) fn normalize_char(ch: &str) -> Result<char> {
     let ch = name::normalize_token(ch, "char")?;
-    let two_digits = ch.len() == 2 && ch.bytes().all(|b| b.is_ascii_digit());
-    let one_alpha = ch.chars().count() == 1 && ch.chars().all(char::is_alphabetic);
-    if two_digits || one_alpha {
-        Ok(ch)
-    } else {
-        Err(Error::usage(format!(
-            "char {ch:?} must be one letter or two digits (§5.1)"
-        )))
+    let mut it = ch.chars();
+    match (it.next(), it.next()) {
+        (Some(c), None) if c.is_alphabetic() || c.is_ascii_digit() => Ok(c),
+        _ => Err(Error::usage(format!(
+            "char {ch:?} must be one letter or one digit (§5.1)"
+        ))),
     }
 }
 

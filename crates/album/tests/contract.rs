@@ -309,7 +309,7 @@ fn verbs_read() {
             "--gender",
             "female",
             "--away",
-            "260601..260615",
+            "20260601..20260615",
         ],
     );
     alb(&root, &["csa", "book_club", "-k", "group"]);
@@ -534,7 +534,7 @@ fn exit_codes() {
         ("no such slug", vec!["get", "nobody"]),
         ("a slug at two nodes", vec!["get", "mara"]),
         ("-c mints nothing", vec!["csa", "x", "-c"]),
-        ("-a keys nothing", vec!["csa", "x", "-a", "260718"]),
+        ("-a keys nothing", vec!["csa", "x", "-a", "20260718"]),
         ("no series to read", vec!["series"]),
         ("a token album lacks", vec!["csa", "x", "-k", "task"]),
         ("a name is one token", vec!["csa", "john", "appleseed"]),

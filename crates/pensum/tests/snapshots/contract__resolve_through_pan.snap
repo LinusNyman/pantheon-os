@@ -32,7 +32,7 @@ expression: "pretty(&serde_json::from_slice::<Value>(&out.stdout).unwrap())"
     }
   ],
   "unresolved": [
-    "pensum:260718",
+    "pensum:20260718",
     "pensum:never_written"
   ]
 }

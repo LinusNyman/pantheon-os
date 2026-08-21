@@ -13,7 +13,7 @@ expression: pretty(&redact(plan))
         ]
       },
       "home": "ecv",
-      "key": "260718",
+      "key": "20260718",
       "kind": "log",
       "refs": [],
       "series": "weight"
@@ -21,7 +21,7 @@ expression: pretty(&redact(plan))
     "before": null,
     "core": "annales",
     "home": "ecv",
-    "key": "260718",
+    "key": "20260718",
     "kind": "log",
     "series": "weight",
     "verb": "add"

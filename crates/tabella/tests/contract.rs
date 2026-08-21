@@ -612,7 +612,7 @@ fn exit_codes() {
             vec!["-k", "person", "get", "trip_idea"],
         ),
         ("no series to mint", vec!["ecv", "x", "-c"]),
-        ("no key to date", vec!["ecv", "x", "-a", "260718"]),
+        ("no key to date", vec!["ecv", "x", "-a", "20260718"]),
         ("no series to read", vec!["series"]),
         (
             "raw is one document's body, so only `get` has one",

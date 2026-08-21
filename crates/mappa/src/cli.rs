@@ -294,7 +294,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Where { slug } => cmd_where(cli, slug),
         Cmd::Schema => Ok(Response::Json(serde_json::to_value(pantheon::schema::<
             Mappa,
-        >(1))?)),
+        >(2))?)),
         Cmd::Version => Ok(Response::Json(version_json())),
         Cmd::Help => Ok(Response::Json(help_json())),
     }
@@ -981,7 +981,7 @@ fn version_json() -> Value {
         "name": Mappa::NAME,
         "short": "map",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 

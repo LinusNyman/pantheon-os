@@ -11,7 +11,7 @@ exit 2: a token album lacks — album has no "task" token; it declares person, o
 exit 2: a name is one token — a name is one token, and 2 were given — did you mean "john_appleseed"? (§5.1, §7.3)
 exit 2: add needs a name — name the album record (§7.3)
 exit 3: a blank field — --note is blank (§8.1)
-exit 3: a malformed away — away period 0 has a malformed from "26060": a day is YYMMDD (§5.4)
+exit 3: a malformed away — away period 0 has a malformed from "26060": a day is YYYYMMDD (§5.4)
 exit 3: a slug another kind holds — csa already holds "book_club" as a group: two kinds spell two files but only one `album:book_club`, so the ref would be ambiguous (§5.4, §18)
 exit 2: a malformed ref — reference "not-a-ref" is not `core:slug`
 exit 5: an overwrite, piped — <a pending change>

@@ -37,35 +37,6 @@ impl CodeForm {
     }
 }
 
-/// One level's defining char (§5.1): a single alphabetic character, or a
-/// fixed-width two-digit numeric (`01`..`99`). Stored as its string form so a
-/// leading zero survives text sort and round-trip (`01` ≠ `1`).
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum CharToken {
-    /// A single Unicode-alphabetic character.
-    Alpha(char),
-    /// Exactly two ASCII digits.
-    Numeric(String),
-}
-
-impl CharToken {
-    /// The token's on-disk / in-code string: `"a"` or `"01"`.
-    #[must_use]
-    pub fn as_code_str(&self) -> String {
-        match self {
-            CharToken::Alpha(c) => c.to_string(),
-            CharToken::Numeric(n) => n.clone(),
-        }
-    }
-
-    fn push_to(&self, out: &mut String) {
-        match self {
-            CharToken::Alpha(c) => out.push(*c),
-            CharToken::Numeric(n) => out.push_str(n),
-        }
-    }
-}
-
 impl Code {
     /// Parse and validate a code's *syntax* only — no disk access (§5.1). A
     /// definition-prefix code (internal `_`) is accepted here but does not
@@ -125,11 +96,12 @@ impl Code {
         }
     }
 
-    /// Left-to-right scan of a *compact* code (§5.1): a letter is a one-char token;
-    /// a digit begins a two-digit token. Errors on a definition-prefix code (its
-    /// internal `_` cannot be tokenized from the string alone — it is resolved by a
-    /// walk), on an opening digit, or on a lone/short digit run.
-    pub fn tokenize_compact(&self) -> Result<Vec<CharToken>> {
+    /// Left-to-right scan of a *compact* code (§5.1): **every token is exactly one
+    /// character**, a letter or a digit, so the scan is a plain `chars()` walk with
+    /// nothing to look ahead at. Errors on a definition-prefix code (its internal `_`
+    /// cannot be tokenized from the string alone — it is resolved by a walk), on an
+    /// opening digit, or on a character no char slot may hold.
+    pub fn tokenize_compact(&self) -> Result<Vec<char>> {
         if !self.is_compact() {
             return Err(Error::usage(format!(
                 "code {:?} is definition-prefix; it cannot be tokenized from the string alone (§5.1)",
@@ -137,38 +109,21 @@ impl Code {
             )));
         }
         let mut tokens = Vec::new();
-        let mut chars = self.0.chars();
-        let mut first = true;
-        while let Some(c) = chars.next() {
+        for (i, c) in self.0.chars().enumerate() {
             if c.is_ascii_digit() {
-                if first {
+                if i == 0 {
                     return Err(Error::usage(format!(
                         "code {:?} opens with a digit (§5.1)",
                         self.0
                     )));
                 }
-                let d2 = chars.next().ok_or_else(|| {
-                    Error::usage(format!(
-                        "code {:?} ends with a lone digit; a numeric level is two digits (§5.1)",
-                        self.0
-                    ))
-                })?;
-                if !d2.is_ascii_digit() {
-                    return Err(Error::usage(format!(
-                        "code {:?} has a single digit; a numeric level is two digits (§5.1)",
-                        self.0
-                    )));
-                }
-                tokens.push(CharToken::Numeric(format!("{c}{d2}")));
-            } else if c.is_alphabetic() {
-                tokens.push(CharToken::Alpha(c));
-            } else {
+            } else if !c.is_alphabetic() {
                 return Err(Error::usage(format!(
                     "code {:?} has an illegal character {c:?}",
                     self.0
                 )));
             }
-            first = false;
+            tokens.push(c);
         }
         Ok(tokens)
     }
@@ -185,11 +140,7 @@ impl Code {
         if tokens.len() <= 1 {
             return None;
         }
-        let mut s = String::new();
-        for t in &tokens[..tokens.len() - 1] {
-            t.push_to(&mut s);
-        }
-        Some(Code(s))
+        Some(Code(tokens[..tokens.len() - 1].iter().collect()))
     }
 }
 
@@ -205,15 +156,14 @@ pub struct NodeName {
     pub code: Code,
     pub form: CodeForm,
     /// The defining char — `None` for a definition-prefix node.
-    pub ch: Option<CharToken>,
+    pub ch: Option<char>,
     pub label: String,
 }
 
 /// Parse a node directory name, given its parent's code (`None` at the root, where
 /// a node has no parent prefix). A trailing `_` marks the definition-prefix form;
-/// otherwise the first token (one letter or two digits) is the defining char and
-/// the rest is the label (§5.1). This is the single point that tells the two forms
-/// apart at read time.
+/// otherwise the first character is the defining char and the rest is the label
+/// (§5.1). This is the single point that tells the two forms apart at read time.
 ///
 /// A definition-prefix node's children may themselves only be definition-prefix
 /// (§5.1); a triple child under a definition-prefix parent is a naming mistake and
@@ -271,7 +221,7 @@ pub fn parse_node_dirname(parent: Option<&Code>, dirname: &str) -> Result<NodeNa
 
     let (ch, label) = split_triple(rem, dirname)?;
     let mut code_str = parent.map(|p| p.as_str().to_string()).unwrap_or_default();
-    ch.push_to(&mut code_str);
+    code_str.push(ch);
     Ok(NodeName {
         code: Code(code_str),
         form: CodeForm::Triple,
@@ -281,29 +231,12 @@ pub fn parse_node_dirname(parent: Option<&Code>, dirname: &str) -> Result<NodeNa
 }
 
 /// Split a triple remainder `[char]_[label]` into its defining char and label. The
-/// char is two ASCII digits or one alphabetic character; the label keeps its
+/// char is **one** character — a letter or a digit (§5.1) — and the label keeps its
 /// internal `_` whole.
-fn split_triple(rem: &str, dirname: &str) -> Result<(CharToken, String)> {
-    let bytes = rem.as_bytes();
-    // Numeric char: two ASCII digits then `_`.
-    if bytes.len() >= 3
-        && bytes[0].is_ascii_digit()
-        && bytes[1].is_ascii_digit()
-        && bytes[2] == b'_'
-    {
-        let ch = CharToken::Numeric(rem[..2].to_string());
-        let label = rem[3..].to_string();
-        if label.is_empty() {
-            return Err(Error::validation(format!(
-                "directory {dirname:?} has an empty label"
-            )));
-        }
-        return Ok((ch, label));
-    }
-    // Alpha char: one letter then `_`.
+fn split_triple(rem: &str, dirname: &str) -> Result<(char, String)> {
     let mut it = rem.char_indices();
     let (_, first) = it.next().expect("non-empty remainder");
-    if first.is_alphabetic() {
+    if first.is_alphabetic() || first.is_ascii_digit() {
         if let Some((sep_idx, sep)) = it.next() {
             if sep == '_' {
                 let label = rem[sep_idx + 1..].to_string();
@@ -312,11 +245,11 @@ fn split_triple(rem: &str, dirname: &str) -> Result<(CharToken, String)> {
                         "directory {dirname:?} has an empty label"
                     )));
                 }
-                return Ok((CharToken::Alpha(first), label));
+                return Ok((first, label));
             }
         }
     }
     Err(Error::validation(format!(
-        "directory {dirname:?} is malformed: expected `[char]_[label]` with a one-letter or two-digit char (§5.1)"
+        "directory {dirname:?} is malformed: expected `[char]_[label]` with a one-character char (§5.1)"
     )))
 }

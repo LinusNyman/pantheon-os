@@ -6,7 +6,7 @@ expression: out
 pen acm x -c
   # a determined series is minted by its determinant
   => exit 2: pensum's register is nameless and minted by the node's first task, so -c mints nothing (§7.1, §7.3)
-pen acm x -a 260719
+pen acm x -a 20260719
   # a task keys by its name, not a date
   => exit 2: a task keys by its name, not by a date, so -a keys nothing — a deadline is a Fasti event referencing the task (§5.4, §8.4)
 pen series acm weight

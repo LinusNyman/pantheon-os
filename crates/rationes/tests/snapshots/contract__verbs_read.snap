@@ -6,7 +6,7 @@ expression: out
 $ rat list
 0 [
   {
-    "as_of": "260718",
+    "as_of": "20260718",
     "balance": 900.0,
     "core": "rationes",
     "data": {
@@ -20,7 +20,7 @@ $ rat list
   {
     "core": "rationes",
     "data": {
-      "expires": "300101"
+      "expires": "20300101"
     },
     "home": "cri",
     "kind": "claim",
@@ -28,7 +28,7 @@ $ rat list
     "slug": "passport"
   },
   {
-    "as_of": "260719",
+    "as_of": "20260719",
     "balance": 4310.0,
     "core": "rationes",
     "data": {
@@ -44,7 +44,7 @@ $ rat list
 $ rat list -k asset
 0 [
   {
-    "as_of": "260718",
+    "as_of": "20260718",
     "balance": 900.0,
     "core": "rationes",
     "data": {
@@ -59,7 +59,7 @@ $ rat list -k asset
 
 $ rat get checking
 0 {
-  "as_of": "260719",
+  "as_of": "20260719",
   "balance": 4310.0,
   "core": "rationes",
   "data": {
@@ -79,7 +79,7 @@ $ rat series checking
       "amount": 4200.0
     },
     "home": "crp",
-    "key": "260718",
+    "key": "20260718",
     "kind": "balance",
     "refs": [],
     "series": "checking"
@@ -90,14 +90,14 @@ $ rat series checking
       "amount": 4310.0
     },
     "home": "crp",
-    "key": "260719",
+    "key": "20260719",
     "kind": "balance",
     "refs": [],
     "series": "checking"
   }
 ]
 
-$ rat series checking --from 260719
+$ rat series checking --from 20260719
 0 [
   {
     "core": "rationes",
@@ -105,7 +105,7 @@ $ rat series checking --from 260719
       "amount": 4310.0
     },
     "home": "crp",
-    "key": "260719",
+    "key": "20260719",
     "kind": "balance",
     "refs": [],
     "series": "checking"

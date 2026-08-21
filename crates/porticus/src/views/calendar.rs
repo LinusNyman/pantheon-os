@@ -20,15 +20,10 @@ use crate::view::{Grid, GridCell, Layout, Nav, Row, View, ViewId};
 /// Monday-first, which is what the week is here.
 const COLUMNS: [&str; 7] = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
-/// The reading key a dated record wears (§6.1) — `YYMMDD`, and the format every cell,
+/// The reading key a dated record wears (§6.1) — `YYYYMMDD`, and the format every cell,
 /// row and relay speaks. Referenced, never coined here (I1).
 fn key_of(day: Date) -> String {
-    format!(
-        "{:02}{:02}{:02}",
-        day.year().rem_euclid(100),
-        day.month(),
-        day.day()
-    )
+    format!("{:04}{:02}{:02}", day.year(), day.month(), day.day())
 }
 
 /// The instrument's dated items on a month grid, folded fresh each frame.
@@ -133,11 +128,7 @@ where
         // One pass over the fold, bucketed by day-of-month, so a month costs one fold
         // rather than one per cell (P§6).
         let mut counts = [0usize; 32];
-        let prefix = format!(
-            "{:02}{:02}",
-            self.cursor.year().rem_euclid(100),
-            self.cursor.month()
-        );
+        let prefix = format!("{:04}{:02}", self.cursor.year(), self.cursor.month());
         for row in (self.fold)() {
             let Some(when) = row.when.as_deref() else {
                 continue;

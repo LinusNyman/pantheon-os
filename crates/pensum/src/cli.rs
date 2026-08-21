@@ -109,7 +109,7 @@ enum Cmd {
         #[arg(short = 'r', long = "ref", value_name = "REF")]
         refs: Vec<String>,
         /// Mark it done, on a date; bare means today (§7.2).
-        #[arg(long = "done", value_name = "YYMMDD", num_args = 0..=1, default_missing_value = "")]
+        #[arg(long = "done", value_name = "YYYYMMDD", num_args = 0..=1, default_missing_value = "")]
         done: Option<String>,
     },
     /// Change a task in place, by its key (§7.2) — mark it done, or rewrite its note.
@@ -120,7 +120,7 @@ enum Cmd {
         tokens: Vec<String>,
         #[arg(short = 'r', long = "ref", value_name = "REF")]
         refs: Vec<String>,
-        #[arg(long = "done", value_name = "YYMMDD", num_args = 0..=1, default_missing_value = "")]
+        #[arg(long = "done", value_name = "YYYYMMDD", num_args = 0..=1, default_missing_value = "")]
         done: Option<String>,
         /// Put it back to intended — the clearing form of `--done` (§7.2).
         #[arg(long = "undone", conflicts_with = "done")]
@@ -270,7 +270,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Where { tokens } => cmd_where(cli, tokens),
         Cmd::Schema => Ok(Response::Json(serde_json::to_value(pantheon::schema::<
             Pensum,
-        >(1))?)),
+        >(2))?)),
         Cmd::Version => Ok(Response::Json(version_json())),
         Cmd::Help => Ok(Response::Json(help_json())),
     }
@@ -818,7 +818,7 @@ fn version_json() -> Value {
         "name": Pensum::NAME,
         "short": "pen",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 
@@ -829,6 +829,6 @@ fn help_json() -> Value {
         "about": "the intention tense: a future doing, as named tasks in a node's register (§8.5)",
         "verbs": VERBS,
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }

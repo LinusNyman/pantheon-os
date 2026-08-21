@@ -3,12 +3,12 @@ source: crates/album/tests/contract.rs
 expression: pretty(&schema)
 ---
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "album",
   "record": {
     "$defs": {
       "Away": {
-        "description": "A period an agent is away (§8.1). Keys are `YYMMDD`, the same shape a series key\nwears (§5.4), and `to` is absent while the period is still open.\n\nThis is the list-valued field §6.1 describes: an entity was never a sample, so\nthe history worth keeping accumulates *inside* the object rather than becoming a\nseries. A lens overlays it on a timeline by reading Album's JSON (§8.4, §12);\nAlbum itself knows nothing about timelines.",
+        "description": "A period an agent is away (§8.1). Keys are `YYYYMMDD`, the same shape a series key\nwears (§5.4), and `to` is absent while the period is still open.\n\nThis is the list-valued field §6.1 describes: an entity was never a sample, so\nthe history worth keeping accumulates *inside* the object rather than becoming a\nseries. A lens overlays it on a timeline by reading Album's JSON (§8.4, §12);\nAlbum itself knows nothing about timelines.",
         "properties": {
           "from": {
             "type": "string"

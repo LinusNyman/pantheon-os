@@ -5,8 +5,8 @@ expression: pretty(&closed)
 {
   "core": "fasti",
   "data": {
-    "from": "240301",
-    "to": "260630"
+    "from": "20240301",
+    "to": "20260630"
   },
   "home": "aof",
   "kind": "span",

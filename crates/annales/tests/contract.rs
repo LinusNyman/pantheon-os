@@ -98,18 +98,18 @@ fn verb_add_fresh_then_overwrite() {
     insta::assert_snapshot!("verb_add_created_series", pretty(&created));
 
     // A fresh key runs free (§7.3).
-    let (code, fresh) = ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+    let (code, fresh) = ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_fresh", pretty(&fresh));
 
     // A second reading on the same key is an overwrite — a mutation. Piped and
     // without `-y`, it exits 5 and prints the change for the caller to review.
-    let (code, pending) = ann(&root, &["ecv", "weight", "78.9", "-a", "260718"]);
+    let (code, pending) = ann(&root, &["ecv", "weight", "78.9", "-a", "20260718"]);
     assert_eq!(code, 5, "an overwrite must stop at the checkpoint (§7.3)");
     insta::assert_snapshot!("verb_add_overwrite_pending", pretty(&redact(pending)));
 
     // Re-run with `-y` and it commits.
-    let (code, applied) = ann(&root, &["ecv", "weight", "78.9", "-a", "260718", "-y"]);
+    let (code, applied) = ann(&root, &["ecv", "weight", "78.9", "-a", "20260718", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_overwrite_applied", pretty(&applied));
 }
@@ -118,13 +118,13 @@ fn verb_add_fresh_then_overwrite() {
 fn verb_edit_keeps_the_key() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
-    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
 
     // A correction rewrites the keyed line in place; the date key is the reading's
     // own identity and does not move (I1, §5.4).
     let (code, edited) = ann(
         &root,
-        &["edit", "260718", "79.0", "--series", "weight", "-y"],
+        &["edit", "20260718", "79.0", "--series", "weight", "-y"],
     );
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_edit", pretty(&edited));
@@ -138,8 +138,8 @@ fn verb_edit_keeps_the_key() {
 fn verb_rm() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
-    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
-    let (code, deleted) = ann(&root, &["rm", "260718", "--series", "weight", "-y"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
+    let (code, deleted) = ann(&root, &["rm", "20260718", "--series", "weight", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_rm", pretty(&deleted));
 }
@@ -148,7 +148,7 @@ fn verb_rm() {
 fn dry_run_emits_a_plan_and_writes_nothing() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
-    let (code, plan) = ann(&root, &["ecv", "weight", "78.4", "-a", "260718", "-n"]);
+    let (code, plan) = ann(&root, &["ecv", "weight", "78.4", "-a", "20260718", "-n"]);
     assert_eq!(code, 0, "--dry-run is not a failure");
     insta::assert_snapshot!("verb_add_dry_run", pretty(&redact(plan)));
 
@@ -164,12 +164,12 @@ fn verbs_list_get_series() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
     ann(&root, &["ecv", "places", "-c"]);
-    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
-    ann(&root, &["ecv", "weight", "79.1", "-a", "260719"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
+    ann(&root, &["ecv", "weight", "79.1", "-a", "20260719"]);
     // A fact carried entirely by its references is still a fact (§8.6, I9).
     ann(
         &root,
-        &["ecv", "places", "-a", "260718", "-r", "mappa:office"],
+        &["ecv", "places", "-a", "20260718", "-r", "mappa:office"],
     );
 
     let mut out = String::new();
@@ -177,9 +177,9 @@ fn verbs_list_get_series() {
     let (_, whole) = ann(&root, &["series", "weight"]);
     out.push_str(&format!("series weight:\n{}\n", pretty(&whole)));
     // A window is a filter on it, never a second verb.
-    let (_, windowed) = ann(&root, &["series", "weight", "--from", "260719"]);
+    let (_, windowed) = ann(&root, &["series", "weight", "--from", "20260719"]);
     out.push_str(&format!(
-        "series weight --from 260719:\n{}\n",
+        "series weight --from 20260719:\n{}\n",
         pretty(&windowed)
     ));
     // `get` is the present: the reading at the latest key (I1).
@@ -201,14 +201,14 @@ fn verbs_list_get_series() {
 fn the_editor_form_piped_prints_a_path_and_spawns_nothing() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
-    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
 
     // An `edit` given no new value, with stdout a pipe: it spawns nothing and hands
     // back the file's path, so the LLM hand opens it with its own tools rather than
     // a process it cannot drive. `$EDITOR` is set to prove nothing is run.
     let (code, out) = ann_env(
         &root,
-        &["edit", "260718", "--series", "weight"],
+        &["edit", "20260718", "--series", "weight"],
         &[("EDITOR", "false"), ("VISUAL", "false")],
     );
     assert_eq!(code, 0, "the editor form is not a failure (§7.3)");
@@ -226,13 +226,13 @@ fn the_editor_form_piped_prints_a_path_and_spawns_nothing() {
 fn write_verbs_are_refused_under_a_rule() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
-    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
 
     let rule = [("PANTHEON_RULE", "1")];
     for args in [
-        &["ecv", "weight", "79.0", "-a", "260719"][..],
-        &["edit", "260718", "79.0", "--series", "weight", "-y"][..],
-        &["rm", "260718", "--series", "weight", "-y"][..],
+        &["ecv", "weight", "79.0", "-a", "20260719"][..],
+        &["edit", "20260718", "79.0", "--series", "weight", "-y"][..],
+        &["rm", "20260718", "--series", "weight", "-y"][..],
     ] {
         let (code, out) = ann_env(&root, args, &rule);
         assert_eq!(
@@ -250,7 +250,7 @@ fn write_verbs_are_refused_under_a_rule() {
     // And `--dry-run` still computes, since it writes nothing (§7.3).
     let (code, _) = ann_env(
         &root,
-        &["ecv", "weight", "79.0", "-a", "260719", "-n"],
+        &["ecv", "weight", "79.0", "-a", "20260719", "-n"],
         &rule,
     );
     assert_eq!(code, 0);
@@ -262,14 +262,14 @@ fn write_verbs_are_refused_under_a_rule() {
 fn verb_rename_cascades_refs() {
     let root = fresh_root();
     ann(&root, &["ecv", "wieght", "-c"]);
-    ann(&root, &["ecv", "wieght", "78.4", "-a", "260718"]);
+    ann(&root, &["ecv", "wieght", "78.4", "-a", "20260718"]);
     // A referrer written by hand rather than by a core: the cascade is the spine's,
     // and it rewrites whatever record points at the name — including, in the real
     // tree, another core's (§5.4, I5).
     let referrer = root.join("e_ego/e_c_corpus/ec_v_valetudo/ecv__/ecv__log__mood.jsonl");
     std::fs::write(
         &referrer,
-        "{\"key\":\"260718\",\"refs\":[\"annales:wieght\"],\"data\":{\"values\":[\"ok\"]}}\n",
+        "{\"key\":\"20260718\",\"refs\":[\"annales:wieght\"],\"data\":{\"values\":[\"ok\"]}}\n",
     )
     .unwrap();
 
@@ -291,7 +291,7 @@ fn verb_rename_cascades_refs() {
 fn verb_move_rehomes_without_touching_refs() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
-    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
 
     let (code, moved) = ann(&root, &["move", "weight", "--to", "ec", "-y"]);
     assert_eq!(code, 0);
@@ -314,7 +314,7 @@ fn verb_move_rehomes_without_touching_refs() {
 fn on_disk_envelope_stores_no_location() {
     let root = fresh_root();
     ann(&root, &["ecv", "weight", "-c"]);
-    ann(&root, &["ecv", "weight", "78.4", "-a", "260718"]);
+    ann(&root, &["ecv", "weight", "78.4", "-a", "20260718"]);
     ann(
         &root,
         &[
@@ -322,7 +322,7 @@ fn on_disk_envelope_stores_no_location() {
             "weight",
             "79.1",
             "-a",
-            "260719",
+            "20260719",
             "--note",
             "after a run",
         ],
@@ -342,7 +342,7 @@ fn exit_codes() {
     // A node holding exactly one series: inference has a single answer.
     let one = fresh_root();
     ann(&one, &["ecv", "weight", "-c"]);
-    ann(&one, &["ecv", "weight", "78.4", "-a", "260718"]);
+    ann(&one, &["ecv", "weight", "78.4", "-a", "20260718"]);
 
     // A node holding two: inference must list them and stop, never guess (§7.3).
     let two = fresh_root();
@@ -354,12 +354,12 @@ fn exit_codes() {
         (
             &one,
             "a typo cannot conjure a series",
-            &["ecv", "wieght", "1", "-a", "260718"],
+            &["ecv", "wieght", "1", "-a", "20260718"],
         ),
         (
             &one,
             "no such series, tree-wide",
-            &["nosuch", "1", "-a", "260718"],
+            &["nosuch", "1", "-a", "20260718"],
         ),
         (
             &one,
@@ -369,7 +369,7 @@ fn exit_codes() {
         (
             &one,
             "no line at that key",
-            &["rm", "999999", "--series", "weight", "-y"],
+            &["rm", "99999999", "--series", "weight", "-y"],
         ),
         (
             &one,
@@ -379,18 +379,18 @@ fn exit_codes() {
         (
             &one,
             "a blank reading value",
-            &["ecv", "weight", "  ", "-a", "260722"],
+            &["ecv", "weight", "  ", "-a", "20260722"],
         ),
         // A second reading on a key that exists is an overwrite awaiting review.
         (
             &one,
             "an overwrite, piped, without -y",
-            &["ecv", "weight", "1", "-a", "260718"],
+            &["ecv", "weight", "1", "-a", "20260718"],
         ),
         (
             &two,
             "two series at the node: ambiguous",
-            &["ecv", "1", "-a", "260718"],
+            &["ecv", "1", "-a", "20260718"],
         ),
         (
             &one,
@@ -400,7 +400,7 @@ fn exit_codes() {
         (
             &one,
             "a malformed reference",
-            &["ecv", "weight", "1", "-a", "260723", "-r", "office"],
+            &["ecv", "weight", "1", "-a", "20260723", "-r", "office"],
         ),
     ];
 

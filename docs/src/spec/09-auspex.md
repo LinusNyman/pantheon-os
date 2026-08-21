@@ -39,7 +39,7 @@ A rule declares when it runs and what it may touch; its *scope* — which runs e
 A rule is a **pure function of the tree**: context on stdin, proposals on stdout. It never writes.
 
 ```
-stdin  ← {"sign":"hook","rule":"stale_contact","scope":"csa","now":"260710",
+stdin  ← {"sign":"hook","rule":"stale_contact","scope":"csa","now":"20260710",
           "trigger":{"core":"annales","home":"csa_john_appleseed"}}
 stdout → {"writes":[{"core":"pensum","verb":"add","home":"acm",
                      "name":"Reach out to Alex","refs":["album:alex"]},

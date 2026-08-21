@@ -11,7 +11,7 @@ expression: pretty(&fresh)
     ]
   },
   "home": "ecv",
-  "key": "260718",
+  "key": "20260718",
   "kind": "log",
   "refs": [],
   "series": "weight"

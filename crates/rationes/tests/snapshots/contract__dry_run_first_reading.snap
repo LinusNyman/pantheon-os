@@ -11,7 +11,7 @@ expression: pretty(&redact(plan))
         "amount": 4200.0
       },
       "home": "crp",
-      "key": "260718",
+      "key": "20260718",
       "kind": "balance",
       "refs": [],
       "series": "checking"
@@ -19,7 +19,7 @@ expression: pretty(&redact(plan))
     "before": null,
     "core": "rationes",
     "home": "crp",
-    "key": "260718",
+    "key": "20260718",
     "kind": "balance",
     "series": "checking",
     "verb": "add"
