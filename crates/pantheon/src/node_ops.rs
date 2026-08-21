@@ -152,7 +152,15 @@ pub fn plan_rename(
         refuse_collision(&parent_path, parent_code.as_ref(), &new_code, code)?;
     }
 
-    let new_dirname = triple_dirname(parent_code.as_ref(), &new_ch, &new_label);
+    // The label as it will be spelled on disk. A **typed** label is a fresh mint and so is
+    // written in the tree's spelling (D8); a label nobody touched is carried through byte
+    // for byte in the spelling the tree already holds, which is what keeps a bare `--char`
+    // recode the pure prefix substitution `ass` → `asd` relied on.
+    let disk_label = match label {
+        Some(_) => name::fs_spelling(&new_label),
+        None => new_label.clone(),
+    };
+    let new_dirname = triple_dirname(parent_code.as_ref(), &new_ch, &disk_label);
     let new_top_rel = rel_path(root, &parent_path).join(&new_dirname);
     let changes = plan_recode(root, code, &new_code, &new_top_rel)?;
 
@@ -209,8 +217,11 @@ pub fn plan_rename_def(
     let parent_path = path.parent().unwrap_or(root).to_path_buf();
     refuse_collision(&parent_path, parent_code.as_ref(), &new_code, code)?;
 
-    // 1. Recode the branch (dirs and files), exactly like any rename.
-    let new_dirname = def_dirname(parent_code.as_ref(), &new_def);
+    // 1. Recode the branch (dirs and files), exactly like any rename. The definition is
+    //    decomposed for the *directory* only (D8) — `new_def` itself stays composed,
+    //    because it is also this entity's slug and goes out in every `core:slug` ref the
+    //    cascade below rewrites.
+    let new_dirname = def_dirname(parent_code.as_ref(), &name::fs_spelling(&new_def));
     let new_top_rel = rel_path(root, &parent_path).join(&new_dirname);
     let mut changes = plan_recode(root, code, &new_code, &new_top_rel)?;
 
