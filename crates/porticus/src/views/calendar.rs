@@ -26,6 +26,17 @@ fn key_of(day: Date) -> String {
     format!("{:04}{:02}{:02}", day.year(), day.month(), day.day())
 }
 
+/// The day inside a key — its first [`pantheon::DATE_WIDTH`] digits.
+///
+/// A timed key (`20260703T1400`) starts where an all-day one ends (§5.4), so the day
+/// is the prefix either way — "a meeting 4–5pm" belongs on the 3rd, not on no day at
+/// all. A name key has no day and lands on no cell (§6.1). The same reading Speculum
+/// makes for its horizon.
+fn day_of(when: &str) -> Option<&str> {
+    let day = when.get(..pantheon::DATE_WIDTH)?;
+    day.bytes().all(|b| b.is_ascii_digit()).then_some(day)
+}
+
 /// The instrument's dated items on a month grid, folded fresh each frame.
 pub struct Calendar<F> {
     fold: F,
@@ -112,10 +123,11 @@ where
         let today = key_of(self.cursor);
         let mut rows: Vec<Row> = (self.fold)()
             .into_iter()
-            .filter(|row| row.when.as_deref() == Some(today.as_str()))
+            .filter(|row| row.when.as_deref().and_then(day_of) == Some(today.as_str()))
             .collect();
-        // Within one day the key says nothing more, so the label is the order.
-        rows.sort_by(|a, b| a.label.cmp(&b.label));
+        // Within one day the key still orders — a timed key carries its hour past the
+        // day (§5.4) — so the key sorts first and the label breaks its ties.
+        rows.sort_by(|a, b| a.when.cmp(&b.when).then_with(|| a.label.cmp(&b.label)));
         Some(rows)
     }
 
@@ -130,10 +142,10 @@ where
         let mut counts = [0usize; 32];
         let prefix = format!("{:04}{:02}", self.cursor.year(), self.cursor.month());
         for row in (self.fold)() {
-            let Some(when) = row.when.as_deref() else {
+            let Some(day) = row.when.as_deref().and_then(day_of) else {
                 continue;
             };
-            if let Some(day) = when.strip_prefix(prefix.as_str())
+            if let Some(day) = day.strip_prefix(prefix.as_str())
                 && let Ok(day) = day.parse::<usize>()
                 && (1..=31).contains(&day)
             {
@@ -227,5 +239,77 @@ fn month_name(month: i8) -> &'static str {
         10 => "October",
         11 => "November",
         _ => "December",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::action::RecordRef;
+
+    fn row(when: &str, label: &str) -> Row {
+        Row {
+            label: label.to_string(),
+            target: Target::Row(RecordRef::new(Code::parse("aof").unwrap(), when)),
+            when: Some(when.to_string()),
+        }
+    }
+
+    /// A timed key's day is its first eight digits (§5.4): the cell counts it, the day
+    /// list shows it, and within the day the hour the key carries is the order.
+    #[test]
+    fn a_timed_key_lands_on_its_day() {
+        let rows = vec![
+            row("20260902T1730", "booking"),
+            row("20260902T0800", "exercise"),
+            row("20260902", "allday"),
+            row("20260915", "window"),
+            row("20261002T0900", "next_month"),
+        ];
+        let mut cal = Calendar::of(move || rows.clone());
+        cal.cursor = date(2026, 9, 2);
+
+        let node = Code::parse("aof").unwrap();
+        let day: Vec<String> = cal
+            .rows(&node)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.label)
+            .collect();
+        assert_eq!(day, ["allday", "exercise", "booking"]);
+
+        let items: Vec<usize> = cal
+            .grid()
+            .unwrap()
+            .cells
+            .iter()
+            .flatten()
+            .map(|c| c.items)
+            .collect();
+        assert_eq!(items[1], 3, "the 2nd counts its timed keys: {items:?}");
+        assert_eq!(items[14], 1, "the 15th keeps its all-day window: {items:?}");
+        assert_eq!(
+            items.iter().sum::<usize>(),
+            4,
+            "October's key is not September's: {items:?}"
+        );
+    }
+
+    /// A name key has no day and lands on no cell (§6.1).
+    #[test]
+    fn a_name_key_lands_nowhere() {
+        let rows = vec![row("mvp_review", "named")];
+        let mut cal = Calendar::of(move || rows.clone());
+        cal.cursor = date(2026, 9, 2);
+        assert!(cal.rows(&Code::parse("aof").unwrap()).unwrap().is_empty());
+        let counted: usize = cal
+            .grid()
+            .unwrap()
+            .cells
+            .iter()
+            .flatten()
+            .map(|c| c.items)
+            .sum();
+        assert_eq!(counted, 0);
     }
 }
