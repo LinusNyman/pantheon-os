@@ -443,7 +443,7 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   invalidating any token a hand holds from an earlier `--dry-run`. One test catches it:
   `pantheon/tests/units.rs::a_change_body_names_a_series_only_when_there_is_one`, which pins the byte
   string. If it fails, the token contract moved — decide that deliberately; do not update the pin.
-- **Keep snapshots off the wall clock.** Pass every date explicitly (`ann -a 260718`, `pen --done 260719`);
+- **Keep snapshots off the wall clock.** Pass every date explicitly (`ann -a 20260718`, `pen --done 20260719`);
   a core that reads `now` in a snapshotted path makes the suite fail tomorrow.
 - **Name normalization is one rule** (§5.1): lowercase, NFC, alphanumeric+`_`, fold space/`-` to `_`,
   collapse and strip `_`. NFC is not optional (macOS/Linux byte disagreement). Apply on write, compare NFC on read.

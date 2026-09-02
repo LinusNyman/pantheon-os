@@ -58,7 +58,11 @@ fn main() -> Result<()> {
 /// carries values a hand chose — an Annales reading of `250601` is a *measurement*, and
 /// widening it would corrupt the record it was meant to preserve. Only the keys the spec
 /// gives a date shape are rewritten; `key` is handled separately, being the envelope's.
-const DATE_FIELDS: [&str; 7] = ["done", "from", "to", "at", "until", "expires", "lapses"];
+/// `deadline` is no core's field, but the live tree carries it on tasks written before
+/// the schema closed — a date a hand meant, so it migrates with the rest.
+const DATE_FIELDS: [&str; 8] = [
+    "done", "from", "to", "at", "until", "expires", "lapses", "deadline",
+];
 
 /// Widen a six-digit `YYMMDD` to `YYYYMMDD`, preserving any `Thhmm` tail.
 ///
@@ -402,5 +406,31 @@ mod tests {
             r#"{"key":"20260601","refs":[],"data":{"values":["250601","4.0"]}}"#
         );
         assert_eq!(n, 1, "the key alone moved");
+    }
+
+    /// A task written before the schema closed carries fields the schema never named —
+    /// `deadline` is a date a hand meant and migrates; a bare `hhmm` `until` is an end
+    /// *time* on the key's own day and must not be touched.
+    #[test]
+    fn a_hand_s_own_date_fields_migrate_and_a_bare_time_does_not() {
+        let mut n = 0;
+        let line = r#"{"key":"fix_roof","refs":[],"data":{"done":"260720","deadline":"260731","partner":"alex"}}"#;
+        let out = rewrite_line(line, Path::new("t"), &mut n);
+        assert_eq!(
+            out,
+            r#"{"key":"fix_roof","refs":[],"data":{"done":"20260720","deadline":"20260731","partner":"alex"}}"#
+        );
+        assert_eq!(n, 2);
+
+        let mut n = 0;
+        let line =
+            r#"{"key":"260902T1730","refs":[],"data":{"values":["a meeting"],"until":"1800"}}"#;
+        let out = rewrite_line(line, Path::new("t"), &mut n);
+        assert_eq!(
+            out,
+            r#"{"key":"20260902T1730","refs":[],"data":{"values":["a meeting"],"until":"1800"}}"#,
+            "the bare end-time survives untouched"
+        );
+        assert_eq!(n, 1);
     }
 }
