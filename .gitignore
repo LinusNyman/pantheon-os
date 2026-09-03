@@ -16,6 +16,11 @@ AGENTS.md
 .aider*
 .cursor/
 
+# The repo is itself a node in the author's live tree, so `pan` mints this node's meta
+# dir (§6.3) here on first annotation. That is tree metadata, not repo content — and the
+# code is whatever the node wears, so the pattern follows a recode rather than pinning one.
+/*__/
+
 # Cargo.lock is COMMITTED — this is a binary-producing workspace (§15). Do not ignore it.
 
 # macOS
