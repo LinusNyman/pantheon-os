@@ -419,8 +419,15 @@ core's `schema` and writes it, same envelope and plan token as a typed `add`. It
 existing check (name normalization §5.1, within-node slug refusal §18, `deny_unknown_fields`). This
 also **unblocks Auspex's minting-licensing half** (the `/series` grant slot) — do it here once, both
 consumers benefit.
-**Done.** `tab add --data '{…}'` mints a document from JSON, validated; Auspex can apply a `data`
-proposal; snapshots frozen; §7.3/§8 updated. **Do this before X1.**
+**Done.** `add --data '{…}'` on all seven cores, validated against each core's
+own published schema; Auspex applies a `data` proposal (`apply.rs`'s refusal is gone, and the
+`/series` mint-licensing half unblocked with it); §7.3, §9.3 and §18 updated. **No snapshot
+churned** — the `help` snapshots list verbs and kinds, not flags — so the anticipated refreeze cost
+nothing. Two things the plan did not foresee: only the two-shape cores carried
+`deny_unknown_fields`, so the ingest path needed an unknown-key check of its own or a typo'd field
+would write an empty record at exit `0`; and on a two-shape core the record has to name its own
+shape, since the positional pattern that usually discriminates is unavailable once the figure is
+inside the record. **X1 is unblocked.**
 **Size.** L · spine + all seven cores + spec · the reusable unlock.
 
 ### X1 — The Canvas connector

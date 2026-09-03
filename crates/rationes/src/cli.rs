@@ -123,6 +123,24 @@ struct Fields {
     note: Option<Option<String>>,
 }
 
+impl Fields {
+    /// The field flags a hand actually named — what `--data` refuses to share a record
+    /// with (§7.3). Envelope and addressing flags are not fields and are absent here.
+    fn named(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        for (given, flag) in [
+            (self.currency.is_some(), "--currency"),
+            (self.expires.is_some(), "--expires"),
+            (self.note.is_some(), "--note"),
+        ] {
+            if given {
+                out.push(flag);
+            }
+        }
+        out
+    }
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// File a holding, or write a balance reading on one (§8.3).
@@ -136,6 +154,12 @@ enum Cmd {
         tokens: Vec<String>,
         #[command(flatten)]
         fields: Fields,
+        /// The whole record as JSON, for what the flags cannot spell (§7.3). Which of
+        /// the two shapes it is, the record itself says: an `amount` makes it a
+        /// balance, its absence a holding (§7.1) — so the reading's figure rides in
+        /// the record rather than in a second positional.
+        #[arg(long = "data", value_name = "JSON")]
+        data: Option<String>,
         /// Attach a reference; repeatable (§5.4). The org an account sits with is a
         /// ref (`-r album:some_bank`), never a home (I3, I9, §8.3).
         #[arg(short = 'r', long = "ref", value_name = "REF")]
@@ -286,8 +310,9 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Add {
             tokens,
             fields,
+            data,
             refs,
-        } => cmd_add(cli, tokens, fields, refs),
+        } => cmd_add(cli, tokens, fields, data.as_deref(), refs),
         Cmd::Edit { slug, fields, refs } => cmd_edit(cli, slug, fields, refs),
         Cmd::Rename { slug, new } => cmd_rename(cli, slug, new),
         Cmd::Move { slug, to } => cmd_move(cli, slug, to),
@@ -313,12 +338,39 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
 /// that does not parse as a figure is a usage error, not a two-word holding name —
 /// the same discipline §7.3 keeps for a name, where a quiet join would file the wrong
 /// record forever.
-fn cmd_add(cli: &Cli, tokens: &[String], fields: &Fields, refs: &[String]) -> Result<Response> {
+fn cmd_add(
+    cli: &Cli,
+    tokens: &[String],
+    fields: &Fields,
+    data: Option<&str>,
+    refs: &[String],
+) -> Result<Response> {
     refuse_under_rule(cli, "add")?;
     let ctx = Ctx::open(cli)?;
     // Peeled only to count: the entity form hands the *original* tokens back to the
     // spine's own resolver, which does the peel again with the $PWD locus behind it.
     let (home, rest) = contract::peel_home(&ctx.store, cli.home.as_deref(), tokens)?;
+
+    // `--data` carries the whole record, and **the record names its own shape**: an
+    // `amount` makes it a balance, its absence a holding — which is the same
+    // discrimination the untagged enum makes on disk (§7.1). So the figure rides
+    // inside the record and the holding's name is the only token, either way.
+    if let Some(json) = data {
+        contract::refuse_data_with_fields(&fields.named())?;
+        let [slug] = rest else {
+            return Err(Error::usage(
+                "with --data the balance's figure is the record's `amount`, so the \
+                 holding's name is the only token (§7.3, §8.3)",
+            ));
+        };
+        return match contract::record_from_json::<Rationes>(json)? {
+            Record::Balance(balance) => {
+                add_balance_record(cli, &ctx, home.as_ref(), slug, balance, refs)
+            }
+            Record::Holding(holding) => add_holding_record(cli, &ctx, tokens, holding, refs),
+        };
+    }
+
     match rest {
         [] => Err(Error::usage(format!(
             "name the {} record (§7.3)",
@@ -344,6 +396,18 @@ fn add_holding(
     ctx: &Ctx,
     tokens: &[String],
     fields: &Fields,
+    refs: &[String],
+) -> Result<Response> {
+    add_holding_record(cli, ctx, tokens, build_holding(fields, None), refs)
+}
+
+/// File one holding, however its fields were given — typed as flags or ingested whole
+/// with `--data` (§7.3, §8.3).
+fn add_holding_record(
+    cli: &Cli,
+    ctx: &Ctx,
+    tokens: &[String],
+    holding: Holding,
     refs: &[String],
 ) -> Result<Response> {
     let kind = ctx.write_kind()?;
@@ -373,7 +437,6 @@ fn add_holding(
         )));
     }
 
-    let holding = build_holding(fields, None);
     let record = Record::Holding(holding);
     Rationes::validate(&record)?;
     let entity = Entity {
@@ -448,15 +511,27 @@ fn add_balance(
              name in one token and its reading in the next (§7.3, §8.3)"
         ))
     })?;
-
-    let eref = holding_for_balance(ctx, slug, scope)?;
-    let sref = balance_series(ctx, &eref)?;
-    let key = contract::key_from_at(cli.at.as_deref())?;
-
     let balance = Balance {
         amount,
         note: given(fields.note.as_ref(), None),
     };
+    add_balance_record(cli, ctx, scope, slug, balance, refs)
+}
+
+/// Write one balance reading, however its figure was given — typed as a positional or
+/// ingested whole with `--data` (§7.3, §8.3).
+fn add_balance_record(
+    cli: &Cli,
+    ctx: &Ctx,
+    scope: Option<&Code>,
+    slug: &str,
+    balance: Balance,
+    refs: &[String],
+) -> Result<Response> {
+    let eref = holding_for_balance(ctx, slug, scope)?;
+    let sref = balance_series(ctx, &eref)?;
+    let key = contract::key_from_at(cli.at.as_deref())?;
+
     let record = Record::Balance(balance);
     Rationes::validate(&record)?;
     let line = Line {

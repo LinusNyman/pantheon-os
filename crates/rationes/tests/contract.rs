@@ -714,3 +714,98 @@ fn the_files_wear_the_names_the_spec_gives_them() {
         format!("{}--- balance ---\n{}", holding, reading)
     );
 }
+
+// ── the ingest flag on a two-shape core (§7.3, §7.1) ─────────────────────────
+
+/// **With `--data` the record names its own shape** (§7.1, §7.3).
+///
+/// Rationes writes two shapes and tells them apart by counting positionals: one token is
+/// a holding, two are a holding and its balance. `--data` cannot use that count — the
+/// figure is *inside* the record — so the discrimination falls to the record itself, and
+/// it is the same one the untagged enum already makes on disk: an `amount` makes it a
+/// balance, its absence a holding (§5.2). One token addresses either.
+#[test]
+fn add_data_routes_by_the_shape_the_record_reads_as() {
+    let root = fresh_root();
+
+    // No `amount` → a holding, filed as an entity.
+    let (code, value) = rat(
+        &root,
+        &[
+            "add",
+            "-H",
+            "crp",
+            "checking",
+            "--data",
+            r#"{"currency":"sek"}"#,
+            "-y",
+        ],
+    );
+    assert_eq!(code, 0, "{value}");
+    assert_eq!(value["kind"], "account");
+    assert_eq!(value["data"]["currency"], "sek");
+
+    // An `amount` → a balance, a dated line in the holding's own series.
+    let (code, value) = rat(
+        &root,
+        &[
+            "add",
+            "-H",
+            "crp",
+            "checking",
+            "--data",
+            r#"{"amount":4200.5,"note":"after rent"}"#,
+            "-a",
+            "20260718",
+            "-y",
+        ],
+    );
+    assert_eq!(code, 0, "{value}");
+    assert_eq!(value["kind"], "balance");
+    assert_eq!(value["series"], "checking");
+    assert_eq!(value["key"], "20260718");
+    assert_eq!(value["data"]["amount"], 4200.5);
+}
+
+/// **The figure rides in the record, so a positional amount beside `--data` is refused**
+/// — two sources for one field, and §7.3 answers that with a usage error rather than a
+/// precedence rule.
+#[test]
+fn add_data_refuses_a_positional_amount() {
+    let root = fresh_root();
+    let (code, _) = rat(
+        &root,
+        &[
+            "add",
+            "-H",
+            "crp",
+            "checking",
+            "--data",
+            r#"{"currency":"sek"}"#,
+            "-y",
+        ],
+    );
+    assert_eq!(code, 0);
+
+    let (code, value) = rat(
+        &root,
+        &[
+            "add",
+            "-H",
+            "crp",
+            "checking",
+            "99",
+            "--data",
+            r#"{"amount":1}"#,
+            "-y",
+        ],
+    );
+    assert_eq!(code, 2, "{value}");
+    assert!(
+        value["error"]["msg"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("amount"),
+        "{value}"
+    );
+}

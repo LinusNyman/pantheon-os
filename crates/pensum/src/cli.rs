@@ -105,6 +105,9 @@ enum Cmd {
     /// `pen reach_out_to_alex "call re: the contract"` · `pen acm buy_milk "2%"`.
     Add {
         tokens: Vec<String>,
+        /// The whole record as JSON, for what the flags cannot spell (§7.3).
+        #[arg(long = "data", value_name = "JSON")]
+        data: Option<String>,
         /// Attach a reference — what the task is *about* (§5.4, §8.5).
         #[arg(short = 'r', long = "ref", value_name = "REF")]
         refs: Vec<String>,
@@ -254,7 +257,12 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
     }
 
     match cmd {
-        Cmd::Add { tokens, refs, done } => cmd_add(cli, tokens, refs, done.as_deref()),
+        Cmd::Add {
+            tokens,
+            data,
+            refs,
+            done,
+        } => cmd_add(cli, tokens, data.as_deref(), refs, done.as_deref()),
         Cmd::Edit {
             tokens,
             refs,
@@ -281,7 +289,13 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
 /// File a task (§8.5). Unlike every other `add` in the workspace this one may bring
 /// its container with it — a nameless register has nothing to mistype, so it is
 /// minted by its determinant, the node's first task, rather than by `-c` (§7.3, §18).
-fn cmd_add(cli: &Cli, tokens: &[String], refs: &[String], done: Option<&str>) -> Result<Response> {
+fn cmd_add(
+    cli: &Cli,
+    tokens: &[String],
+    data: Option<&str>,
+    refs: &[String],
+    done: Option<&str>,
+) -> Result<Response> {
     refuse_under_rule(cli, "add")?;
     let ctx = Ctx::open(cli)?;
     let target = contract::resolve_register_target(
@@ -302,9 +316,26 @@ fn cmd_add(cli: &Cli, tokens: &[String], refs: &[String], done: Option<&str>) ->
         path: ctx.path_at(&target.home),
     });
 
-    let record = Task {
-        done: done_value(done)?,
-        note: note_from(&target.values),
+    // `--data` carries the whole record where the flags cannot spell it (§7.3). A
+    // Pensum task takes its note from the words after its name, so those count as a
+    // field named twice just as `--done` does; the name itself is the key and stays
+    // the positional's (§7.3, I3).
+    let record = match data {
+        Some(json) => {
+            let mut named = Vec::new();
+            if done.is_some() {
+                named.push("--done");
+            }
+            if !target.values.is_empty() {
+                named.push("the words after the task's name");
+            }
+            contract::refuse_data_with_fields(&named)?;
+            contract::record_from_json::<Pensum>(json)?
+        }
+        None => Task {
+            done: done_value(done)?,
+            note: note_from(&target.values),
+        },
     };
     Pensum::validate(&record)?;
     let line = Line {
