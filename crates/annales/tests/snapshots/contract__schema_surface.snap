@@ -4,7 +4,7 @@ assertion_line: 80
 expression: pretty(&schema)
 ---
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "annales",
   "record": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",

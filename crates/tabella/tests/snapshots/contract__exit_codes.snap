@@ -22,7 +22,7 @@ tab ecv x -c
   # no series to mint
   => exit 2: tabella keeps no series, so -c mints nothing: the document `add` creates *is* the record (§7.1, §18)
 
-tab ecv x -a 260718
+tab ecv x -a 20260718
   # no key to date
   => exit 2: tabella keeps no series, so -a keys nothing: a document is not a sample, and its name is its key (§5.4, §7.1)
 

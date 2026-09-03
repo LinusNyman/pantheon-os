@@ -3,7 +3,7 @@ source: crates/fasti/tests/contract.rs
 expression: pretty(&schema)
 ---
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "fasti",
   "record": {
     "$defs": {
@@ -19,7 +19,7 @@ expression: pretty(&schema)
             ]
           },
           "until": {
-            "description": "When it ends — `hhmm`, or `YYMMDDThhmm` where it runs past its own day. The\n*start* is the line's key, which is what makes \"a meeting 4–5pm\" one record\nrather than two (§7.3, §8.4). Absent for an occurrence with no duration: a\ndeadline is a point.",
+            "description": "When it ends — `hhmm`, or `YYYYMMDDThhmm` where it runs past its own day. The\n*start* is the line's key, which is what makes \"a meeting 4–5pm\" one record\nrather than two (§7.3, §8.4). Absent for an occurrence with no duration: a\ndeadline is a point.",
             "type": [
               "string",
               "null"
@@ -40,7 +40,7 @@ expression: pretty(&schema)
         "description": "A period or state — the `data` half of a partitioned entity file (§6.1, §8.4).\n\nIts `refs` ride in the envelope, and its home, core, kind, and slug are the file's\nlocation and name (I3), so none of them is stored here. What is left is the period\nitself: when it opened, when it closed if it has, and a hand's remark.\n\n`from` is **required** and `to` is **optionally absent** — an absent `to` is an open\nspan, the state you are still in, and closing it is an ordinary `edit` that corrects\nthe one object in place (I1, §6.1). There is no `open` flag beside it: a boolean\nthat merely restates whether a field is present is a second copy of the same fact,\nfree to drift from it (§18).",
         "properties": {
           "from": {
-            "description": "The day the period opens, `YYMMDD` — the same shape a series key wears (§5.4),\nso a span and an event sort against each other without a parser.",
+            "description": "The day the period opens, `YYYYMMDD` — the same shape a series key wears (§5.4),\nso a span and an event sort against each other without a parser.",
             "type": "string"
           },
           "note": {

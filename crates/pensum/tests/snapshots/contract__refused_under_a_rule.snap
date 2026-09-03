@@ -4,7 +4,7 @@ assertion_line: 377
 expression: out
 ---
 exit 6: pen acm file_taxes
-exit 6: pen edit buy_milk --done 260719 -y
+exit 6: pen edit buy_milk --done 20260719 -y
 exit 6: pen rename buy_milk get_milk -y
 exit 6: pen mv buy_milk --to ao -y
 exit 6: pen rm buy_milk -y

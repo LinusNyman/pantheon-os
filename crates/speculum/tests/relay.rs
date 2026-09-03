@@ -172,7 +172,7 @@ fn a_reading_is_logged_through_annales(root: &Path) {
         String::from_utf8_lossy(&out.stdout)
     );
 
-    let today = jiff::Zoned::now().strftime("%y%m%d").to_string();
+    let today = jiff::Zoned::now().strftime("%Y%m%d").to_string();
     let dated = listed
         .as_array()
         .and_then(|lines| lines.first())

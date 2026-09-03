@@ -117,14 +117,14 @@ enum Format {
 #[allow(clippy::option_option)]
 #[derive(clap::Args, Default)]
 struct Fields {
-    /// The day a span opens, YYMMDD (§8.4). Names the entity form.
+    /// The day a span opens, YYYYMMDD (§8.4). Names the entity form.
     #[arg(long = "from", value_name = "DAY")]
     from: Option<String>,
-    /// The day a span closes, YYMMDD (§8.4). Names the entity form; absent on a fresh
+    /// The day a span closes, YYYYMMDD (§8.4). Names the entity form; absent on a fresh
     /// span leaves it open, which is the state you are still in.
     #[arg(long = "to", value_name = "DAY")]
     to: Option<String>,
-    /// When an occurrence ends — hhmm, or YYMMDDThhmm (§8.4). Names the series form;
+    /// When an occurrence ends — hhmm, or YYYYMMDDThhmm (§8.4). Names the series form;
     /// the start is the line's own key (§7.3).
     #[arg(long = "until", value_name = "WHEN")]
     until: Option<String>,
@@ -138,11 +138,11 @@ enum Cmd {
     /// Place something on the timeline — a span, or an occurrence in an event series.
     ///
     /// A **span** is `[home] <name> --from DAY [--to DAY]`: `fas aof mvp_phase --from
-    /// 260101`. A partitioned entity needs no prior container — the record `add`
+    /// 20260101`. A partitioned entity needs no prior container — the record `add`
     /// creates *is* the span (§18).
     ///
     /// An **event** is `[home] [series] [values…]` with a date: `fas aof standups
-    /// "sprint review" -a 260719T1600`. Each of §7.3's four inference forms works, and
+    /// "sprint review" -a 20260719T1600`. Each of §7.3's four inference forms works, and
     /// `-c` mints the series first — a hand-named series is never conjured by a typo.
     Add {
         tokens: Vec<String>,
@@ -165,7 +165,7 @@ enum Cmd {
     /// Correct a record in place — a span by slug, or an occurrence by its key (§7.2).
     /// What a hand does not give, the record keeps (I1).
     ///
-    /// Closing an open span is this verb: `fas edit mvp_phase --to 260901`.
+    /// Closing an open span is this verb: `fas edit mvp_phase --to 20260901`.
     ///
     /// Given no new value it is the editor form (§7.3): at a TTY the value opens in
     /// `$VISUAL`/`$EDITOR`/`vi`; piped, it prints `{"path":…}`.
@@ -334,7 +334,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Where { tokens } => cmd_where(cli, tokens),
         Cmd::Schema => Ok(Response::Json(serde_json::to_value(pantheon::schema::<
             Fasti,
-        >(1))?)),
+        >(2))?)),
         Cmd::Version => Ok(Response::Json(version_json())),
         Cmd::Help => Ok(Response::Json(help_json())),
     }
@@ -1098,7 +1098,7 @@ fn cmd_series(
         .map(checked_line)
         .collect::<Result<Vec<_>>>()?;
     // A window is a filter on the collection, never a second verb (§7.2). A `--to` date
-    // also admits that day's timed keys (`260719T1600` is within `--to 260719`).
+    // also admits that day's timed keys (`20260719T1600` is within `--to 20260719`).
     if let Some(from) = from {
         lines.retain(|l| l.key.as_str() >= from);
     }
@@ -1753,7 +1753,7 @@ fn version_json() -> Value {
         "name": Fasti::NAME,
         "short": "fas",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 

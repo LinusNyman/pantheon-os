@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use crate::code::{Code, parse_node_dirname};
 use crate::core::Core;
 use crate::document::Document;
-use crate::envelope::{Entity, Frontmatter, Key, Line, Ref};
+use crate::envelope::{DATE_WIDTH, Entity, Frontmatter, Key, Line, Ref};
 use crate::name::normalize_token;
 use crate::store::{DocumentRef, EntityRef, PresentLine, SeriesRef, Store};
 use crate::tree::resolve_code;
@@ -414,9 +414,15 @@ fn scratch_path() -> PathBuf {
 
 // ── the key is what you give, never invented (§7.3) ──────────────────────────
 
-/// Turn `--at` into a series key (§7.3): `YYMMDD`, `YYMMDDThhmm`, or `hhmm` for a
+/// Turn `--at` into a series key (§7.3): `YYYYMMDD`, `YYYYMMDDThhmm`, or `hhmm` for a
 /// time today; absent, today's date. The tool never auto-suffixes to dodge a
 /// collision — a second reading on one key is an overwrite, and confirms as one.
+///
+/// **A six-digit date is refused rather than widened.** Reading `260719` as `20260719`
+/// would be the century guess [`DATE_WIDTH`](crate::DATE_WIDTH) exists to remove, and it
+/// would be wrong for exactly the dates a hand is most likely to type by hand — a birth
+/// date, anything before 2000. The refusal is what sends a stale tree through the
+/// migration instead of silently half-converting it, one write at a time.
 pub fn key_from_at(at: Option<&str>) -> Result<Key> {
     let today = today();
     let Some(raw) = at else {
@@ -426,26 +432,21 @@ pub fn key_from_at(at: Option<&str>) -> Result<Key> {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     match given.split_once('T') {
         Some((date, time))
-            if digits(date) && date.len() == 6 && digits(time) && time.len() == 4 =>
+            if digits(date) && date.len() == DATE_WIDTH && digits(time) && time.len() == 4 =>
         {
             Key::parse(given)
         }
-        None if digits(given) && given.len() == 6 => Key::parse(given),
+        None if digits(given) && given.len() == DATE_WIDTH => Key::parse(given),
         None if digits(given) && given.len() == 4 => Key::parse(&format!("{today}T{given}")),
         _ => Err(Error::usage(format!(
-            "-a takes YYMMDD, YYMMDDThhmm, or hhmm; got {raw:?} (§7.3)"
+            "-a takes YYYYMMDD, YYYYMMDDThhmm, or hhmm; got {raw:?} (§7.3)"
         ))),
     }
 }
 
 fn today() -> String {
     let date = jiff::Zoned::now().date();
-    format!(
-        "{:02}{:02}{:02}",
-        date.year().rem_euclid(100),
-        date.month(),
-        date.day()
-    )
+    format!("{:04}{:02}{:02}", date.year(), date.month(), date.day())
 }
 
 // ── home and series are found, never invented (§7.3) ─────────────────────────

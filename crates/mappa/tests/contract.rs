@@ -593,7 +593,7 @@ fn exit_codes() {
         ("no such slug", vec!["get", "nowhere"]),
         ("a slug at two nodes", vec!["get", "the_yard"]),
         ("-c mints nothing", vec!["clh", "x", "-c"]),
-        ("-a keys nothing", vec!["clh", "x", "-a", "260718"]),
+        ("-a keys nothing", vec!["clh", "x", "-a", "20260718"]),
         ("no series to read", vec!["series"]),
         ("a token mappa lacks", vec!["clh", "x", "-k", "person"]),
         ("a name is one token", vec!["clh", "the", "yard"]),

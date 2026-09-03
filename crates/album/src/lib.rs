@@ -43,7 +43,7 @@ pub use cli::run_cli;
 #[cfg(feature = "tui")]
 pub use screen::AlbumApp;
 
-/// A period an agent is away (§8.1). Keys are `YYMMDD`, the same shape a series key
+/// A period an agent is away (§8.1). Keys are `YYYYMMDD`, the same shape a series key
 /// wears (§5.4), and `to` is absent while the period is still open.
 ///
 /// This is the list-valued field §6.1 describes: an entity was never a sample, so
@@ -155,14 +155,14 @@ impl Core for Album {
     }
 }
 
-/// An away bound is a `YYMMDD` day, the same shape a series key wears (§5.4) — so
+/// An away bound is a `YYYYMMDD` day, the same shape a series key wears (§5.4) — so
 /// the two sort the same way, and a lens can line them up without a parser.
 fn check_day(value: &str, i: usize, which: &str) -> Result<()> {
-    if value.len() == 6 && value.bytes().all(|b| b.is_ascii_digit()) {
+    if value.len() == pantheon::DATE_WIDTH && value.bytes().all(|b| b.is_ascii_digit()) {
         Ok(())
     } else {
         Err(Error::validation(format!(
-            "away period {i} has a malformed {which} {value:?}: a day is YYMMDD (§5.4)"
+            "away period {i} has a malformed {which} {value:?}: a day is YYYYMMDD (§5.4)"
         )))
     }
 }

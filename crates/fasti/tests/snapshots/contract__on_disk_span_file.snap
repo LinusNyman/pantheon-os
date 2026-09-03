@@ -5,7 +5,7 @@ expression: span.clone()
 {
   "refs": [],
   "data": {
-    "from": "260101",
-    "to": "260630"
+    "from": "20260101",
+    "to": "20260630"
   }
 }

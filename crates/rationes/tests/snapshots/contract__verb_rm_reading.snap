@@ -4,6 +4,6 @@ assertion_line: 346
 expression: pretty(&removed)
 ---
 {
-  "deleted": "260719",
+  "deleted": "20260719",
   "series": "checking"
 }

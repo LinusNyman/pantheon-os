@@ -540,7 +540,7 @@ fn context_for(rule: &crate::Rule, now: &str, sign: &str, trigger: Option<&Trigg
     ctx
 }
 
-/// Today, as the `YYMMDD` a rule keys by.
+/// Today, as the `YYYYMMDD` a rule keys by.
 ///
 /// **`now` is a date and stays one** (§9.3): that is what makes a rule idempotent, the
 /// same proposal on the same day being the same key to upsert rather than stack. A
@@ -597,7 +597,7 @@ fn help_json() -> Value {
         "verbs": VERBS,
         "bare": "opens the rules browser at a terminal; emits this down a pipe",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 
@@ -606,6 +606,6 @@ fn version_json() -> Value {
         "name": "auspex",
         "short": "aus",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }

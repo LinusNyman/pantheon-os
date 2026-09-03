@@ -130,14 +130,14 @@ fn a_passive_overlay_yields_to_a_navigation_key() {
     };
 
     // `+` raises the Title overlay — its version line is the tell it is up.
-    assert!(up("+").contains("format 1"), "title should be up");
+    assert!(up("+").contains("format 2"), "title should be up");
     // `Esc` still just closes it — the one unwind that is unchanged.
-    assert!(!up("+<esc>").contains("format 1"), "esc closes the title");
+    assert!(!up("+<esc>").contains("format 2"), "esc closes the title");
     // A non-Esc key yields: `+` then `?` closes the title and opens Help in one press.
     // Without the yield, `?` was swallowed and the title stayed up.
     let swapped = up("+?");
     assert!(
-        !swapped.contains("format 1"),
+        !swapped.contains("format 2"),
         "title yielded to `?`: {swapped}"
     );
     assert!(
@@ -164,7 +164,7 @@ fn the_title_is_a_full_page_banner_without_a_tagline() {
         "the tagline no longer rides beside the name (C6): {text}"
     );
     assert!(
-        text.contains("format 1"),
+        text.contains("format 2"),
         "the splash still carries the version line: {text}"
     );
 }
@@ -426,8 +426,8 @@ fn a_picked_home_still_carries_the_views_date() {
     assert_eq!(node.as_str(), "a", "the home is the one taken in the modal");
     assert_eq!(
         at.expect("the calendar cell still dates the add").len(),
-        6,
-        "a reading key is YYMMDD (§6.1)"
+        8,
+        "a reading key is YYYYMMDD (§6.1)"
     );
 }
 
@@ -700,11 +700,11 @@ fn an_agenda_sorts_dated_first() {
                 ..row("undated", "ac")
             },
             Row {
-                when: Some("260719".into()),
+                when: Some("20260719".into()),
                 ..row("later", "ac")
             },
             Row {
-                when: Some("260701".into()),
+                when: Some("20260701".into()),
                 ..row("earlier", "ac")
             },
         ]
@@ -744,9 +744,9 @@ fn every_chart_shape_draws() {
                     Panel {
                         title: "weight".into(),
                         chart: Chart::Trend(vec![
-                            ("260701".into(), 78.4),
-                            ("260708".into(), 78.1),
-                            ("260715".into(), 77.9),
+                            ("20260701".into(), 78.4),
+                            ("20260708".into(), 78.1),
+                            ("20260715".into(), 77.9),
                         ]),
                     },
                     Panel {
@@ -763,11 +763,17 @@ fn every_chart_shape_draws() {
                     },
                     Panel {
                         title: "logging".into(),
-                        chart: Chart::Heatmap(vec![("260701".into(), 1.0), ("260702".into(), 0.0)]),
+                        chart: Chart::Heatmap(vec![
+                            ("20260701".into(), 1.0),
+                            ("20260702".into(), 0.0),
+                        ]),
                     },
                     Panel {
                         title: "throughput".into(),
-                        chart: Chart::Spark(vec![("260701".into(), 3.0), ("260702".into(), 5.0)]),
+                        chart: Chart::Spark(vec![
+                            ("20260701".into(), 3.0),
+                            ("20260702".into(), 5.0),
+                        ]),
                     },
                 ]
             }))]
@@ -824,7 +830,10 @@ fn a_chart_survives_empty_and_flat_data() {
                     },
                     Panel {
                         title: "flat".into(),
-                        chart: Chart::Trend(vec![("260701".into(), 5.0), ("260702".into(), 5.0)]),
+                        chart: Chart::Trend(vec![
+                            ("20260701".into(), 5.0),
+                            ("20260702".into(), 5.0),
+                        ]),
                     },
                     Panel {
                         title: "zero pie".into(),
@@ -1333,7 +1342,7 @@ fn a_calendar_lists_only_the_focused_day() {
     // 1 January 1999 is not today, whenever today is — so the row is always elsewhere.
     let mut calendar = Calendar::of(|| {
         vec![Row {
-            when: Some("990101".into()),
+            when: Some("20990101".into()),
             ..row("long_ago", "ac")
         }]
     });
@@ -1382,7 +1391,7 @@ fn a_calendar_cell_dates_the_add() {
         panic!("a dated Full view names its cell through `target` (P§7)");
     };
     let at = at.expect("the cell carries its date");
-    assert_eq!(at.len(), 6, "a reading key is YYMMDD (§6.1): {at}");
+    assert_eq!(at.len(), 8, "a reading key is YYYYMMDD (§6.1): {at}");
 
     // Move a day and the date the add would carry moves with it.
     calendar.navigate(Nav::Right);
@@ -1416,13 +1425,13 @@ fn a_timeline_bar_carries_its_own_home() {
                     vec![
                         CardSpan {
                             label: "mvp_phase".into(),
-                            from: "260101".into(),
-                            to: Some("260630".into()),
+                            from: "20260101".into(),
+                            to: Some("20260630".into()),
                             home: RecordRef::new(Code::parse("ac").unwrap(), "mvp_phase"),
                         },
                         CardSpan {
                             label: "residence".into(),
-                            from: "260201".into(),
+                            from: "20260201".into(),
                             // Open: drawn to the range's right edge (§8.4).
                             to: None,
                             home: RecordRef::new(Code::parse("cs").unwrap(), "residence"),

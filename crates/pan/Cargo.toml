@@ -3,7 +3,7 @@ name = "pan"
 # 0.1.1: the round-1 defect fixes and the B8 identity check. Bumped so `pan -V` and
 # `pan doctor` can tell a fresh build from an install left behind by an earlier one —
 # a crate version drifts freely beneath `format_version`, which is what §15.5 pins.
-version = "0.1.1"
+version = "0.1.2"
 description = "The PantheonOS structural CLI — codes, files, refs, node annotations over the spine (§5.5)."
 edition.workspace = true
 rust-version.workspace = true

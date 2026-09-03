@@ -87,7 +87,7 @@ fn seeded() -> PathBuf {
     let root = fresh_root();
     assert_eq!(ann(&root, &["ecv", "weight", "-c"]), 0, "the log must mint");
     assert_eq!(
-        ann(&root, &["ecv", "weight", "82", "-a", "260718"]),
+        ann(&root, &["ecv", "weight", "82", "-a", "20260718"]),
         0,
         "the reading must land"
     );
@@ -162,7 +162,7 @@ fn x_on_a_row_removes_the_record_from_disk() {
     let root = seeded();
     assert_eq!(
         listed(&root),
-        ["260718"],
+        ["20260718"],
         "a reading is keyed by its date (I1, §6.1)"
     );
 

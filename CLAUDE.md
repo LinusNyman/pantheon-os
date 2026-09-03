@@ -129,9 +129,11 @@ variants — a *dispatch type, not a disk format*, since the filename already na
 `location`/`region` are one storage shape, so it keeps one flat struct, and an enum there would
 have turned `edit -k` into a record transformation when §7.2 says it is a file rename.
 
-**Still stubbed** — one not-implemented line: `pan migrate` (`Cmd::Migrate`, §5.5). It is
+**Still stubbed** — one not-implemented line: `pan migrate` (`Cmd::Migrate`, §5.5). It was
 *blocked, not deferred*: shape-directed and idempotent, it can only be built once a *prior*
-format version exists to rewrite from, so it waits on the first release (§16 step 11).
+format version exists to rewrite from. **Wave 10 unblocked it** — the date width moved and
+`format_version` is now `2`, so there is a 1→2 rewrite for it to do, and `cargo xtask
+migrate-dates` is the one-off standing in for it. Building it is now a choice, not a wait.
 **Step 8 (`auspex`) is done**, landed in four parts against §16's own "`plan` before `run`"
 sequencing: the hook (below), the **read half** (discovery, the header, `ls`/`version`/`help`,
 the browser screen), the **propose protocol** (`plan`/`test`), and **apply** (`run` — the
@@ -168,7 +170,7 @@ build-order steps. The fan-out is done; the shape now is iterate-on-one-app.
   ones, for any new app.
 
 **`aus` is `pan`-shaped and `pan doctor` sees it** — it emits `version -f json` with
-`format_version: 1`, so it reads as installed. Three things about its shape a later change must not
+`format_version: 2`, so it reads as installed. Three things about its shape a later change must not
 undo:
 
 - **`aus` is `pan`-shaped, not a core's shape**: its own structural verbs, **no `schema`** (it
@@ -441,7 +443,7 @@ Run fmt + clippy + tests before every commit — CI denies warnings *and* pedant
   invalidating any token a hand holds from an earlier `--dry-run`. One test catches it:
   `pantheon/tests/units.rs::a_change_body_names_a_series_only_when_there_is_one`, which pins the byte
   string. If it fails, the token contract moved — decide that deliberately; do not update the pin.
-- **Keep snapshots off the wall clock.** Pass every date explicitly (`ann -a 260718`, `pen --done 260719`);
+- **Keep snapshots off the wall clock.** Pass every date explicitly (`ann -a 20260718`, `pen --done 20260719`);
   a core that reads `now` in a snapshotted path makes the suite fail tomorrow.
 - **Name normalization is one rule** (§5.1): lowercase, NFC, alphanumeric+`_`, fold space/`-` to `_`,
   collapse and strip `_`. NFC is not optional (macOS/Linux byte disagreement). Apply on write, compare NFC on read.
@@ -750,6 +752,90 @@ missing verbs the migration needs. What a later change must not undo:
   the dependency build across the twelve or it recompiles the world twelve times under
   `lto = true`. `pan` is `0.1.1` from this wave so `pan -V` and `pan doctor` can tell the
   builds apart; a crate version drifts freely beneath `format_version` (§15.5).
+
+### Improvement phase — Wave 9 (the char slot is one character; §5.1)
+
+A naming-rule change, so **§5.1 moved and the code is downstream of it**. The padded
+two-digit numeric level (`01`…`99`) is gone: **a defining char is exactly one character,
+a letter or a digit, and an enumerated level counts `0`…`9` then continues `a`…`z`.**
+What a later change must not undo:
+
+- **Every compact token is one character, so `tokenize_compact` is a `chars()` walk.**
+  The old scanner looked ahead — "a letter is a one-char token, a digit begins a
+  two-digit token" — which is why the width had to be fixed in the first place. With one
+  width there is nothing to disambiguate, so `asdl01` is six levels, not five. **The
+  ordering is free**: ASCII puts every digit before every letter, so the counting order
+  `0`…`9`,`a`…`z` *is* the text sort order, which the padded form only achieved by
+  padding. A level never needs a 37th sibling (I7).
+- **`CharToken` was deleted, not narrowed.** The enum existed solely to hold "one letter
+  or two digits"; once both are one character it is `char`, and `NodeName.ch` /
+  `Node.ch` are `Option<char>`. Nothing ever branched on Alpha-vs-Numeric — do not
+  reintroduce a type to carry a distinction the rule no longer makes.
+- **`Code::parse` still refuses an opening digit**, and that rule is now independent of
+  tokenizing rather than a consequence of it: it is what keeps a sphere alphabetic and a
+  code visually distinct from a date. A counted level therefore always takes a defining
+  char above it.
+- **There is no compat mode, deliberately.** Reading both widths would bring back exactly
+  the ambiguity the fixed width existed to prevent (`aop01` = `a,o,p,0,1` or
+  `a,o,p,01`?), so an un-migrated padded dir is simply `malformed_dir`. The consequence
+  is that **the old and new binaries cannot both read a half-migrated tree**, which is
+  what shapes the migration below.
+- **The live `~/aedes` was migrated by bouncing through letters** (43 nodes): old `pan`
+  0.1.1 renamed every padded char to a spare *letter* (legal under both rules, so the
+  intermediate tree is valid to each binary), then the new `pan` renamed that letter to
+  its digit. Both passes ran `pan rename --char` deepest-first — so a node's ancestors
+  are untouched when its turn comes and its already-renamed descendants ride the cascade
+  — and every step dry-ran first. `00`…`09` de-padded (`07`→`7`); the two levels
+  numbered past nine (`aotke_m_mou`, one Avicii album) were recounted in order. **A whole
+  phase must finish before the next starts**: renaming one branch at a time leaves a tree
+  that neither binary can walk.
+- **`aop00_07_esa_26_` is a definition-prefix node, not a padded char.** Its trailing `_`
+  is the marker (§5.1), so `pan` never read `07` as a char and it needed no rename — it
+  rode its parent's cascade. A hand-rolled scan of the directory names got this wrong;
+  **source a structural question from `pan tree -f json`, not from splitting names.**
+
+### Improvement phase — Wave 10 (a date is `YYYYMMDD`; §5.4, format 1 → 2)
+
+The second naming-rule change, and the first **on-disk format** change: every date in the
+suite is eight digits. §5.4 moved and the code is downstream of it. What a later change
+must not undo:
+
+- **The reason is the century, and it was silently wrong rather than merely imprecise.**
+  A two-digit year forced every reader to assume `20xx` — fine for a reading taken today,
+  wrong for any date a hand records *about the past*. It surfaced as "why can't Album hold
+  a birthday?": `940317` read as 2094. The assumption lived in four separate readers
+  (`studium::fold`'s `2000 + year`, `porticus`'s Calendar and Timeline, `speculum`'s
+  horizon), each independently, so there was no one place to correct it. **Eight digits
+  remove the question rather than answering it consistently.**
+- **`pantheon::DATE_WIDTH` is the one statement of the width** and every reader now takes
+  it from there — the spine, both hand-rolled core checks (Album's and Fasti's `check_day`),
+  and all three consumers. Pensum and Rationes already delegated to `Key::parse().classify()`
+  and so moved for free; that is the shape to copy, not a fresh `len() == 8`.
+- **A six-digit date is refused, never widened** (`key_from_at`, §5.4). Guessing `20` at
+  the CLI would be the same century assumption one layer down, and it is exactly wrong for
+  the dates a hand types by hand. **There is no compat mode**, as in Wave 9 — and here
+  reading both widths would be worse than ambiguous, it would be *silently wrong*: keys sort
+  lexicographically, so a series holding both `260601` and `20260715` folds to the **older**
+  line as its present (`'0' < '6'`), breaking I1 with no error anywhere.
+- **`format_version` is `2`** — the first bump, and it is what §16 step 11 was waiting on:
+  `pan migrate` is **no longer blocked**, because a prior format now exists to rewrite from.
+  The literal lives in **17 places** (twelve apps' `version_json`, each core's
+  `schema::<C>(2)` call, `pan doctor`'s own entry, `porticus`'s Title line). That duplication
+  is now a real hazard — a missed one reads as a disagreeing app — and folding it into one
+  spine constant is the obvious follow-up.
+- **The migration is `cargo xtask migrate-dates --root <tree> [--apply]`**, dry-run by
+  default. **Its safety is `is_record_file`, not the extension.** The live tree held
+  **23,995 `.json` files of which 148 were records** — the rest dependency lockfiles under
+  project nodes, and an npm lockfile carries `"from"` keys a date pass would rewrite. This
+  is the Wave 8 `rename-prefix` trap exactly, and the same answer: bound the walk to the
+  node tree (§5.2 — a record's filename begins with its meta dir's name), never a skip list.
+- **It rewrites text, never re-serializes.** A parse-and-re-emit would reflow every record
+  in the tree, and a migration that churns files it did not need to touch is one nobody can
+  review (I6). Only the seven dated field names plus `key` are touched, so an Annales
+  *reading* of `250601` — a measurement, not a date — is left alone.
+- **Verified on a copy of the live tree before anything was recommended**: 158 dates across
+  59 files, idempotent on re-run, still valid JSON, and read back through `pen`/`fas`/`ann`.
+  Keep that order for the next format change — dry-run, copy, apply, read back.
 
 ### Step 6's durable rules (the chrome)
 

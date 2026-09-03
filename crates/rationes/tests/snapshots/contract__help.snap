@@ -5,7 +5,7 @@ expression: pretty(&help)
 ---
 {
   "about": "res holdings: the accounts, goods, and rights you hold (§8.3)",
-  "format_version": 1,
+  "format_version": 2,
   "kinds": [
     "account",
     "asset",

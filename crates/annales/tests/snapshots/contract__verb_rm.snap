@@ -4,5 +4,5 @@ assertion_line: 137
 expression: pretty(&deleted)
 ---
 {
-  "deleted": "260718"
+  "deleted": "20260718"
 }

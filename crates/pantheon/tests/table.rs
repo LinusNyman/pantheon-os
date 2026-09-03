@@ -16,14 +16,14 @@ use serde_json::json;
 #[test]
 fn a_fold_hoists_data_into_columns() {
     let value = json!([
-        {"core":"pensum","home":"ac","kind":"task","key":"buy_milk","refs":[],"data":{"done":"260719"}},
+        {"core":"pensum","home":"ac","kind":"task","key":"buy_milk","refs":[],"data":{"done":"20260719"}},
         {"core":"pensum","home":"ac","kind":"task","key":"call_alex","refs":["album:alex"],"data":{}},
     ]);
     assert_eq!(
         render(&value),
         "\
 KEY        REFS        DONE
-buy_milk               260719
+buy_milk               20260719
 call_alex  album:alex
 "
     );
@@ -206,12 +206,12 @@ fn an_empty_fold_renders_nothing() {
 /// disqualify the record from being a row.
 #[test]
 fn nesting_inside_data_stays_a_row() {
-    let value = json!([{"slug":"alex","data":{"away":[{"from":"260601"}]}}]);
+    let value = json!([{"slug":"alex","data":{"away":[{"from":"20260601"}]}}]);
     assert_eq!(
         render(&value),
         "\
 SLUG  AWAY
-alex  [{\"from\":\"260601\"}]
+alex  [{\"from\":\"20260601\"}]
 "
     );
 }

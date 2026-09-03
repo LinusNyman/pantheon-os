@@ -105,7 +105,7 @@ fn seed(root: &Path) {
             "add",
             "teknisk_fysik",
             "--from",
-            "240801",
+            "20240801",
             "-r",
             "album:kth",
         ],
@@ -113,11 +113,11 @@ fn seed(root: &Path) {
 
     // Enrolments — courses group under the programme by ref, not nesting (I3, §19.1).
     for (slug, from, to) in [
-        ("mekanik", "250110", Some("250601")),
-        ("elektromagnetism", "250110", Some("250826")),
-        ("projektkurs", "250110", Some("250601")),
-        ("kvantfysik", "250115", None),
-        ("flervariabel", "250115", None),
+        ("mekanik", "20250110", Some("20250601")),
+        ("elektromagnetism", "20250110", Some("20250826")),
+        ("projektkurs", "20250110", Some("20250601")),
+        ("kvantfysik", "20250115", None),
+        ("flervariabel", "20250115", None),
     ] {
         let mut args = vec!["-H", "asd", "add", slug, "--from", from];
         if let Some(to) = to {
@@ -143,7 +143,7 @@ fn seed(root: &Path) {
             "7.5",
             "-c",
             "-a",
-            "250601",
+            "20250601",
             "-r",
             "fasti:mekanik",
         ],
@@ -162,7 +162,7 @@ fn seed(root: &Path) {
             "6.0",
             "-c",
             "-a",
-            "250310",
+            "20250310",
             "-r",
             "fasti:elektromagnetism",
         ],
@@ -178,7 +178,7 @@ fn seed(root: &Path) {
             "C",
             "6.0",
             "-a",
-            "250825",
+            "20250825",
             "-r",
             "fasti:elektromagnetism",
         ],
@@ -196,7 +196,7 @@ fn seed(root: &Path) {
             "7.5",
             "-c",
             "-a",
-            "250601",
+            "20250601",
             "-r",
             "fasti:projektkurs",
         ],
@@ -215,7 +215,7 @@ fn seed(root: &Path) {
             "7.5",
             "-c",
             "-a",
-            "250815",
+            "20250815",
             "-r",
             "fasti:flervariabel",
         ],
@@ -243,7 +243,7 @@ fn seed(root: &Path) {
             "B",
             "7.5",
             "-a",
-            "250602",
+            "20250602",
             "-r",
             "album:ada_prof",
         ],
@@ -267,12 +267,21 @@ fn seed(root: &Path) {
     run(
         root,
         "ann",
-        &["-H", "asd", "add", "studytime", "3.5", "-c", "-a", "250601"],
+        &[
+            "-H",
+            "asd",
+            "add",
+            "studytime",
+            "3.5",
+            "-c",
+            "-a",
+            "20250601",
+        ],
     );
     run(
         root,
         "ann",
-        &["-H", "asd", "add", "studytime", "2.0", "-a", "250602"],
+        &["-H", "asd", "add", "studytime", "2.0", "-a", "20250602"],
     );
 }
 
@@ -349,11 +358,13 @@ fn records_a_grade_through_the_lens(root: &Path) {
 
     // Fill it for a mekanik retake and submit. Add does not confirm, so Enter relays at
     // once (P§5); the fields are course · grade · credits · date, Tab between them. This
-    // records `ann add -H asd mekanik A 7.5 --at 250701` — an A after the seeded B.
+    // records `ann add -H asd mekanik A 7.5 --at 20250701` — an A after the seeded B.
     porticus::drive(
         &mut Studium::new(root),
         root,
-        &porticus::keys(&format!("{on_asd}amekanik<tab>A<tab>7.5<tab>250701<enter>")),
+        &porticus::keys(&format!(
+            "{on_asd}amekanik<tab>A<tab>7.5<tab>20250701<enter>"
+        )),
         100,
         24,
     )
@@ -507,7 +518,7 @@ fn the_rest_of_a_study_life(root: &Path) {
         form.contains("hours") && !form.contains("credits"),
         "the study tab's `a` opens the study form, not the grade form: {form}"
     );
-    drive("5a<enter>lectures<tab>2.5<tab>250610<tab>y<enter>");
+    drive("5a<enter>lectures<tab>2.5<tab>20250610<tab>y<enter>");
     let logged = Command::new(bin_dir().join("ann"))
         .arg("-C")
         .arg(root)
@@ -524,7 +535,7 @@ fn the_rest_of_a_study_life(root: &Path) {
     // ── G3: place an exam (§19.8) ────────────────────────────────────────────
     // `4` is the deadlines tab. Its form is Fasti's: series, what, date, what it
     // concerns, and the explicit mint — five fields, none of them a grade's.
-    drive("4a<enter>tentor<tab>mekanik tenta<tab>260315<tab>fasti:mekanik<tab>y<enter>");
+    drive("4a<enter>tentor<tab>mekanik tenta<tab>20260315<tab>fasti:mekanik<tab>y<enter>");
     let placed = Command::new(bin_dir().join("fas"))
         .arg("-C")
         .arg(root)
@@ -534,7 +545,7 @@ fn the_rest_of_a_study_life(root: &Path) {
     let events: Value = serde_json::from_slice(&placed.stdout).unwrap_or_default();
     assert_eq!(
         events[0]["key"].as_str(),
-        Some("260315"),
+        Some("20260315"),
         "`a` on the deadlines tab placed a Fasti event (§19.8, §8.4): {events}"
     );
     assert_eq!(
@@ -548,7 +559,7 @@ fn the_rest_of_a_study_life(root: &Path) {
     // `kvantfysik` was seeded open; `<down>` past mekanik/elektromagnetism/flervariabel
     // is fragile, so search picks it out — `/` narrows the rows and ranks the match first.
     let on_asd = "2<down><right><down>";
-    drive(&format!("{on_asd}<tab>/kvantfysik<enter>e260610<enter>y"));
+    drive(&format!("{on_asd}<tab>/kvantfysik<enter>e20260610<enter>y"));
     let closed = Command::new(bin_dir().join("fas"))
         .arg("-C")
         .arg(root)
@@ -558,7 +569,7 @@ fn the_rest_of_a_study_life(root: &Path) {
     let span: Value = serde_json::from_slice(&closed.stdout).unwrap_or_default();
     assert_eq!(
         span["data"]["to"].as_str(),
-        Some("260610"),
+        Some("20260610"),
         "`e` on a courses row closed the enrolment through `fas` (§19.8): {span}"
     );
 }
@@ -634,7 +645,7 @@ fn the_gpa_folds_across_three_cores_and_the_screen_shows_it() {
     );
 
     // ── G1: §19.5's period placement, derived and drawn ──────────────────────
-    // Mekanik ran `250110 → 250601`, in a programme that began `240801` — study year one,
+    // Mekanik ran `20250110 → 20250601`, in a programme that began `20240801` — study year one,
     // an interval covering P2, P3 and P4. Nothing stores it (I1): the span carries a `from`
     // and a `to`, the curriculum carries year-less anchors, and the label is the fold.
     let placed = porticus::drive(

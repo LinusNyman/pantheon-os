@@ -174,7 +174,7 @@ fn edit_marks_a_task_done_and_undone() {
     let root = fresh_root();
     pen(&root, &["acm", "buy_milk", "the 2% one"]);
 
-    let (code, done) = pen(&root, &["edit", "buy_milk", "--done", "260719", "-y"]);
+    let (code, done) = pen(&root, &["edit", "buy_milk", "--done", "20260719", "-y"]);
     assert_eq!(code, 0);
     // What a hand did not give, the task keeps (I1) — the note survives.
     let (_, undone) = pen(&root, &["edit", "buy_milk", "--undone", "-y"]);
@@ -261,7 +261,7 @@ fn the_read_verbs() {
     pen(&root, &["acm", "reach_out_to_alex", "-r", "album:alex"]);
     pen(&root, &["acm", "buy_milk", "the 2% one"]);
     pen(&root, &["ao", "file_taxes"]);
-    pen(&root, &["edit", "buy_milk", "--done", "260719", "-y"]);
+    pen(&root, &["edit", "buy_milk", "--done", "20260719", "-y"]);
 
     let mut out = String::new();
     for (label, args) in [
@@ -425,7 +425,7 @@ fn write_verbs_are_refused_under_a_rule() {
     let mut out = String::new();
     for args in [
         &["acm", "file_taxes"][..],
-        &["edit", "buy_milk", "--done", "260719", "-y"][..],
+        &["edit", "buy_milk", "--done", "20260719", "-y"][..],
         &["rename", "buy_milk", "get_milk", "-y"][..],
         &["mv", "buy_milk", "--to", "ao", "-y"][..],
         &["rm", "buy_milk", "-y"][..],
@@ -444,7 +444,7 @@ fn the_on_disk_record_stores_no_location() {
     let root = fresh_root();
     pen(&root, &["acm", "reach_out_to_alex", "-r", "album:alex"]);
     pen(&root, &["acm", "buy_milk", "the 2% one"]);
-    pen(&root, &["edit", "buy_milk", "--done", "260719", "-y"]);
+    pen(&root, &["edit", "buy_milk", "--done", "20260719", "-y"]);
     // A record's home, core, and kind are its file's location and name (I3), so
     // none of them appears inside — and the filename carries no series name.
     let text = std::fs::read_to_string(register(&root, "acm")).unwrap();
@@ -464,7 +464,7 @@ fn exit_codes() {
         ),
         (
             "a task keys by its name, not a date",
-            &["acm", "x", "-a", "260719"],
+            &["acm", "x", "-a", "20260719"],
         ),
         (
             "pensum's register is nameless",
@@ -524,7 +524,7 @@ fn tasks_resolve_through_pan() {
     // A date-keyed line hand-written into the same register: a sample, not an
     // identity, so it must resolve to nothing (I1, §5.4).
     let mut text = std::fs::read_to_string(register(&root, "ao")).unwrap();
-    text.push_str("{\"key\":\"260718\",\"refs\":[],\"data\":{}}\n");
+    text.push_str("{\"key\":\"20260718\",\"refs\":[],\"data\":{}}\n");
     std::fs::write(register(&root, "ao"), text).unwrap();
 
     let self_bin = PathBuf::from(env!("CARGO_BIN_EXE_pen"));
@@ -557,14 +557,14 @@ fn tasks_resolve_through_pan() {
             "resolve",
             "pensum:reach_out_to_alex",
             "pensum:file_taxes",
-            "pensum:260718",
+            "pensum:20260718",
             "pensum:never_written",
         ])
         .env("PATH", path)
         .env_remove("PANTHEON_ROOT")
         .output()
         .unwrap();
-    // Any unresolved ref exits 4 — `pensum:260718` and `pensum:never_written` are.
+    // Any unresolved ref exits 4 — `pensum:20260718` and `pensum:never_written` are.
     assert_eq!(
         out.status.code(),
         Some(4),

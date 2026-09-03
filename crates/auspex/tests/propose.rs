@@ -318,14 +318,14 @@ fn test_hands_a_rule_the_fixture_from_stdin() {
          printf '{\"writes\":[{\"got\":%s}]}\\n' \"$CTX\"\n",
     );
 
-    let fixture = r#"{"sign":"hook","rule":"echoes","scope":"csa","now":"260101",
+    let fixture = r#"{"sign":"hook","rule":"echoes","scope":"csa","now":"20260101",
                       "trigger":{"core":"annales","home":"csa"}}"#;
     let (code, rules) = aus_stdin(&root, &["test", "echoes"], Some(fixture));
     assert_eq!(code, 0);
 
     let got = &row(&rules, "echoes")["writes"][0]["got"];
     assert_eq!(
-        got["now"], "260101",
+        got["now"], "20260101",
         "the fixture's own date reached the rule"
     );
     assert_eq!(got["sign"], "hook");
@@ -355,7 +355,7 @@ fn test_synthesizes_a_context_when_no_fixture_is_given() {
     // `now` is today's date by construction, so its **shape** is what can be asserted;
     // the value would make this test fail tomorrow.
     let now = got["now"].as_str().expect("now is a string");
-    assert_eq!(now.len(), 6, "YYMMDD (§9.3): {now}");
+    assert_eq!(now.len(), 8, "YYYYMMDD (§9.3): {now}");
     assert!(
         now.chars().all(|c| c.is_ascii_digit()),
         "digits only: {now}"

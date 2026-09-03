@@ -115,8 +115,8 @@ struct Fields {
     /// The unit its balance is read in — `usd`, `shares` (§8.3).
     #[arg(long = "currency", value_name = "C", num_args = 0..=1)]
     currency: Option<Option<String>>,
-    /// The day the holding lapses, `YYMMDD` — a claim's expiry (§8.3).
-    #[arg(long = "expires", value_name = "YYMMDD", num_args = 0..=1)]
+    /// The day the holding lapses, `YYYYMMDD` — a claim's expiry (§8.3).
+    #[arg(long = "expires", value_name = "YYYYMMDD", num_args = 0..=1)]
     expires: Option<Option<String>>,
     /// A hand's remark — on the holding, or on the reading being written.
     #[arg(long = "note", value_name = "TEXT", num_args = 0..=1)]
@@ -129,7 +129,7 @@ enum Cmd {
     ///
     /// Tokens are `[home] <holding> [amount]`. Without an amount this files the
     /// holding itself — `rat crp checking -k account`; with one it writes a reading
-    /// on a holding that must already exist — `rat crp checking 4200 -a 260718`.
+    /// on a holding that must already exist — `rat crp checking 4200 -a 20260718`.
     /// A partitioned entity needs no prior container, and a determined-name series is
     /// minted by its determinant, so **neither form takes `-c`** (§7.3, §18).
     Add {
@@ -298,7 +298,7 @@ pub(crate) fn run(cli: &Cli, as_json: bool) -> Result<Response> {
         Cmd::Where { slug } => cmd_where(cli, slug),
         Cmd::Schema => Ok(Response::Json(serde_json::to_value(pantheon::schema::<
             Rationes,
-        >(1))?)),
+        >(2))?)),
         Cmd::Version => Ok(Response::Json(version_json())),
         Cmd::Help => Ok(Response::Json(help_json())),
     }
@@ -867,7 +867,7 @@ fn cmd_series(
     }
     let mut lines = ctx.store.read_series(&sref)?;
     // A window is a filter on the collection, never a second verb (§7.2). A `--to`
-    // date also admits that day's timed keys (`260703T1400` is within `--to 260703`).
+    // date also admits that day's timed keys (`20260703T1400` is within `--to 20260703`).
     if let Some(from) = from {
         lines.retain(|l| l.key.as_str() >= from);
     }
@@ -931,7 +931,7 @@ fn holding_for_balance(ctx: &Ctx, slug: &str, scope: Option<&Code>) -> Result<En
     if !Rationes::carries_balance(&eref.kind) {
         return Err(Error::validation(format!(
             "{:?} is a {}, and a {} carries no balance series: an expiry is a field, not \
-             a figure sampled over time — set it with `rat edit {} --expires <YYMMDD>` \
+             a figure sampled over time — set it with `rat edit {} --expires <YYYYMMDD>` \
              (§8.3, §6.4)",
             eref.slug, eref.kind, eref.kind, eref.slug
         )));
@@ -1438,7 +1438,7 @@ fn version_json() -> Value {
         "name": Rationes::NAME,
         "short": "rat",
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }
 
@@ -1451,6 +1451,6 @@ fn help_json() -> Value {
         "kinds": Rationes::KINDS,
         "series": Rationes::BALANCE,
         "version": env!("CARGO_PKG_VERSION"),
-        "format_version": 1,
+        "format_version": 2,
     })
 }

@@ -10,4 +10,4 @@ expression: "format!(\"{}--- balance ---\\n{}\", holding, reading)"
   }
 }
 --- balance ---
-{"key":"260718","refs":[],"data":{"amount":4200.0}}
+{"key":"20260718","refs":[],"data":{"amount":4200.0}}

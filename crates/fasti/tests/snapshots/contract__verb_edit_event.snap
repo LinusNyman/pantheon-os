@@ -10,7 +10,7 @@ expression: pretty(&edited)
     ]
   },
   "home": "aof",
-  "key": "260719",
+  "key": "20260719",
   "kind": "event",
   "refs": [],
   "series": "standups"

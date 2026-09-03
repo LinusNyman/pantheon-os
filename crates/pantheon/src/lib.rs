@@ -53,14 +53,14 @@ pub mod validate;
 
 pub use cascade::{Cascade, RefRewrite, occupied_slug, plan_cascade};
 pub use classify::{DocExt, FileClass, classify};
-pub use code::{CharToken, Code, CodeForm, NodeName};
+pub use code::{Code, CodeForm, NodeName};
 pub use contract::{
     Checkpoint, DocumentQuery, DocumentTarget, Edited, EntityQuery, EntityTarget, RecordChange,
     RegisterQuery, RegisterTarget, Response, SeriesTarget, peel_home,
 };
 pub use core::{Core, CoreRegistry, DiscoveredCore};
 pub use document::{Document, read_frontmatter};
-pub use envelope::{Entity, Frontmatter, Key, KeyShape, Line, RawEntity, RawLine, Ref};
+pub use envelope::{DATE_WIDTH, Entity, Frontmatter, Key, KeyShape, Line, RawEntity, RawLine, Ref};
 pub use error::{Error, ExitCode, Result};
 pub use hook::wake_if_noted;
 pub use lock::with_record_lock;

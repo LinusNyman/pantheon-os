@@ -4,7 +4,7 @@
 //! does not need to: the interval already points at every period it overlaps, so the
 //! placement is *derived* from the interval against the curriculum's year-less anchors and
 //! stored nowhere (I1). That is the whole of §19.5's "a course can point to several
-//! periods" — Mekanik's `250114 → 250602` covers P3 and P4 and reads as `P3–P4`.
+//! periods" — Mekanik's `20250114 → 20250602` covers P3 and P4 and reads as `P3–P4`.
 //!
 //! **The label is absolute.** With `periods_per_year` periods to a year, a course's label
 //! is `(study_year − 1) × periods_per_year + n`, so a year-2 P1 reads as **P6** — the index
@@ -121,14 +121,16 @@ fn overlaps(period: &Period, from: &(i64, String), to: &(i64, String)) -> bool {
     false
 }
 
-/// A `YYMMDD` date as `(year, "MMDD")` — comparable as a pair, so no date arithmetic and
+/// A `YYYYMMDD` date as `(year, "MMDD")` — comparable as a pair, so no date arithmetic and
 /// no second date crate (§13).
 fn split(date: &str) -> Option<(i64, String)> {
-    if date.len() != 6 || !date.bytes().all(|b| b.is_ascii_digit()) {
+    if date.len() != pantheon::DATE_WIDTH || !date.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    let year = date[..2].parse::<i64>().ok()?;
-    Some((year, date[2..].to_owned()))
+    // The year is the full four digits now, so a study year spanning 1999→2000 orders
+    // correctly where a two-digit year wrapped to a smaller number (§5.4, §19.5).
+    let year = date[..4].parse::<i64>().ok()?;
+    Some((year, date[4..].to_owned()))
 }
 
 fn day(date: &str) -> Option<(i64, String)> {
@@ -159,14 +161,14 @@ periods = [
     /// terms it touched come with it.
     #[test]
     fn a_course_spanning_two_periods_reads_as_the_range() {
-        let p = placement(&kth(), "240826", "250114", Some("250602")).expect("placed");
+        let p = placement(&kth(), "20240826", "20250114", Some("20250602")).expect("placed");
         // It opens on P2's *last day*, so P2–P4 — the interval points at every period it
         // overlaps and the fold does not round the edge off.
         assert_eq!(p.label, "P2–P4");
         assert_eq!(p.terms, ["ht", "vt"]);
 
         // Squarely inside the spring: §19.5's `P3–P4`, in the programme's first year.
-        let first = placement(&kth(), "250826", "260115", Some("260602")).expect("placed");
+        let first = placement(&kth(), "20250826", "20260115", Some("20260602")).expect("placed");
         assert_eq!(first.label, "P3–P4");
         assert_eq!(first.terms, ["vt"]);
     }
@@ -178,19 +180,19 @@ periods = [
     /// the programme's own first spring in year two.
     #[test]
     fn a_programme_starting_before_its_first_period_still_counts_from_one() {
-        let p = placement(&kth(), "240801", "250110", Some("250601")).expect("placed");
+        let p = placement(&kth(), "20240801", "20250110", Some("20250601")).expect("placed");
         assert_eq!(p.label, "P2–P4");
     }
 
     /// **The label is absolute across the programme** (§19.5): a year-2 P1 is P6.
     #[test]
     fn a_second_year_p1_reads_as_p6() {
-        let p = placement(&kth(), "250826", "260901", Some("261020")).expect("placed");
+        let p = placement(&kth(), "20250826", "20260901", Some("20261020")).expect("placed");
         assert_eq!(p.label, "P6");
         assert_eq!(p.terms, ["ht"]);
         // And the year turns at the first period's anchor, not in January: a course
         // starting the preceding May is still year 1.
-        let spring = placement(&kth(), "250826", "260510", Some("260520")).expect("placed");
+        let spring = placement(&kth(), "20250826", "20260510", Some("20260520")).expect("placed");
         assert_eq!(spring.label, "P4", "P4 of year one, not year two");
     }
 
@@ -198,14 +200,14 @@ periods = [
     /// not sat the periods ahead of it.
     #[test]
     fn an_open_span_is_placed_by_its_start() {
-        let p = placement(&kth(), "250826", "250901", None).expect("placed");
+        let p = placement(&kth(), "20250826", "20250901", None).expect("placed");
         assert_eq!(p.label, "P1");
     }
 
     /// A period wrapping the new year is met from either side of it.
     #[test]
     fn a_period_that_wraps_the_new_year_is_still_met() {
-        let p = placement(&kth(), "250826", "260105", Some("260110")).expect("placed");
+        let p = placement(&kth(), "20250826", "20260105", Some("20260110")).expect("placed");
         assert_eq!(p.label, "P2", "January still sits in the autumn's P2");
     }
 
@@ -213,8 +215,8 @@ periods = [
     #[test]
     fn a_curriculum_without_a_calendar_places_nothing() {
         let bare = Curriculum::parse("default_scale = \"af\"\n").unwrap();
-        assert!(placement(&bare, "250826", "260115", Some("260602")).is_none());
+        assert!(placement(&bare, "20250826", "20260115", Some("20260602")).is_none());
         // And a date that will not read places nothing either.
-        assert!(placement(&kth(), "250826", "nope", None).is_none());
+        assert!(placement(&kth(), "20250826", "nope", None).is_none());
     }
 }

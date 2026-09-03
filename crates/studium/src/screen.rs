@@ -275,7 +275,7 @@ impl View for Courses {
     fn prompts_for(&self, action: Action) -> Option<&'static str> {
         // Closing an enrolment has nothing to say until the day is typed (P§5). The line
         // is appended after `--to`, so the relay is the command a hand would write.
-        (action == Action::Edit).then_some("closed on (yymmdd)")
+        (action == Action::Edit).then_some("closed on (yyyymmdd)")
     }
 
     fn rows(&mut self, node: &Code) -> Option<Vec<Row>> {
@@ -437,10 +437,10 @@ fn sessions(root: &std::path::Path, scope: &Scope) -> Vec<Row> {
         .collect()
 }
 
-/// Today as `YYMMDD` (§5.4) — the clock, read where "what is coming" needs it and nowhere
+/// Today as `YYYYMMDD` (§5.4) — the clock, read where "what is coming" needs it and nowhere
 /// else (§19.4).
 fn today() -> String {
-    jiff::Zoned::now().strftime("%y%m%d").to_string()
+    jiff::Zoned::now().strftime("%Y%m%d").to_string()
 }
 
 fn tasks(root: &std::path::Path, scope: &Scope) -> Vec<Row> {

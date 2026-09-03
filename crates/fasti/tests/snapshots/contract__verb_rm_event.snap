@@ -3,5 +3,5 @@ source: crates/fasti/tests/contract.rs
 expression: pretty(&deleted)
 ---
 {
-  "deleted": "260719"
+  "deleted": "20260719"
 }

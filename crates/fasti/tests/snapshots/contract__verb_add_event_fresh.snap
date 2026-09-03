@@ -11,7 +11,7 @@ expression: pretty(&fresh)
     ]
   },
   "home": "aof",
-  "key": "260719T1600",
+  "key": "20260719T1600",
   "kind": "event",
   "refs": [],
   "series": "standups"

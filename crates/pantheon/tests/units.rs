@@ -45,7 +45,7 @@ fn album_registry() -> CoreRegistry {
         name: "album".to_string(),
         short: "alb".to_string(),
         kinds: vec![("person".to_string(), Shape::Partitioned)],
-        format_version: 1,
+        format_version: 2,
     }])
 }
 
@@ -376,9 +376,12 @@ fn code_tokenizes_reparents_and_rejects() {
     assert_eq!(csa.tokenize_compact().unwrap().len(), 3);
     assert_eq!(csa.parent_compact().unwrap().as_str(), "cs");
 
-    // A numeric level is two digits: asdl01 -> a,s,d,l,01.
+    // Every token is one character, a digit as much as a letter: asdl01 -> a,s,d,l,0,1.
     let numeric = Code::parse("asdl01").unwrap();
-    assert_eq!(numeric.tokenize_compact().unwrap().len(), 5);
+    assert_eq!(
+        numeric.tokenize_compact().unwrap(),
+        ['a', 's', 'd', 'l', '0', '1']
+    );
 
     // Definition-prefix codes carry `_`, do not tokenize, and have no string parent.
     let def = Code::parse("csa_john_appleseed").unwrap();
@@ -392,6 +395,44 @@ fn code_tokenizes_reparents_and_rejects() {
     );
     assert!(Code::parse("a__b").is_err(), "a code never contains __");
     assert!(Code::parse("_a").is_err(), "a code never has a leading _");
+}
+
+/// **An enumerated level is one character wide, and it counts `0`..`9` then `a`..`z`.**
+///
+/// The padded pair (`01`..`99`) is gone (§5.1): the char slot holds exactly one character
+/// whether it is a letter or a digit, so a compact code is a string of one-char tokens and
+/// nothing has to look ahead to read it. What the count buys is that the counting order
+/// *is* the text sort order — ASCII puts every digit before every letter — so the eleventh
+/// sibling of a counted level is `a` and it still sorts after `9`.
+#[test]
+fn an_enumerated_level_counts_in_single_characters() {
+    let root = fresh_root();
+    mint(&root, "root", triple("a", "actio"));
+    mint(&root, "a", triple("s", "scientia"));
+    for (ch, label) in [("0", "first"), ("9", "tenth"), ("a", "eleventh")] {
+        mint(&root, "as", triple(ch, label));
+    }
+
+    // Counting order is text-sort order: the digits, then the letter that continues them.
+    let mut kids: Vec<String> = std::fs::read_dir(root.join("a_actio/a_s_scientia"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    kids.sort();
+    assert_eq!(kids, ["as_0_first", "as_9_tenth", "as_a_eleventh"]);
+
+    // A padded pair is no longer a char, so the old spelling is refused at the mint.
+    let err = plan_new(&root, "as", triple("01", "padded")).unwrap_err();
+    assert!(
+        err.to_string().contains("one letter or one digit"),
+        "a two-digit char must be refused: {err}"
+    );
+
+    // And a digit char recodes like any other — the migration path off the padded form.
+    let (plan, _) =
+        plan_rename(&root, &Code::parse("as0").unwrap(), Some("1"), None, None).unwrap();
+    plan.apply(&root).unwrap();
+    assert!(root.join("a_actio/a_s_scientia/as_1_first").is_dir());
 }
 
 #[test]
@@ -539,7 +580,7 @@ fn a_determined_series_is_never_a_ref_target_even_when_it_carries_a_name() {
         &root,
         "crp",
         "crp__balance__checking.jsonl",
-        "{\"key\":\"260718\",\"refs\":[],\"data\":{\"amount\":4200.0}}\n",
+        "{\"key\":\"20260718\",\"refs\":[],\"data\":{\"amount\":4200.0}}\n",
     );
 
     let reg = CoreRegistry::from_cores(vec![DiscoveredCore {
@@ -549,7 +590,7 @@ fn a_determined_series_is_never_a_ref_target_even_when_it_carries_a_name() {
             ("account".to_string(), Shape::Partitioned),
             ("balance".to_string(), Shape::Series { named: false }),
         ],
-        format_version: 1,
+        format_version: 2,
     }]);
 
     let outcomes = resolve_all(&root, &reg, &[Ref::parse("rationes:checking").unwrap()]).unwrap();
@@ -719,7 +760,7 @@ fn a_change_body_names_a_series_only_when_there_is_one() {
         home: "ecv".to_string(),
         kind: "log".to_string(),
         series: Some("weight".to_string()),
-        key: "260718".to_string(),
+        key: "20260718".to_string(),
         before: None,
         after: Some(serde_json::json!({"values": ["78.4"]})),
         cascade: None,
@@ -729,7 +770,7 @@ fn a_change_body_names_a_series_only_when_there_is_one() {
     // this is the exact byte string a Series change has always hashed. An edit to
     // `body()` that reorders, adds, or renames a key breaks *this* rather than
     // silently invalidating every token a hand is holding (§7.3).
-    let series_body = r#"{"after":{"values":["78.4"]},"before":null,"core":"annales","home":"ecv","key":"260718","kind":"log","series":"weight","verb":"add"}"#;
+    let series_body = r#"{"after":{"values":["78.4"]},"before":null,"core":"annales","home":"ecv","key":"20260718","kind":"log","series":"weight","verb":"add"}"#;
     let token_of = |c: &pantheon::RecordChange| c.to_json()["change"].to_string();
     assert_eq!(token_of(&base), series_body);
 
@@ -987,8 +1028,8 @@ fn the_cascade_rewrites_refs_across_cores_and_shapes() {
         &root,
         "cso",
         "cso__log__standups.jsonl",
-        "{\"key\":\"260718\",\"refs\":[\"album:johnn\"],\"data\":{\"values\":[\"ok\"]}}\n\
-         {\"key\":\"260719\",\"refs\":[],\"data\":{\"values\":[\"none\"]}}\n",
+        "{\"key\":\"20260718\",\"refs\":[\"album:johnn\"],\"data\":{\"values\":[\"ok\"]}}\n\
+         {\"key\":\"20260719\",\"refs\":[],\"data\":{\"values\":[\"none\"]}}\n",
     );
 
     let plan = pantheon::plan_cascade(&root, OWN, &r("album:johnn"), &r("album:john")).unwrap();
@@ -1010,7 +1051,7 @@ fn the_cascade_rewrites_refs_across_cores_and_shapes() {
     .unwrap();
     assert!(series.contains(r#""refs":["album:john"]"#), "{series}");
     assert!(
-        series.contains(r#"{"key":"260719","refs":[],"data":{"values":["none"]}}"#),
+        series.contains(r#"{"key":"20260719","refs":[],"data":{"values":["none"]}}"#),
         "the untouched line is carried through verbatim: {series}"
     );
 }
@@ -1221,7 +1262,7 @@ fn the_first_task_mints_the_series_and_a_named_one_still_refuses() {
         name: Some("wieght".to_string()),
         path: named.series_path(&home, "log", Some("wieght")).unwrap(),
     };
-    let err = named.write_line(&missing, &line("260718")).unwrap_err();
+    let err = named.write_line(&missing, &line("20260718")).unwrap_err();
     assert_eq!(err.exit_code(), pantheon::ExitCode::NotFound);
     assert!(!missing.path.exists(), "a refused write mints nothing");
 }
@@ -1255,12 +1296,12 @@ fn a_date_keyed_series_still_folds_to_its_latest() {
     let home = Code::parse("csa").unwrap();
     let store = pantheon::Store::<Named>::new(&root);
     let sref = store.create_series(&home, "log", "weight").unwrap();
-    for key in ["260718", "260720", "260719"] {
+    for key in ["20260718", "20260720", "20260719"] {
         store.write_line(&sref, &line(key)).unwrap();
     }
     let folded = store.fold(None, None).unwrap();
     assert_eq!(folded.len(), 1, "a sampled series folds to one present");
-    assert_eq!(folded[0].line.key.as_str(), "260720");
+    assert_eq!(folded[0].line.key.as_str(), "20260720");
     assert_eq!(folded[0].name.as_deref(), Some("weight"));
 }
 
@@ -1269,7 +1310,7 @@ fn pensum_registry() -> CoreRegistry {
         name: "pensum".to_string(),
         short: "pen".to_string(),
         kinds: vec![("task".to_string(), Shape::Series { named: false })],
-        format_version: 1,
+        format_version: 2,
     }])
 }
 
@@ -1284,14 +1325,14 @@ fn a_name_keyed_line_resolves_but_a_date_keyed_one_does_not() {
         "csa__task.jsonl",
         "{\"key\":\"reach_out_to_alex\",\"refs\":[],\"data\":{}}\n\
          {\"key\":\"file_taxes\",\"refs\":[],\"data\":{}}\n\
-         {\"key\":\"260718\",\"refs\":[],\"data\":{}}\n",
+         {\"key\":\"20260718\",\"refs\":[],\"data\":{}}\n",
     );
 
     let reg = pensum_registry();
     let want = [
         Ref::parse("pensum:reach_out_to_alex").unwrap(),
         Ref::parse("pensum:file_taxes").unwrap(),
-        Ref::parse("pensum:260718").unwrap(),
+        Ref::parse("pensum:20260718").unwrap(),
         Ref::parse("pensum:never_written").unwrap(),
     ];
     let out = resolve_all(&root, &reg, &want).unwrap();
@@ -1515,14 +1556,14 @@ fn a_date_keyed_line_never_blocks_a_rename() {
         &root,
         "csa",
         "csa__task.jsonl",
-        "{\"key\":\"260718\",\"refs\":[],\"data\":{}}\n",
+        "{\"key\":\"20260718\",\"refs\":[],\"data\":{}}\n",
     );
     assert!(
         pantheon::plan_cascade(
             &root,
             &["task"],
             &Ref::parse("pensum:a").unwrap(),
-            &Ref::parse("pensum:260718").unwrap(),
+            &Ref::parse("pensum:20260718").unwrap(),
         )
         .is_ok()
     );
@@ -2333,7 +2374,7 @@ fn rename_prefix_takes_a_scope_whose_own_name_opens_with_the_old_prefix() {
 /// **A masked directory is descended into, and every byte outside the prefix survives**
 /// (D11 criteria 1 and 3; D8).
 ///
-/// `aotm_251001_candela` takes a six-digit char, which fails §5.1, so no walk can address
+/// `aotm_20251001_candela` takes a six-digit char, which fails §5.1, so no walk can address
 /// it — and it is three levels of masking deep. The names inside are NFD and must stay
 /// NFD: the destination is the stored bytes with a prefix run swapped, never a spelling
 /// rebuilt from a literal (§3.13's near miss, caught by the Phase 4 preflight).
@@ -2348,22 +2389,26 @@ fn rename_prefix_descends_a_masked_dir_and_keeps_its_nfd() {
     // NFD: `a` + COMBINING RING ABOVE, never the precomposed `å`.
     let nfd = "a\u{030a}rskursma\u{0308}rke";
     let deep = node
-        .join("aom_251001_candela")
-        .join("aom251001_p_photos")
-        .join(format!("aom251001p_{nfd}"));
+        .join("aom_20251001_candela")
+        .join("aom20251001_p_photos")
+        .join(format!("aom20251001p_{nfd}"));
     std::fs::create_dir_all(&deep).unwrap();
-    std::fs::write(deep.join(format!("aom251001p_{nfd}_note.md")), "n").unwrap();
+    std::fs::write(deep.join(format!("aom20251001p_{nfd}_note.md")), "n").unwrap();
 
     let (plan, _) =
         plan_rename_prefix(&root, "aom", "aotm", Some(&Code::parse("aotm").unwrap())).unwrap();
     plan.apply(&root).unwrap();
 
     let landed = node
-        .join("aotm_251001_candela")
-        .join("aotm251001_p_photos")
-        .join(format!("aotm251001p_{nfd}"));
+        .join("aotm_20251001_candela")
+        .join("aotm20251001_p_photos")
+        .join(format!("aotm20251001p_{nfd}"));
     assert!(landed.is_dir(), "the masked interior was not reached");
-    assert!(landed.join(format!("aotm251001p_{nfd}_note.md")).is_file());
+    assert!(
+        landed
+            .join(format!("aotm20251001p_{nfd}_note.md"))
+            .is_file()
+    );
     // The bytes, not just the name: a normalizing filesystem would answer `is_dir` to
     // either spelling, so the directory's own entry is read back and compared.
     let read_back: Vec<String> = std::fs::read_dir(landed.parent().unwrap())
@@ -2371,7 +2416,7 @@ fn rename_prefix_descends_a_masked_dir_and_keeps_its_nfd() {
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert!(
-        read_back.contains(&format!("aotm251001p_{nfd}")),
+        read_back.contains(&format!("aotm20251001p_{nfd}")),
         "NFD was not preserved: {read_back:?}"
     );
 }
@@ -2602,7 +2647,7 @@ fn a_bare_code_dot_ext_follows_its_node_but_a_word_does_not() {
 
 /// **A digit continues a code; a letter starts a word.**
 ///
-/// `asseff_t_tentamen` holds ninety exam PDFs named `assefft250113l.pdf` — the node's code
+/// `asseff_t_tentamen` holds ninety exam PDFs named `assefft20250113l.pdf` — the node's code
 /// with a date run straight onto it, no separator. They are the node's files and a recode
 /// has to take them. Nothing that merely opens with the code can follow it with a digit,
 /// which is what keeps `assets.json`, `assrc` and `assettings.json` out at the same gate.
@@ -2613,7 +2658,7 @@ fn a_digit_continues_a_code_but_a_letter_starts_a_word() {
     mint(&root, "a", triple("s", "scientia"));
     mint(&root, "as", triple("s", "studium"));
     let node = root.join("a_actio/a_s_scientia/as_s_studium");
-    std::fs::write(node.join("ass250113l.pdf"), "x").unwrap();
+    std::fs::write(node.join("ass20250113l.pdf"), "x").unwrap();
     std::fs::write(node.join("assrc"), "x").unwrap();
     std::fs::write(node.join("assettings.json"), "x").unwrap();
 
@@ -2623,7 +2668,7 @@ fn a_digit_continues_a_code_but_a_letter_starts_a_word() {
 
     let landed = root.join("a_actio/a_s_scientia/as_d_studium");
     assert!(
-        landed.join("asd250113l.pdf").is_file(),
+        landed.join("asd20250113l.pdf").is_file(),
         "a dated code was not followed"
     );
     assert!(landed.join("assrc").is_file(), "`assrc` was renamed");
@@ -2649,7 +2694,7 @@ fn a_masked_bare_code_dot_ext_is_read_against_its_directory() {
     let node = root.join("a_actio/a_s_scientia/as_s_studium");
     // A six-digit char is no char §5.1 will read, so this directory is masked and its
     // interior is reached only by the cascade.
-    let masked = node.join("ass_251001_candela").join("asst_a_review");
+    let masked = node.join("ass_20251001_candela").join("asst_a_review");
     std::fs::create_dir_all(&masked).unwrap();
     std::fs::write(masked.join("assta.pdf"), "x").unwrap();
     std::fs::write(masked.join("assets.json"), "x").unwrap();
@@ -2661,7 +2706,7 @@ fn a_masked_bare_code_dot_ext_is_read_against_its_directory() {
 
     let landed = root
         .join("a_actio/a_s_scientia/as_d_studium")
-        .join("asd_251001_candela")
+        .join("asd_20251001_candela")
         .join("asdt_a_review");
     assert!(landed.is_dir(), "the masked interior was not reached");
     assert!(
@@ -2694,7 +2739,7 @@ fn rename_prefix_skips_a_word_that_opens_with_the_prefix_and_prunes_the_machine_
     mint(&root, "as", triple("s", "scholae"));
     let node = root.join("a_actio/a_s_studium/as_s_scholae");
     // A masked child — the walk enters this one.
-    let masked = node.join("ass_251001_kurs");
+    let masked = node.join("ass_20251001_kurs");
     std::fs::create_dir_all(masked.join(".git/refs")).unwrap();
     std::fs::create_dir_all(masked.join("node_modules/pkg")).unwrap();
     std::fs::write(masked.join(".git/refs/ass_ref"), "git").unwrap();
@@ -2702,7 +2747,7 @@ fn rename_prefix_skips_a_word_that_opens_with_the_prefix_and_prunes_the_machine_
     // Ordinary words, and one real stranded name to keep the plan non-empty.
     std::fs::write(masked.join("assimulation.py"), "sim").unwrap();
     std::fs::create_dir_all(masked.join("asstderr")).unwrap();
-    std::fs::write(masked.join("ass251001_note.md"), "n").unwrap();
+    std::fs::write(masked.join("ass20251001_note.md"), "n").unwrap();
 
     let (plan, _) =
         plan_rename_prefix(&root, "ass", "asd", Some(&Code::parse("ass").unwrap())).unwrap();
@@ -2714,10 +2759,10 @@ fn rename_prefix_skips_a_word_that_opens_with_the_prefix_and_prunes_the_machine_
         );
     }
     plan.apply(&root).unwrap();
-    assert!(node.join("asd_251001_kurs/asd251001_note.md").is_file());
-    assert!(node.join("asd_251001_kurs/assimulation.py").is_file());
-    assert!(node.join("asd_251001_kurs/asstderr").is_dir());
-    assert!(node.join("asd_251001_kurs/.git/refs/ass_ref").is_file());
+    assert!(node.join("asd_20251001_kurs/asd20251001_note.md").is_file());
+    assert!(node.join("asd_20251001_kurs/assimulation.py").is_file());
+    assert!(node.join("asd_20251001_kurs/asstderr").is_dir());
+    assert!(node.join("asd_20251001_kurs/.git/refs/ass_ref").is_file());
 }
 
 /// **`mv` recodes the interior of a directory it cannot resolve** (D11 criterion 4).
@@ -2734,18 +2779,22 @@ fn mv_recodes_the_interior_of_a_dir_it_cannot_resolve() {
     mint(&root, "ao", triple("t", "tutela"));
     mint(&root, "aoo", triple("k", "kth"));
     let old = root.join("a_actio/a_o_opus/ao_o_officium/aoo_k_kth");
-    let masked = old.join("aook_251001_candela");
-    std::fs::create_dir_all(masked.join("aook251001_b_board")).unwrap();
-    std::fs::write(masked.join("aook251001_b_board/aook251001b_note.md"), "n").unwrap();
+    let masked = old.join("aook_20251001_candela");
+    std::fs::create_dir_all(masked.join("aook20251001_b_board")).unwrap();
+    std::fs::write(
+        masked.join("aook20251001_b_board/aook20251001b_note.md"),
+        "n",
+    )
+    .unwrap();
 
     let (plan, _) = plan_mv(&root, &Code::parse("aook").unwrap(), "aot").unwrap();
     plan.apply(&root).unwrap();
 
-    let landed = root.join("a_actio/a_o_opus/ao_t_tutela/aot_k_kth/aotk_251001_candela");
+    let landed = root.join("a_actio/a_o_opus/ao_t_tutela/aot_k_kth/aotk_20251001_candela");
     assert!(landed.is_dir(), "the masked child kept the dead prefix");
     assert!(
         landed
-            .join("aotk251001_b_board/aotk251001b_note.md")
+            .join("aotk20251001_b_board/aotk20251001b_note.md")
             .is_file(),
         "the masked interior was stranded"
     );

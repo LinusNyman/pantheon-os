@@ -328,7 +328,7 @@ fn draw_title(frame: &mut Frame, ident: &crate::Ident, theme: Theme, area: Rect)
         theme.text(),
     )));
     lines.push(Line::from(Span::styled(
-        format!("crate {}  ·  format 1", env!("CARGO_PKG_VERSION")),
+        format!("crate {}  ·  format 2", env!("CARGO_PKG_VERSION")),
         theme.dim(),
     )));
 

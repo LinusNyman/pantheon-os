@@ -4,7 +4,7 @@ assertion_line: 135
 expression: pretty(&schema)
 ---
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "rationes",
   "record": {
     "$defs": {
@@ -42,7 +42,7 @@ expression: pretty(&schema)
             ]
           },
           "expires": {
-            "description": "When the holding lapses (`YYMMDD`) — a `claim`'s expiry, which §8.3 makes a\n**field** precisely because it is one date and not a series of them.",
+            "description": "When the holding lapses (`YYYYMMDD`) — a `claim`'s expiry, which §8.3 makes a\n**field** precisely because it is one date and not a series of them.",
             "type": [
               "string",
               "null"

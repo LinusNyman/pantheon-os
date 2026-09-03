@@ -5,7 +5,7 @@ expression: pretty(&help)
 {
   "about": "the omens: rules that read the tree and propose intentions (§9)",
   "bare": "opens the rules browser at a terminal; emits this down a pipe",
-  "format_version": 1,
+  "format_version": 2,
   "name": "auspex",
   "short": "aus",
   "verbs": [

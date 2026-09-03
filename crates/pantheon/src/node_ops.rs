@@ -19,7 +19,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::cascade::plan_cascade;
 use crate::classify::{FileClass, RESERVED_KIND_FUNCTION, classify};
-use crate::code::{CharToken, Code};
+use crate::code::Code;
 use crate::core::CoreRegistry;
 use crate::envelope::Ref;
 use crate::mint::{normalize_char, prefix_shadows};
@@ -116,7 +116,7 @@ pub fn plan_rename(
             "a definition-prefix rename (`--def`) goes through the registry-aware path (§10.1)",
         ));
     }
-    let Some(current_ch) = nn.ch.clone() else {
+    let Some(current_ch) = nn.ch else {
         return Err(Error::usage(format!(
             "node {} is definition-prefix; rename it with --def, not --char/--label (§5.1)",
             code.as_str()
@@ -132,8 +132,8 @@ pub fn plan_rename(
 
     // The new char and label — each defaulting to the current one.
     let new_ch = match ch {
-        Some(c) => char_token_from(&normalize_char(c)?),
-        None => current_ch.clone(),
+        Some(c) => normalize_char(c)?,
+        None => current_ch,
     };
     let new_label = match label {
         Some(l) => name::normalize_token(l, "label")?,
@@ -147,7 +147,7 @@ pub fn plan_rename(
             code.as_str()
         )));
     }
-    let new_code = child_code(parent_code.as_ref(), &new_ch);
+    let new_code = child_code(parent_code.as_ref(), new_ch);
     if new_ch != current_ch {
         refuse_collision(&parent_path, parent_code.as_ref(), &new_code, code)?;
     }
@@ -160,7 +160,7 @@ pub fn plan_rename(
         Some(_) => name::fs_spelling(&new_label),
         None => new_label.clone(),
     };
-    let new_dirname = triple_dirname(parent_code.as_ref(), &new_ch, &disk_label);
+    let new_dirname = triple_dirname(parent_code.as_ref(), new_ch, &disk_label);
     let new_top_rel = rel_path(root, &parent_path).join(&new_dirname);
     let changes = plan_recode(root, code, &new_code, &new_top_rel)?;
 
@@ -312,7 +312,7 @@ pub fn plan_mv(root: &Path, code: &Code, to_parent: &str) -> Result<(Plan, Value
         ));
     }
 
-    let new_code = if let Some(ch) = &nn.ch {
+    let new_code = if let Some(ch) = nn.ch {
         child_code(new_parent_code.as_ref(), ch)
     } else {
         // Def-prefix node: new code is `{new_parent}_{def}`.
@@ -331,7 +331,7 @@ pub fn plan_mv(root: &Path, code: &Code, to_parent: &str) -> Result<(Plan, Value
     }
     refuse_collision(&new_parent_path, new_parent_code.as_ref(), &new_code, code)?;
 
-    let new_dirname = match &nn.ch {
+    let new_dirname = match nn.ch {
         Some(ch) => triple_dirname(new_parent_code.as_ref(), ch, &nn.label),
         None => def_dirname(new_parent_code.as_ref(), &nn.label),
     };
@@ -488,7 +488,7 @@ fn merge_into(
     // 3. Child nodes: merged into their twin where the destination holds one, moved
     //    whole where it does not.
     for child in &src.children {
-        let new_code = match &child.ch {
+        let new_code = match child.ch {
             Some(ch) => {
                 if !dst_code.is_compact() {
                     return Err(Error::usage(format!(
@@ -524,7 +524,7 @@ fn merge_into(
                 relabelled,
             )?;
         } else {
-            let new_dirname = match &child.ch {
+            let new_dirname = match child.ch {
                 Some(ch) => triple_dirname(Some(dst_code), ch, &child.label),
                 None => def_dirname(Some(dst_code), &child.label),
             };
@@ -1273,7 +1273,7 @@ fn recode_contents(
     // Child node dirs, recursively.
     for child in &node.children {
         let old_dirname = dir_name_of(child);
-        let new_dirname = match &child.ch {
+        let new_dirname = match child.ch {
             Some(ch) => triple_dirname(Some(&node_new_code), ch, &child.label),
             None => def_dirname(Some(&node_new_code), &child.label),
         };
@@ -1482,14 +1482,14 @@ fn swap_dir_code_dot(name: &str, dir_abs: &Path, old: &str, new: &str) -> String
     };
     let parts: Vec<&str> = dirname.split('_').collect();
     let mut codes = vec![parts[0].to_string()];
-    // `{code}_{char}_{label}` and the label-less `{code}_{char}`: the char is one letter or
-    // one-or-two digits. A longer second segment is a label, not a char.
+    // `{code}_{char}_{label}` and the label-less `{code}_{char}`: the char is exactly one
+    // character (§5.1). A longer second segment is a label, not a char.
     if parts.len() >= 2 {
-        let ch = parts[1];
-        let short_digits =
-            !ch.is_empty() && ch.len() <= 2 && ch.bytes().all(|b| b.is_ascii_digit());
-        if ch.chars().count() == 1 && ch.chars().all(char::is_alphabetic) || short_digits {
-            codes.push(format!("{}{ch}", parts[0]));
+        let mut ch = parts[1].chars();
+        if let (Some(c), None) = (ch.next(), ch.next())
+            && (c.is_alphabetic() || c.is_ascii_digit())
+        {
+            codes.push(format!("{}{c}", parts[0]));
         }
     }
     let nfc_stem: String = stem.nfc().collect();
@@ -1597,10 +1597,10 @@ fn push_rename(changes: &mut Vec<Change>, from: PathBuf, to: PathBuf) {
 
 /// A triple node's directory name: `{parent}_{char}_{label}`, or `{char}_{label}` at the
 /// root.
-fn triple_dirname(parent: Option<&Code>, ch: &CharToken, label: &str) -> String {
+fn triple_dirname(parent: Option<&Code>, ch: char, label: &str) -> String {
     match parent {
-        Some(p) => format!("{}_{}_{}", p.as_str(), ch.as_code_str(), label),
-        None => format!("{}_{}", ch.as_code_str(), label),
+        Some(p) => format!("{}_{ch}_{label}", p.as_str()),
+        None => format!("{ch}_{label}"),
     }
 }
 
@@ -1614,21 +1614,12 @@ fn def_dirname(parent: Option<&Code>, def: &str) -> String {
 }
 
 /// A triple child's full code from its parent's code and its char.
-fn child_code(parent: Option<&Code>, ch: &CharToken) -> Code {
+fn child_code(parent: Option<&Code>, ch: char) -> Code {
     let s = match parent {
-        Some(p) => format!("{}{}", p.as_str(), ch.as_code_str()),
-        None => ch.as_code_str(),
+        Some(p) => format!("{}{ch}", p.as_str()),
+        None => ch.to_string(),
     };
     Code::parse(&s).expect("a parent code plus a normalized char is a valid code")
-}
-
-/// A `CharToken` from a normalized char string (`"a"` or `"01"`).
-fn char_token_from(ch: &str) -> CharToken {
-    if ch.len() == 2 && ch.bytes().all(|b| b.is_ascii_digit()) {
-        CharToken::Numeric(ch.to_string())
-    } else {
-        CharToken::Alpha(ch.chars().next().unwrap_or('x'))
-    }
 }
 
 /// Whether `dest` is `code` itself or a node in its subtree — the `mv`-into-own-subtree

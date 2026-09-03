@@ -101,9 +101,9 @@ pub struct Frontmatter {
 /// date- or name-keyed (I5).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KeyShape {
-    /// `YYMMDD`.
+    /// `YYYYMMDD`.
     Date,
-    /// `YYMMDD` plus a time.
+    /// `YYYYMMDD` plus a time.
     DateTime,
     /// A record name (a slug).
     Name,
@@ -155,14 +155,26 @@ impl<'de> Deserialize<'de> for Key {
     }
 }
 
+/// The width of a date key, `YYYYMMDD` (§5.4) — **the one place the suite states it**.
+///
+/// It is four digits of year rather than two because a two-digit year cannot say which
+/// century it means: every reader had to assume `20xx`, which is fine for a reading taken
+/// today and wrong for any date a hand records about the past — a birth date, a document's
+/// issue, a span that opened last century. The assumption was load-bearing in four separate
+/// places and silently wrong in all of them; `YYYYMMDD` removes the question rather than
+/// answering it consistently.
+pub const DATE_WIDTH: usize = 8;
+
 fn classify_key(s: &str) -> KeyShape {
     let bytes = s.as_bytes();
     let all_digits = |r: &[u8]| !r.is_empty() && r.iter().all(u8::is_ascii_digit);
-    if s.len() == 6 && all_digits(bytes) {
+    if s.len() == DATE_WIDTH && all_digits(bytes) {
         return KeyShape::Date;
     }
-    if s.len() > 6 && all_digits(&bytes[..6]) {
-        let rest = s[6..].strip_prefix('T').unwrap_or(&s[6..]);
+    if s.len() > DATE_WIDTH && all_digits(&bytes[..DATE_WIDTH]) {
+        let rest = s[DATE_WIDTH..]
+            .strip_prefix('T')
+            .unwrap_or(&s[DATE_WIDTH..]);
         if all_digits(rest.as_bytes()) {
             return KeyShape::DateTime;
         }

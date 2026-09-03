@@ -130,17 +130,17 @@ fn schema_surface() {
 fn verb_add_span_fresh_then_overwrite() {
     let root = fresh_root();
     // A fresh `add` runs free: it creates the record it *is* (§7.3, §18).
-    let (code, fresh) = fas(&root, &["aof", "MVP Phase", "--from", "260101"]);
+    let (code, fresh) = fas(&root, &["aof", "MVP Phase", "--from", "20260101"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_span_fresh", pretty(&fresh));
 
     // Landing on a slug that exists is an overwrite — a mutation, so piped and without
     // -y it is exit 5 with the change to review (§7.3).
-    let (code, pending) = fas(&root, &["aof", "mvp_phase", "--to", "260901"]);
+    let (code, pending) = fas(&root, &["aof", "mvp_phase", "--to", "20260901"]);
     assert_eq!(code, 5);
     insta::assert_snapshot!("verb_add_span_overwrite_pending", pretty(&redact(pending)));
 
-    let (code, applied) = fas(&root, &["aof", "mvp_phase", "--to", "260901", "-y"]);
+    let (code, applied) = fas(&root, &["aof", "mvp_phase", "--to", "20260901", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_span_overwrite_applied", pretty(&applied));
 }
@@ -150,23 +150,23 @@ fn verb_add_span_fresh_then_overwrite() {
 #[test]
 fn verb_edit_closes_an_open_span() {
     let root = fresh_root();
-    let (_, open) = fas(&root, &["aof", "employment", "--from", "240301"]);
+    let (_, open) = fas(&root, &["aof", "employment", "--from", "20240301"]);
     assert!(
         open["data"].get("to").is_none(),
         "an open span has no `to` at all, not a null one (§8.4)"
     );
 
-    let (code, closed) = fas(&root, &["edit", "employment", "--to", "260630", "-y"]);
+    let (code, closed) = fas(&root, &["edit", "employment", "--to", "20260630", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_edit_span_close", pretty(&closed));
     // What a hand did not give, the record keeps (I1).
-    assert_eq!(closed["data"]["from"], "240301");
+    assert_eq!(closed["data"]["from"], "20240301");
 }
 
 #[test]
 fn dry_run_emits_a_plan_and_writes_nothing() {
     let root = fresh_root();
-    let (code, plan) = fas(&root, &["aof", "sabbatical", "--from", "260401", "-n"]);
+    let (code, plan) = fas(&root, &["aof", "sabbatical", "--from", "20260401", "-n"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_span_dry_run", pretty(&redact(plan)));
     assert_eq!(
@@ -179,7 +179,7 @@ fn dry_run_emits_a_plan_and_writes_nothing() {
 #[test]
 fn verb_rm_span() {
     let root = fresh_root();
-    fas(&root, &["aof", "sabbatical", "--from", "260401"]);
+    fas(&root, &["aof", "sabbatical", "--from", "20260401"]);
     let (code, deleted) = fas(&root, &["rm", "sabbatical", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_rm_span", pretty(&deleted));
@@ -189,7 +189,7 @@ fn verb_rm_span() {
 #[test]
 fn verb_move_span_carries_no_refs_with_it() {
     let root = fresh_root();
-    fas(&root, &["aof", "sabbatical", "--from", "260401"]);
+    fas(&root, &["aof", "sabbatical", "--from", "20260401"]);
     fas(&root, &["aof", "standups", "-c"]);
     fas(
         &root,
@@ -198,7 +198,7 @@ fn verb_move_span_carries_no_refs_with_it() {
             "standups",
             "kickoff",
             "-a",
-            "260401",
+            "20260401",
             "-r",
             "fasti:sabbatical",
         ],
@@ -225,7 +225,7 @@ fn an_entity_as_node_refuses_both_structural_verbs() {
     let root = fresh_root();
     fas(
         &root,
-        &["-H", "aof_mvp_phase", "mvp_phase", "--from", "260101"],
+        &["-H", "aof_mvp_phase", "mvp_phase", "--from", "20260101"],
     );
     let path = root
         .join("a_actio/a_o_opus/ao_f_fabrica/aof_mvp_phase_/aof_mvp_phase__")
@@ -260,7 +260,7 @@ fn verb_add_event_fresh_then_overwrite() {
             "standups",
             "sprint review",
             "-a",
-            "260719T1600",
+            "20260719T1600",
             "--until",
             "1700",
         ],
@@ -270,14 +270,21 @@ fn verb_add_event_fresh_then_overwrite() {
 
     let (code, pending) = fas(
         &root,
-        &["aof", "standups", "sprint retro", "-a", "260719T1600"],
+        &["aof", "standups", "sprint retro", "-a", "20260719T1600"],
     );
     assert_eq!(code, 5, "an overwrite must stop at the checkpoint (§7.3)");
     insta::assert_snapshot!("verb_add_event_overwrite_pending", pretty(&redact(pending)));
 
     let (code, applied) = fas(
         &root,
-        &["aof", "standups", "sprint retro", "-a", "260719T1600", "-y"],
+        &[
+            "aof",
+            "standups",
+            "sprint retro",
+            "-a",
+            "20260719T1600",
+            "-y",
+        ],
     );
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_add_event_overwrite_applied", pretty(&applied));
@@ -287,11 +294,11 @@ fn verb_add_event_fresh_then_overwrite() {
 fn verb_edit_event_keeps_the_key() {
     let root = fresh_root();
     fas(&root, &["aof", "standups", "-c"]);
-    fas(&root, &["aof", "standups", "kickoff", "-a", "260719"]);
+    fas(&root, &["aof", "standups", "kickoff", "-a", "20260719"]);
 
     // A correction rewrites the keyed line in place; the date key is the occurrence's
     // own identity and does not move (I1, §5.4).
-    let (code, edited) = fas(&root, &["edit", "260719", "kickoff moved", "-y"]);
+    let (code, edited) = fas(&root, &["edit", "20260719", "kickoff moved", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_edit_event", pretty(&edited));
 
@@ -304,8 +311,8 @@ fn verb_edit_event_keeps_the_key() {
 fn verb_rm_event() {
     let root = fresh_root();
     fas(&root, &["aof", "standups", "-c"]);
-    fas(&root, &["aof", "standups", "kickoff", "-a", "260719"]);
-    let (code, deleted) = fas(&root, &["rm", "260719", "--series", "standups", "-y"]);
+    fas(&root, &["aof", "standups", "kickoff", "-a", "20260719"]);
+    let (code, deleted) = fas(&root, &["rm", "20260719", "--series", "standups", "-y"]);
     assert_eq!(code, 0);
     insta::assert_snapshot!("verb_rm_event", pretty(&deleted));
 }
@@ -317,19 +324,19 @@ fn verb_rm_event() {
 #[test]
 fn edit_dispatches_on_which_shape_answers() {
     let root = fresh_root();
-    fas(&root, &["aof", "mvp", "--from", "260101"]);
+    fas(&root, &["aof", "mvp", "--from", "20260101"]);
     fas(&root, &["aof", "standups", "-c"]);
-    fas(&root, &["aof", "standups", "kickoff", "-a", "260719"]);
+    fas(&root, &["aof", "standups", "kickoff", "-a", "20260719"]);
 
     let mut out = String::new();
     for (label, args) in [
         (
-            "edit mvp --to 260901",
-            vec!["edit", "mvp", "--to", "260901", "-y"],
+            "edit mvp --to 20260901",
+            vec!["edit", "mvp", "--to", "20260901", "-y"],
         ),
         (
-            "edit 260719 'kickoff done'",
-            vec!["edit", "260719", "kickoff done", "-y"],
+            "edit 20260719 'kickoff done'",
+            vec!["edit", "20260719", "kickoff done", "-y"],
         ),
     ] {
         let (code, value) = fas(&root, &args);
@@ -346,11 +353,11 @@ fn edit_dispatches_on_which_shape_answers() {
 fn add_refuses_a_name_the_other_shape_holds() {
     let root = fresh_root();
     fas(&root, &["aof", "standups", "-c"]);
-    let (code, err) = fas(&root, &["aof", "standups", "--from", "260101"]);
+    let (code, err) = fas(&root, &["aof", "standups", "--from", "20260101"]);
     assert_eq!(code, 3);
     insta::assert_snapshot!("refusal_span_onto_event_series", pretty(&err));
 
-    fas(&root, &["aof", "mvp", "--from", "260101"]);
+    fas(&root, &["aof", "mvp", "--from", "20260101"]);
     let (code, err) = fas(&root, &["aof", "mvp", "-c"]);
     assert_eq!(code, 3);
     insta::assert_snapshot!("refusal_series_onto_span", pretty(&err));
@@ -362,7 +369,7 @@ fn add_refuses_a_name_the_other_shape_holds() {
 #[test]
 fn verb_rename_cascades_across_both_shapes() {
     let root = fresh_root();
-    fas(&root, &["aof", "mvp_phse", "--from", "260101"]);
+    fas(&root, &["aof", "mvp_phse", "--from", "20260101"]);
     fas(&root, &["aof", "standups", "-c"]);
     fas(
         &root,
@@ -371,7 +378,7 @@ fn verb_rename_cascades_across_both_shapes() {
             "standups",
             "kickoff",
             "-a",
-            "260719",
+            "20260719",
             "-r",
             "fasti:mvp_phse",
         ],
@@ -402,7 +409,7 @@ fn verb_rename_cascades_across_both_shapes() {
 #[test]
 fn rename_refuses_a_name_the_other_shape_holds() {
     let root = fresh_root();
-    fas(&root, &["aof", "mvp", "--from", "260101"]);
+    fas(&root, &["aof", "mvp", "--from", "20260101"]);
     fas(&root, &["aoa", "standups", "-c"]);
 
     let (code, err) = fas(&root, &["rename", "mvp", "standups", "-y"]);
@@ -413,10 +420,10 @@ fn rename_refuses_a_name_the_other_shape_holds() {
 #[test]
 fn add_warns_softly_on_a_cross_node_duplicate() {
     let root = fresh_root();
-    assert_eq!(fas(&root, &["aof", "review", "--from", "260101"]).0, 0);
+    assert_eq!(fas(&root, &["aof", "review", "--from", "20260101"]).0, 0);
     // Across nodes the check is a walk, so it stays soft: the write succeeds, the record
     // goes to stdout, and the warning rides stderr (§5.4, §18).
-    let ((code, record), stderr) = fas_env(&root, &["aoa", "review", "--from", "260201"], &[]);
+    let ((code, record), stderr) = fas_env(&root, &["aoa", "review", "--from", "20260201"], &[]);
     assert_eq!(code, 0, "a cross-node duplicate is never refused");
     assert_eq!(record["home"], "aoa");
     let findings: Value = serde_json::from_str(stderr.trim()).unwrap();
@@ -435,7 +442,7 @@ fn add_warns_softly_on_a_cross_node_duplicate() {
 #[test]
 fn list_unspanned_is_derived_and_nothing_nags() {
     let root = fresh_root();
-    fas(&root, &["aof", "mvp_phase", "--from", "260101"]);
+    fas(&root, &["aof", "mvp_phase", "--from", "20260101"]);
     fas(&root, &["aof", "standups", "-c"]);
     fas(
         &root,
@@ -444,12 +451,12 @@ fn list_unspanned_is_derived_and_nothing_nags() {
             "standups",
             "kickoff",
             "-a",
-            "260719",
+            "20260719",
             "-r",
             "fasti:mvp_phase",
         ],
     );
-    fas(&root, &["aof", "standups", "stray", "-a", "260720"]);
+    fas(&root, &["aof", "standups", "stray", "-a", "20260720"]);
     // A `fasti:` ref naming the *series* spans nothing: a collection is not a period.
     fas(
         &root,
@@ -458,14 +465,14 @@ fn list_unspanned_is_derived_and_nothing_nags() {
             "standups",
             "self referential",
             "-a",
-            "260721",
+            "20260721",
             "-r",
             "fasti:standups",
         ],
     );
 
     // Writing an unspanned occurrence is not a warning and not a finding.
-    let ((code, _), stderr) = fas_env(&root, &["aof", "standups", "quiet", "-a", "260722"], &[]);
+    let ((code, _), stderr) = fas_env(&root, &["aof", "standups", "quiet", "-a", "20260722"], &[]);
     assert_eq!(code, 0);
     assert!(stderr.is_empty(), "nothing nags (§8.4): {stderr}");
     assert_eq!(
@@ -486,7 +493,7 @@ fn verbs_read() {
     let root = fresh_root();
     fas(
         &root,
-        &["aof", "mvp_phase", "--from", "260101", "--to", "260630"],
+        &["aof", "mvp_phase", "--from", "20260101", "--to", "20260630"],
     );
     fas(
         &root,
@@ -494,7 +501,7 @@ fn verbs_read() {
             "aof",
             "employment",
             "--from",
-            "240301",
+            "20240301",
             "-r",
             "album:dare_robotics",
         ],
@@ -507,7 +514,7 @@ fn verbs_read() {
             "standups",
             "kickoff",
             "-a",
-            "260719",
+            "20260719",
             "-r",
             "fasti:mvp_phase",
         ],
@@ -519,7 +526,7 @@ fn verbs_read() {
             "standups",
             "demo",
             "-a",
-            "260720T1400",
+            "20260720T1400",
             "--until",
             "1500",
         ],
@@ -531,8 +538,8 @@ fn verbs_read() {
         ("get standups", vec!["get", "standups"]),
         ("series standups", vec!["series", "standups"]),
         (
-            "series standups --from 260720",
-            vec!["series", "standups", "--from", "260720"],
+            "series standups --from 20260720",
+            vec!["series", "standups", "--from", "20260720"],
         ),
         ("list", vec!["-H", "aof", "list"]),
         ("list -k span", vec!["-H", "aof", "list", "-k", "span"]),
@@ -553,8 +560,14 @@ fn verbs_read() {
 #[test]
 fn list_node_addressing() {
     let root = fresh_root();
-    assert_eq!(fas(&root, &["ao", "parent span", "--from", "260101"]).0, 0);
-    assert_eq!(fas(&root, &["aof", "child span", "--from", "260101"]).0, 0);
+    assert_eq!(
+        fas(&root, &["ao", "parent span", "--from", "20260101"]).0,
+        0
+    );
+    assert_eq!(
+        fas(&root, &["aof", "child span", "--from", "20260101"]).0,
+        0
+    );
 
     let slugs = |v: &Value| -> Vec<String> {
         v.as_array()
@@ -599,7 +612,7 @@ fn on_disk_neither_shape_stores_its_location_or_its_variant() {
     let root = fresh_root();
     fas(
         &root,
-        &["aof", "mvp_phase", "--from", "260101", "--to", "260630"],
+        &["aof", "mvp_phase", "--from", "20260101", "--to", "20260630"],
     );
     fas(&root, &["aof", "standups", "-c"]);
     fas(
@@ -609,7 +622,7 @@ fn on_disk_neither_shape_stores_its_location_or_its_variant() {
             "standups",
             "kickoff",
             "-a",
-            "260719",
+            "20260719",
             "-r",
             "fasti:mvp_phase",
         ],
@@ -621,7 +634,7 @@ fn on_disk_neither_shape_stores_its_location_or_its_variant() {
             "standups",
             "demo",
             "-a",
-            "260720T1400",
+            "20260720T1400",
             "--until",
             "1500",
         ],
@@ -651,10 +664,17 @@ fn the_editor_form_piped_prints_a_path_and_spawns_nothing() {
     let root = fresh_root();
     fas(
         &root,
-        &["aof", "mvp_phase", "--from", "260101", "--note", "a remark"],
+        &[
+            "aof",
+            "mvp_phase",
+            "--from",
+            "20260101",
+            "--note",
+            "a remark",
+        ],
     );
     fas(&root, &["aof", "standups", "-c"]);
-    fas(&root, &["aof", "standups", "kickoff", "-a", "260719"]);
+    fas(&root, &["aof", "standups", "kickoff", "-a", "20260719"]);
 
     // `false` would fail if it ran; piped, nothing is spawned at all (§7.3, I8). Both
     // shapes take the editor form, each opening the value its shape has.
@@ -674,7 +694,7 @@ fn the_editor_form_piped_prints_a_path_and_spawns_nothing() {
 
     let ((code, event), _) = fas_env(
         &root,
-        &["edit", "260719"],
+        &["edit", "20260719"],
         &[("EDITOR", "false"), ("VISUAL", "false")],
     );
     assert_eq!(code, 0);
@@ -690,19 +710,19 @@ fn the_editor_form_piped_prints_a_path_and_spawns_nothing() {
 #[test]
 fn write_verbs_are_refused_under_a_rule() {
     let root = fresh_root();
-    fas(&root, &["aof", "mvp_phase", "--from", "260101"]);
+    fas(&root, &["aof", "mvp_phase", "--from", "20260101"]);
     fas(&root, &["aof", "standups", "-c"]);
-    fas(&root, &["aof", "standups", "kickoff", "-a", "260719"]);
+    fas(&root, &["aof", "standups", "kickoff", "-a", "20260719"]);
     let rule = [("PANTHEON_RULE", "1")];
 
     for args in [
-        vec!["aof", "sabbatical", "--from", "260401"],
-        vec!["aof", "standups", "another", "-a", "260720"],
-        vec!["edit", "mvp_phase", "--to", "260901", "-y"],
-        vec!["edit", "260719", "corrected", "-y"],
+        vec!["aof", "sabbatical", "--from", "20260401"],
+        vec!["aof", "standups", "another", "-a", "20260720"],
+        vec!["edit", "mvp_phase", "--to", "20260901", "-y"],
+        vec!["edit", "20260719", "corrected", "-y"],
         vec!["rename", "mvp_phase", "mvp", "-y"],
         vec!["move", "mvp_phase", "--to", "aoa", "-y"],
-        vec!["rm", "260719", "-y"],
+        vec!["rm", "20260719", "-y"],
         vec!["rm", "mvp_phase", "-y"],
     ] {
         let ((code, _), _) = fas_env(&root, &args, &rule);
@@ -714,7 +734,7 @@ fn write_verbs_are_refused_under_a_rule() {
     assert_eq!(
         fas_env(
             &root,
-            &["aof", "sabbatical", "--from", "260401", "-n"],
+            &["aof", "sabbatical", "--from", "20260401", "-n"],
             &rule
         )
         .0
@@ -764,11 +784,11 @@ fn a_bare_short_piped_emits_help() {
 #[test]
 fn records_resolve_through_pan() {
     let root = fresh_root();
-    fas(&root, &["aof", "employment", "--from", "240301"]);
+    fas(&root, &["aof", "employment", "--from", "20240301"]);
     fas(&root, &["aof", "standups", "-c"]);
     fas(
         &root,
-        &["-H", "aof_mvp_phase", "mvp_phase", "--from", "260101"],
+        &["-H", "aof_mvp_phase", "mvp_phase", "--from", "20260101"],
     );
 
     let fas_bin = PathBuf::from(env!("CARGO_BIN_EXE_fas"));
@@ -823,8 +843,8 @@ fn exit_codes() {
     // A node holding exactly one event series: inference has a single answer.
     let one = fresh_root();
     fas(&one, &["aof", "standups", "-c"]);
-    fas(&one, &["aof", "standups", "kickoff", "-a", "260719"]);
-    fas(&one, &["aof", "mvp_phase", "--from", "260101"]);
+    fas(&one, &["aof", "standups", "kickoff", "-a", "20260719"]);
+    fas(&one, &["aof", "mvp_phase", "--from", "20260101"]);
 
     // A node holding two: inference must list them and stop, never guess (§7.3).
     let two = fresh_root();
@@ -836,7 +856,7 @@ fn exit_codes() {
         (
             &one,
             "a span's bound and an event's date at once",
-            &["aof", "x", "--from", "260101", "-a", "260101"],
+            &["aof", "x", "--from", "20260101", "-a", "20260101"],
         ),
         (
             &one,
@@ -852,13 +872,13 @@ fn exit_codes() {
         (
             &one,
             "a span may not end before it starts",
-            &["aof", "w", "--from", "260301", "--to", "260101"],
+            &["aof", "w", "--from", "20260301", "--to", "20260101"],
         ),
         (&one, "a malformed day", &["aof", "v", "--from", "26010"]),
         (
             &one,
             "a malformed --until",
-            &["aof", "standups", "q", "-a", "260720", "--until", "5pm"],
+            &["aof", "standups", "q", "-a", "20260720", "--until", "5pm"],
         ),
         // A span is not a collection, and an occurrence is not a ref target (§5.4).
         (
@@ -875,7 +895,7 @@ fn exit_codes() {
         (
             &one,
             "a typo cannot conjure a timeline",
-            &["aof", "standps", "1", "-a", "260721"],
+            &["aof", "standps", "1", "-a", "20260721"],
         ),
         (
             &one,
@@ -885,7 +905,7 @@ fn exit_codes() {
         (
             &two,
             "two series at the node: ambiguous",
-            &["aof", "1", "-a", "260719"],
+            &["aof", "1", "-a", "20260719"],
         ),
         // Neither shape answers, or both do.
         (
@@ -899,18 +919,18 @@ fn exit_codes() {
         (
             &one,
             "a blank remark",
-            &["aof", "u", "--from", "260101", "--note", "   "],
+            &["aof", "u", "--from", "20260101", "--note", "   "],
         ),
         (
             &one,
             "a malformed reference",
-            &["aof", "t", "--from", "260101", "-r", "not-a-ref"],
+            &["aof", "t", "--from", "20260101", "-r", "not-a-ref"],
         ),
         // A second occurrence on a key that exists is an overwrite awaiting review.
         (
             &one,
             "an overwrite, piped, without -y",
-            &["aof", "standups", "again", "-a", "260719"],
+            &["aof", "standups", "again", "-a", "20260719"],
         ),
     ];
 

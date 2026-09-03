@@ -6,7 +6,7 @@ expression: out
 done:   {
   "core": "pensum",
   "data": {
-    "done": "260719",
+    "done": "20260719",
     "note": "the 2% one"
   },
   "home": "acm",

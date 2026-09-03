@@ -70,7 +70,7 @@ periods = [ { n = 1, slug = "P1", term = "ht", start = "0826", end = "1025" }, �
 
 **Period labels run continuously across the programme.** With `periods_per_year` periods to a year, a course's label is `(study_year − 1) × periods_per_year + n`, so a year-2 P1 reads as **P6** — the absolute index a study life counts in. Study year comes from the span's `from` against the programme span's start; the period comes from the span's interval against the anchors.
 
-**A course spans as many periods as its interval covers** — Mekanik's `250114 → 250602` overlaps both P3 and P4 and reads as **P3–P4** — and Studium *derives* that set from the interval rather than storing a period list (I1). A span cannot carry a `periods` field any more than it can carry a grade (§8.4); it does not need to, because the interval already points at every period it overlaps. This is the whole of "a course can point to several periods": the placement is a period, and a period is however much of the timeline the enrolment occupied.
+**A course spans as many periods as its interval covers** — Mekanik's `20250114 → 20250602` overlaps both P3 and P4 and reads as **P3–P4** — and Studium *derives* that set from the interval rather than storing a period list (I1). A span cannot carry a `periods` field any more than it can carry a grade (§8.4); it does not need to, because the interval already points at every period it overlaps. This is the whole of "a course can point to several periods": the placement is a period, and a period is however much of the timeline the enrolment occupied.
 
 ### 19.6 What else a study life derives
 
@@ -109,7 +109,7 @@ At a terminal the bare `stu` opens the mosaic; down a pipe it emits the figures 
 
 ```json
 { "gpa": 4.09, "credits_completed": 60.0, "credits_in_progress": 30.0,
-  "open_courses": 4, "study_hours": 128.5, "next_exam": { "date": "260315", "course": "sf1624" },
+  "open_courses": 4, "study_hours": 128.5, "next_exam": { "date": "20260315", "course": "sf1624" },
   "period": { "label": "P6", "terms": ["ht"] } }
 ```
 

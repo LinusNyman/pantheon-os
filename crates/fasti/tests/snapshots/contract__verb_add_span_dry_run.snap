@@ -7,7 +7,7 @@ expression: pretty(&redact(plan))
     "after": {
       "core": "fasti",
       "data": {
-        "from": "260401"
+        "from": "20260401"
       },
       "home": "aof",
       "kind": "span",

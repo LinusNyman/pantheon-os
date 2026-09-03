@@ -24,17 +24,18 @@ use crate::view::{Layout, Nav, Row, View, ViewId};
 use crate::views::entity_card::Span_;
 use crate::{Handled, Theme};
 
-/// Parse a `YYMMDD` reading key (§6.1) into a date. A key that does not parse is a
+/// Parse a `YYYYMMDD` reading key (§6.1) into a date. A key that does not parse is a
 /// `pan validate` finding, not a drawing failure — the bar is simply dropped.
 fn parse_key(key: &str) -> Option<Date> {
-    if key.len() != 6 {
+    if key.len() != pantheon::DATE_WIDTH {
         return None;
     }
-    let year: i16 = key.get(0..2)?.parse().ok()?;
-    let month: i8 = key.get(2..4)?.parse().ok()?;
-    let day: i8 = key.get(4..6)?.parse().ok()?;
-    // A two-digit year is this century — the same reading every core writes.
-    Date::new(2000 + year, month, day).ok()
+    // A four-digit year says its own century, so there is no reading to assume here
+    // (§5.4) — which is the whole reason the width moved.
+    let year: i16 = key.get(0..4)?.parse().ok()?;
+    let month: i8 = key.get(4..6)?.parse().ok()?;
+    let day: i8 = key.get(6..8)?.parse().ok()?;
+    Date::new(year, month, day).ok()
 }
 
 /// Where a date sits along the track, in columns from its left edge.

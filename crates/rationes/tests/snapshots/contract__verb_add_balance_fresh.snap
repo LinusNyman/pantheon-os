@@ -9,7 +9,7 @@ expression: pretty(&fresh)
     "amount": 4200.0
   },
   "home": "crp",
-  "key": "260718",
+  "key": "20260718",
   "kind": "balance",
   "refs": [],
   "series": "checking"

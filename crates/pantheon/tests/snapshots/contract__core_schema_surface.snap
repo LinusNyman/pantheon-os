@@ -3,7 +3,7 @@ source: crates/pantheon/tests/contract.rs
 expression: "pretty(&serde_json::to_value(&schema).unwrap())"
 ---
 {
-  "format_version": 1,
+  "format_version": 2,
   "name": "album",
   "record": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
